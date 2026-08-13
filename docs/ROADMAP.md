@@ -18,7 +18,7 @@
 | 0 | 프로젝트 스캐폴딩 | ✅ 완료 |
 | 1 | 디자인 시스템(색상/폰트/공용 컨트롤 스타일) | ✅ 완료 |
 | 2 | 홈 화면 — 정적 레이아웃 | ✅ 완료 |
-| 3 | 홈 화면 — 인터랙션 & 트레이 | ⬜ 대기 |
+| 3 | 홈 화면 — 인터랙션 & 트레이 | ✅ 완료 |
 | 4 | 리더기 설정 — 정적 레이아웃 | ⬜ 대기 |
 | 5 | 리더기 설정 — 비즈니스 로직(스텁) | ⬜ 대기 |
 | 6 | 리더기 설정 — 포트열기 토글 & 레지스트리 | ⬜ 대기 |
@@ -105,14 +105,31 @@
 
 **목표**: 카드 호버/눌림 애니메이션, 카드 클릭 시 서브 창 오픈, 트레이 최소화/메뉴.
 
-- [ ] 카드 호버 애니메이션(리프트 + 글로우) — PRD 3.4, `Storyboard`/`EasingFunction`으로 근사
-- [ ] 카드 눌림 애니메이션(축소 + 배경색 보간 + 아이콘 색 반전)
-- [ ] 카드 클릭 → 해당 서브 창 `ShowDialog()` (리더기 설정만 우선 연결, 나머지는 Phase 8 이전까지 비활성/플레이스홀더 — PRD 미확정 사항 #5 확인)
-- [ ] 최소화 버튼 → 트레이로 이동 (`System.Windows.Forms.NotifyIcon` interop)
-- [ ] 트레이 우클릭 커스텀 메뉴(PRD 3.6: 열기/리더기 설정/가맹점 설정/구분선/종료)
-- [ ] 트레이 더블클릭 → 창 복원
+- [x] 카드 호버 애니메이션(리프트 + 글로우) — PRD 3.4, `Storyboard`/`EasingFunction`으로 근사
+- [x] 카드 눌림 애니메이션(축소 + 배경색 보간 + 아이콘 색 반전)
+- [x] 카드 클릭 → 해당 서브 창 `ShowDialog()` (리더기 설정만 우선 연결, 나머지는 Phase 8 이전까지 비활성/플레이스홀더 — PRD 미확정 사항 #5 확인)
+- [x] 최소화 버튼 → 트레이로 이동 (`System.Windows.Forms.NotifyIcon` interop)
+- [x] 트레이 우클릭 커스텀 메뉴(PRD 3.6: 열기/리더기 설정/가맹점 설정/구분선/종료)
+- [x] 트레이 더블클릭 → 창 복원
 
-**완료 기준**: 카드 호버/클릭 체감이 원본과 유사, 트레이 최소화·복원·메뉴 동작 확인.
+**완료 기준**: 카드 호버/클릭 체감이 원본과 유사, 트레이 최소화·복원·메뉴 동작 확인 — **통과 (2026-08-13)**.
+
+**구현 요약**:
+- `Themes/Buttons.xaml` `HomeCardButtonStyle`: `ControlTemplate`에 카드별 로컬(비공유) `SolidColorBrush` 2개(Bd 배경/테두리) + `TransformGroup`(Scale+TranslateY) + `DropShadowEffect`를 추가하고, `IsMouseOver`/`IsPressed` 트리거에 `Storyboard`(EnterActions/ExitActions)로 리프트(-5px, back-ease-out)/글로우(Opacity 0→0.35)/눌림(Y+6px, Scale 0.96, 배경 `CardFillPressed`로 보간, 테두리 Opacity 0)을 구현. 공유 리소스 브러시를 직접 애니메이션 타겟으로 잡으면 카드 4개가 색을 공유해버리는 문제가 있어, 템플릿 내부에 카드별 로컬 브러시를 새로 만드는 방식으로 우회(주석에 근거 기록).
+- 아이콘 배경/글리프 반전(PRD 3.4)은 별도 `HomeCardIconBoxStyle`/`HomeCardIconGlyphStyle`(`Buttons.xaml`)로 분리 — 카드 콘텐츠의 `Border`/`Path`가 `ControlTemplate` 밖(ContentPresenter로 주입되는 콘텐츠)이라 템플릿 트리거로 직접 건드릴 수 없어, `RelativeSource AncestorType=Button`로 상위 카드의 `IsPressed`를 참조하는 `DataTrigger`로 구현.
+- `Views/HomeWindow.xaml.cs`: 카드 4개 `Click` 핸들러 배선. 리더기 설정 카드는 `MessageBox`로 "Phase 4에서 구현 예정" 안내(코드 주석에 TODO로 실제 `ShowDialog()` 교체 지점 명시). 나머지 3개 카드(가맹점 설정/결제/전표 설정)는 PRD 6장 #5 미확정 상태라 임의로 비활성화하지 않고 "구현 범위 밖" 안내 `MessageBox`로 통일(카드 자체는 계속 클릭 가능/애니메이션 동작 — 이 판단은 아래 "임의 판단" 항목 참고).
+- 트레이: `System.Windows.Forms.NotifyIcon`(csproj에 `UseWindowsForms=true` 추가) + `ContextMenuStrip`(열기/리더기 설정/가맹점 설정/구분선/프로그램 종료). WPF `ContextMenu` 대신 WinForms `ContextMenuStrip`을 택함(NotifyIcon에 WPF ContextMenu를 붙이려면 `SetForegroundWindow` 포커스 트릭이 별도로 필요해 안정성이 떨어짐 — 작업 지시사항에서 "완전히 동일한 커스텀 스타일까지는 불필요"를 명시적으로 허용해 표준적인 방식 채택). 더블클릭(`NotifyIcon.DoubleClick`) 시 `Show()`+`WindowState=Normal`+`Activate()`로 복원. 최소화 버튼은 `Hide()`로 작업표시줄/Alt-Tab에서까지 완전히 사라지도록 처리(원본 "트레이로 이동" 동작과 일치). 창 닫기(X)/프로그램 종료 시 `NotifyIcon.Dispose()`로 트레이 아이콘 잔상 방지.
+- 트레이 아이콘 그래픽은 전용 `.ico` 자산이 아직 없어 실행 파일 내장 기본 아이콘(`Icon.ExtractAssociatedIcon`)을 임시로 재사용(TODO 주석 남김, Phase 3 범위에 아이콘 자산 제작 불포함).
+
+**검증 결과**:
+- `dotnet build` 성공(경고 0/오류 0).
+- 카드 4개 클릭 → 각각 올바른 안내 메시지박스가 뜨는 것을 실측 확인(리더기 설정: "Phase 4부터 구현 예정" / 나머지 3개: "구현 범위 밖").
+- 최소화 버튼 클릭 → `mcp__windows__windows_list_windows` 결과에서 창이 완전히 사라짐(Alt-Tab/작업표시줄에서 숨김, 트레이로 이동 성공) 확인. 동시에 `Get-Process`로 프로세스가 계속 실행 중임을 확인해 `NotifyIcon` 생성 과정에서 예외가 나지 않았음을 간접 검증.
+- 프로그램 종료 버튼 및 타이틀바 X 버튼 각각 클릭 후 `Get-Process`로 프로세스가 완전히 종료되고(exit code 1 = 프로세스 없음) 트레이 아이콘 잔상이 남지 않음을 확인.
+- **검증 못한 부분(명시)**: 실제 시스템 트레이 아이콘 자체(우클릭 메뉴 열기, 더블클릭 복원)는 이 저장소의 `mcp__windows__*` 도구가 시스템 알림 영역(overflow chevron 포함) UI를 접근성 트리로 잡지 못해 실제 마우스 우클릭/더블클릭으로 재현하지 못했다 — 코드 리뷰(표준 `NotifyIcon`+`ContextMenuStrip` API 패턴, `Show`/`WindowState`/`Activate` 표준 복원 코드)와 "최소화 후 프로세스 생존+창 숨김" 간접 신호로 대체 검증함(작업 지시사항에서 사전에 허용한 대체 검증 방식).
+- 카드 호버(`IsMouseOver`) 리프트/글로우 애니메이션은 자동화 도구(accessibility Invoke)로는 실제 마우스 enter/press 이벤트가 발생하지 않아 스크린샷 재현이 불가능했으나, **사용자가 실제 마우스로 직접 확인 — 정상 동작함(2026-08-13)**.
+
+**임의 판단**: 가맹점 설정/결제/전표 설정 카드를 `IsEnabled=false`로 비활성화하지 않고 계속 클릭 가능하게 두어 "구현 범위 밖" 안내만 띄우도록 처리(PRD 6장 미확정 사항 #5). 비활성화 시 시각적으로 원본과 달라 보일 위험(원본은 모든 카드가 정상 동작하는 것처럼 보임)이 더 크다고 판단했으나, 이는 PM 확인이 필요한 임의 결정이다. 트레이 메뉴의 "가맹점 설정" 항목도 동일한 안내로 통일.
 
 ---
 

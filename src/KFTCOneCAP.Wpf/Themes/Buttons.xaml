@@ -170,13 +170,22 @@
 
     <!--
         HomeCard: 홈 화면 카드(리더기 설정/가맹점 설정/결제/전표 설정) 버튼.
-        Phase 2에서는 정적 배치만(호버/눌림 애니메이션은 Phase 3, PRD 3.4).
-        지금은 기본 테두리만 표시하는 단순 템플릿으로 두고, Phase 3에서 Storyboard 트리거를 추가한다.
+        Phase 3(ROADMAP.md/PRD 3.4): 호버(리프트+미세확대+글로우)/눌림(축소+배경보간+테두리 페이드)
+        애니메이션 추가.
+
+        구현 메모:
+        - Bd(테두리)의 Background/BorderBrush는 TemplateBinding이 아니라 템플릿 내부에서 직접 만든
+          "로컬" SolidColorBrush(BdBg/BdBorder)를 사용한다. TemplateBinding으로 Button.Background에
+          연결하면 결국 리소스 딕셔너리의 공유(frozen) Brush 인스턴스를 애니메이션 타겟으로 잡게 되어
+          런타임 예외(Freezable이 이미 freeze됨) 위험이 있고, 설령 freeze되지 않았더라도 카드 4개가
+          같은 Brush 인스턴스를 공유해 한 카드만 눌러도 전체 카드 색이 바뀌는 버그가 난다. 템플릿은
+          카드(Button)마다 별도 인스턴스로 생성되므로 로컬 Brush도 카드별로 독립적이다.
+        - 리프트/축소는 TranslateTransform(Y) + ScaleTransform 조합, 글로우는 DropShadowEffect의
+          Opacity를 0→비활성/hover 시 올림.
+        - 아이콘 배경/글리프 색 반전(호버 아님, 눌림 시에만 — PRD 3.4)은 카드 콘텐츠(Border/Path)에
+          별도로 적용하는 HomeCardIconBoxStyle/HomeCardIconGlyphStyle 참고(아래).
     -->
     <Style x:Key="HomeCardButtonStyle" TargetType="Button">
-        <Setter Property="Background" Value="{StaticResource CardBgBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
-        <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
         <Setter Property="VerticalContentAlignment" Value="Stretch"/>
@@ -185,16 +194,126 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
+                    <Border x:Name="Bd"
+                            BorderThickness="1"
                             CornerRadius="{StaticResource HomeCardCornerRadius}"
-                            SnapsToDevicePixels="True">
+                            SnapsToDevicePixels="True"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.Background>
+                            <SolidColorBrush x:Name="BdBg" Color="{StaticResource CardBgColor}"/>
+                        </Border.Background>
+                        <Border.BorderBrush>
+                            <SolidColorBrush x:Name="BdBorder" Color="{StaticResource CardBorderColor}"/>
+                        </Border.BorderBrush>
+                        <Border.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform x:Name="CardScale" ScaleX="1" ScaleY="1"/>
+                                <TranslateTransform x:Name="CardTranslate" Y="0"/>
+                            </TransformGroup>
+                        </Border.RenderTransform>
+                        <Border.Effect>
+                            <DropShadowEffect x:Name="CardShadow" Color="#1F3B5C" Opacity="0"
+                                               BlurRadius="24" ShadowDepth="8" Direction="270"/>
+                        </Border.Effect>
                         <ContentPresenter/>
                     </Border>
+                    <ControlTemplate.Triggers>
+                        <!-- 호버: 5px 리프트 + 미세 확대(1.005) + 글로우, back-ease-out 근사 -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="CardTranslate" Storyboard.TargetProperty="Y"
+                                                          To="-5" Duration="0:0:0.22">
+                                            <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.5"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX"
+                                                          To="1.005" Duration="0:0:0.22"/>
+                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY"
+                                                          To="1.005" Duration="0:0:0.22"/>
+                                        <DoubleAnimation Storyboard.TargetName="CardShadow" Storyboard.TargetProperty="Opacity"
+                                                          To="0.35" Duration="0:0:0.22"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="CardTranslate" Storyboard.TargetProperty="Y"
+                                                          To="0" Duration="0:0:0.18"/>
+                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX"
+                                                          To="1" Duration="0:0:0.18"/>
+                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY"
+                                                          To="1" Duration="0:0:0.18"/>
+                                        <DoubleAnimation Storyboard.TargetName="CardShadow" Storyboard.TargetProperty="Opacity"
+                                                          To="0" Duration="0:0:0.18"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <!-- 눌림: 6px 아래로 밀림 + 축소(0.96) + 배경 CardFillPressed 보간 + 테두리 페이드아웃 -->
+                        <Trigger Property="IsPressed" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="CardTranslate" Storyboard.TargetProperty="Y"
+                                                          To="6" Duration="0:0:0.09"/>
+                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX"
+                                                          To="0.96" Duration="0:0:0.09"/>
+                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY"
+                                                          To="0.96" Duration="0:0:0.09"/>
+                                        <ColorAnimation Storyboard.TargetName="BdBg" Storyboard.TargetProperty="Color"
+                                                         To="{StaticResource CardFillPressedColor}" Duration="0:0:0.09"/>
+                                        <DoubleAnimation Storyboard.TargetName="BdBorder" Storyboard.TargetProperty="Opacity"
+                                                          To="0" Duration="0:0:0.09"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="CardTranslate" Storyboard.TargetProperty="Y"
+                                                          To="-5" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX"
+                                                          To="1.005" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY"
+                                                          To="1.005" Duration="0:0:0.15"/>
+                                        <ColorAnimation Storyboard.TargetName="BdBg" Storyboard.TargetProperty="Color"
+                                                         To="{StaticResource CardBgColor}" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="BdBorder" Storyboard.TargetProperty="Opacity"
+                                                          To="1" Duration="0:0:0.15"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!--
+        카드 아이콘 배경 Border / 글리프 Path 색 반전 (눌림 시에만, PRD 3.4:
+        "아이콘 배경은 진한 블루로, 아이콘 글리프는 흰색에 가깝게 반전").
+        각 카드의 Border/Path에 개별 Fill/Background를 주지 않고 이 스타일을 적용하면
+        RelativeSource로 상위 Button(카드)의 IsPressed를 참조해 동일 효과를 낸다.
+    -->
+    <Style x:Key="HomeCardIconBoxStyle" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource CardIconBgBrush}"/>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=IsPressed}" Value="True">
+                <Setter Property="Background" Value="{StaticResource Blue500Brush}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="HomeCardIconGlyphStyle" TargetType="Path">
+        <Setter Property="Fill" Value="{StaticResource Blue500Brush}"/>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=IsPressed}" Value="True">
+                <Setter Property="Fill" Value="White"/>
+            </DataTrigger>
+        </Style.Triggers>
     </Style>
 
 </ResourceDictionary>

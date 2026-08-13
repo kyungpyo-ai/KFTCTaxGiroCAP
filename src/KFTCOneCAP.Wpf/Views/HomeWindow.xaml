@@ -9,7 +9,8 @@
         Height="{StaticResource HomeWindowHeight}"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource HomeBgBrush}">
+        Background="{StaticResource HomeBgBrush}"
+        Closing="HomeWindow_Closing">
     <!--
         홈 화면 — 정적 레이아웃 (Phase 2, docs/ROADMAP.md).
         치수는 전부 Themes/Layout.xaml 리소스 키를 참조한다(리터럴 금지 — Phase 8 컴팩트 모드
@@ -116,7 +117,8 @@
             </Grid.ColumnDefinitions>
 
             <!-- 카드 1: 리더기 설정 -->
-            <Button Grid.Column="0" Style="{StaticResource HomeCardButtonStyle}" x:Name="ReaderSetupCardButton">
+            <Button Grid.Column="0" Style="{StaticResource HomeCardButtonStyle}" x:Name="ReaderSetupCardButton"
+                    Click="ReaderSetupCardButton_Click">
                 <Grid Margin="{StaticResource HomeCardContentMargin}">
                     <!--
                         2026-08-13 수정(사용자 피드백): 아이콘-제목 사이 행을 "*"(가변)에서 고정
@@ -134,11 +136,11 @@
                     </Grid.RowDefinitions>
 
                     <Border Grid.Row="0" Width="{StaticResource HomeCardIconBoxSize}" Height="{StaticResource HomeCardIconBoxSize}"
-                            Background="{StaticResource CardIconBgBrush}" CornerRadius="{StaticResource HomeCardIconCornerRadius}"
+                            Style="{StaticResource HomeCardIconBoxStyle}" CornerRadius="{StaticResource HomeCardIconCornerRadius}"
                             HorizontalAlignment="Left">
                         <Viewbox Width="28" Height="28">
                             <Canvas Width="28" Height="28">
-                                <Path Fill="{StaticResource Blue500Brush}">
+                                <Path Style="{StaticResource HomeCardIconGlyphStyle}">
                                     <Path.Data>
                                         <GeometryGroup FillRule="EvenOdd">
                                             <RectangleGeometry Rect="4.5,2.25,19,23.5" RadiusX="3" RadiusY="3"/>
@@ -165,7 +167,8 @@
             </Button>
 
             <!-- 카드 2: 가맹점 설정 -->
-            <Button Grid.Column="2" Style="{StaticResource HomeCardButtonStyle}" x:Name="ShopSetupCardButton">
+            <Button Grid.Column="2" Style="{StaticResource HomeCardButtonStyle}" x:Name="ShopSetupCardButton"
+                    Click="ShopSetupCardButton_Click">
                 <Grid Margin="{StaticResource HomeCardContentMargin}">
                     <!--
                         2026-08-13 수정(사용자 피드백): 아이콘-제목 사이 행을 "*"(가변)에서 고정
@@ -183,11 +186,11 @@
                     </Grid.RowDefinitions>
 
                     <Border Grid.Row="0" Width="{StaticResource HomeCardIconBoxSize}" Height="{StaticResource HomeCardIconBoxSize}"
-                            Background="{StaticResource CardIconBgBrush}" CornerRadius="{StaticResource HomeCardIconCornerRadius}"
+                            Style="{StaticResource HomeCardIconBoxStyle}" CornerRadius="{StaticResource HomeCardIconCornerRadius}"
                             HorizontalAlignment="Left">
                         <Viewbox Width="28" Height="28">
                             <Canvas Width="28" Height="28">
-                                <Path Fill="{StaticResource Blue500Brush}">
+                                <Path Style="{StaticResource HomeCardIconGlyphStyle}">
                                     <Path.Data>
                                         <GeometryGroup FillRule="EvenOdd">
                                             <PathGeometry Figures="M14,3 L26,11 L2,11 Z"/>
@@ -208,7 +211,8 @@
             </Button>
 
             <!-- 카드 3: 결제 -->
-            <Button Grid.Column="4" Style="{StaticResource HomeCardButtonStyle}" x:Name="TransCardButton">
+            <Button Grid.Column="4" Style="{StaticResource HomeCardButtonStyle}" x:Name="TransCardButton"
+                    Click="TransCardButton_Click">
                 <Grid Margin="{StaticResource HomeCardContentMargin}">
                     <!--
                         2026-08-13 수정(사용자 피드백): 아이콘-제목 사이 행을 "*"(가변)에서 고정
@@ -226,11 +230,11 @@
                     </Grid.RowDefinitions>
 
                     <Border Grid.Row="0" Width="{StaticResource HomeCardIconBoxSize}" Height="{StaticResource HomeCardIconBoxSize}"
-                            Background="{StaticResource CardIconBgBrush}" CornerRadius="{StaticResource HomeCardIconCornerRadius}"
+                            Style="{StaticResource HomeCardIconBoxStyle}" CornerRadius="{StaticResource HomeCardIconCornerRadius}"
                             HorizontalAlignment="Left">
                         <Viewbox Width="28" Height="28">
                             <Canvas Width="28" Height="28">
-                                <Path Fill="{StaticResource Blue500Brush}">
+                                <Path Style="{StaticResource HomeCardIconGlyphStyle}">
                                     <Path.Data>
                                         <GeometryGroup FillRule="EvenOdd">
                                             <RectangleGeometry Rect="1,4.5,26,19" RadiusX="2.5" RadiusY="2.5"/>
@@ -239,7 +243,7 @@
                                         </GeometryGroup>
                                     </Path.Data>
                                 </Path>
-                                <Path Fill="{StaticResource Blue500Brush}">
+                                <Path Style="{StaticResource HomeCardIconGlyphStyle}">
                                     <Path.Data>
                                         <GeometryGroup>
                                             <RectangleGeometry Rect="8,15,2,1.8"/>
@@ -263,7 +267,8 @@
             </Button>
 
             <!-- 카드 4: 전표 설정 -->
-            <Button Grid.Column="6" Style="{StaticResource HomeCardButtonStyle}" x:Name="ReceiptSetupCardButton">
+            <Button Grid.Column="6" Style="{StaticResource HomeCardButtonStyle}" x:Name="ReceiptSetupCardButton"
+                    Click="ReceiptSetupCardButton_Click">
                 <Grid Margin="{StaticResource HomeCardContentMargin}">
                     <!--
                         2026-08-13 수정(사용자 피드백): 아이콘-제목 사이 행을 "*"(가변)에서 고정
@@ -281,11 +286,11 @@
                     </Grid.RowDefinitions>
 
                     <Border Grid.Row="0" Width="{StaticResource HomeCardIconBoxSize}" Height="{StaticResource HomeCardIconBoxSize}"
-                            Background="{StaticResource CardIconBgBrush}" CornerRadius="{StaticResource HomeCardIconCornerRadius}"
+                            Style="{StaticResource HomeCardIconBoxStyle}" CornerRadius="{StaticResource HomeCardIconCornerRadius}"
                             HorizontalAlignment="Left">
                         <Viewbox Width="28" Height="28">
                             <Canvas Width="28" Height="28">
-                                <Path Fill="{StaticResource Blue500Brush}">
+                                <Path Style="{StaticResource HomeCardIconGlyphStyle}">
                                     <Path.Data>
                                         <GeometryGroup FillRule="EvenOdd">
                                             <PathGeometry Figures="M6,3 L22,3 L22,20 L20,24 L18,20 L16,24 L14,20 L12,24 L10,20 L8,24 L6,20 Z"/>
@@ -323,12 +328,12 @@
         <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,20">
             <Button x:Name="MinimizeButton" Style="{StaticResource AutoButtonStyle}"
                     Width="{StaticResource HomeFooterBtnW}" Height="{StaticResource HomeFooterBtnH}"
-                    FontSize="16">
+                    FontSize="16" Click="MinimizeButton_Click">
                 <TextBlock Text="&#x2212; 최소화" FontFamily="{StaticResource PretendardFontFamily}"/>
             </Button>
             <Button x:Name="ExitButton" Style="{StaticResource AutoButtonStyle}"
                     Width="{StaticResource HomeFooterBtnW}" Height="{StaticResource HomeFooterBtnH}"
-                    FontSize="16" Margin="{StaticResource HomeFooterBtnMargin}">
+                    FontSize="16" Margin="{StaticResource HomeFooterBtnMargin}" Click="ExitButton_Click">
                 <TextBlock Text="&#x23FB; 프로그램 종료" FontFamily="{StaticResource PretendardFontFamily}"/>
             </Button>
         </StackPanel>

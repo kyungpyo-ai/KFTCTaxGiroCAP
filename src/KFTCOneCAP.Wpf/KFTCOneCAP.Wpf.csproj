@@ -6,6 +6,13 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
+    <!--
+      Phase 3(ROADMAP.md): 트레이 아이콘 구현에 System.Windows.Forms.NotifyIcon 을 사용하기 위해
+      WinForms interop 활성화. WPF에는 네이티브 트레이 API가 없어 PRD 3.6이 명시적으로 이 방식을
+      지정함. net48이므로 Windows 7까지 문제없이 동작(CLAUDE.md 제약과 무관 — .NET Framework
+      전용 WinForms 상호운용이며 Win10+ 전용 API 아님).
+    -->
+    <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
 
   <ItemGroup>
