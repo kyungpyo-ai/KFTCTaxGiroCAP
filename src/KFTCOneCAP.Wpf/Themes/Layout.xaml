@@ -1,0 +1,80 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <!--
+        홈 화면(및 향후 리더기 설정 화면) 레이아웃 치수 — "일반" 모드(96dpi 기준, PRD 3.3).
+        Phase 8에서 컴팩트 모드(세로 해상도 ≤800px) 대응 시 이 파일과 동일한 키 셋을 가진
+        Themes/Layout.Compact.xaml을 추가하고 런타임에 ResourceDictionary를 스왑하는 방식으로
+        전환한다(docs/ROADMAP.md Phase 2/8 참고). 그러므로 홈/리더기설정 XAML에서는 치수를
+        리터럴로 적지 말고 항상 이 파일의 키를 참조할 것.
+
+        수치 출처: docs/PRD_WPF.md 3.3장 + docs/screenshots/home_screen.png 실측 대조.
+        (참고: 원본 스크린샷은 카드 높이 등 일부 값이 PRD 리터럴과 픽셀 단위로 정확히 일치함이
+        확인되어, 스크린샷과 PRD 수치가 실질적으로 같은 소스를 가리키는 것으로 판단하고 PRD
+        수치를 그대로 채택함.)
+    -->
+
+    <!-- 창 크기 (고정, ResizeMode=NoResize) -->
+    <sys:Double x:Key="HomeWindowWidth">1104</sys:Double>
+    <sys:Double x:Key="HomeWindowHeight">567</sys:Double>
+
+    <!-- 좌우 여백 / 헤더 상단 여백 -->
+    <sys:Double x:Key="HomeMarginX">50</sys:Double>
+    <sys:Double x:Key="HomeHeaderTop">38</sys:Double>
+
+    <!-- 헤더 로고 -->
+    <sys:Double x:Key="HomeLogoBoxSize">54</sys:Double>
+
+    <!-- 카드 영역 -->
+    <sys:Double x:Key="HomeCardGap">18</sys:Double>
+    <sys:Double x:Key="HomeCardVisualH">260</sys:Double>
+    <CornerRadius x:Key="HomeCardCornerRadius">20</CornerRadius>
+
+    <!--
+        GridLength 버전 — RowDefinition.Height / ColumnDefinition.Width 는 double 이 아니라
+        GridLength 타입이라 위 sys:Double 리소스를 그대로 바인딩하면 XamlParseException 발생.
+        값은 항상 위 HomeCardGap/HomeCardVisualH 와 동일하게 유지할 것.
+    -->
+    <GridLength x:Key="HomeCardGapGridLength">18</GridLength>
+    <GridLength x:Key="HomeCardVisualHGridLength">260</GridLength>
+
+    <!-- 카드 아이콘 -->
+    <sys:Double x:Key="HomeCardIconBoxSize">56</sys:Double>
+    <sys:Double x:Key="HomeCardIconInset">28</sys:Double>
+    <CornerRadius x:Key="HomeCardIconCornerRadius">12</CornerRadius>
+
+    <!--
+        2026-08-13 추가 수정(사용자 피드백): 카드 내부 아이콘-제목 사이 간격.
+        기존에는 아이콘과 제목 사이 행에 "*"(가변) GridLength를 사용해 카드 높이가 고정(260)인
+        상황에서 제목/설명 텍스트가 카드 하단으로 밀려 내려가는 문제가 있었다(실측 결과 아이콘
+        하단과 제목 상단 간격이 88px까지 벌어짐). docs/screenshots/home_screen.png 실측(아이콘
+        하단 y=259, 제목 상단 y=283 → 간격 24px) 기준으로 고정 간격으로 교체.
+    -->
+    <GridLength x:Key="HomeCardIconTitleGapGridLength">24</GridLength>
+
+    <!-- 헤더 버튼 (로그 전송 / 최신 버전 업데이트) -->
+    <sys:Double x:Key="HomeHeaderLogSendBtnW">132</sys:Double>
+    <sys:Double x:Key="HomeHeaderLogSendBtnH">36</sys:Double>
+    <sys:Double x:Key="HomeHeaderUpdateBtnW">205</sys:Double>
+    <sys:Double x:Key="HomeHeaderUpdateBtnH">36</sys:Double>
+
+    <!-- 하단 버튼 (최소화 / 종료) -->
+    <sys:Double x:Key="HomeFooterBtnW">184</sys:Double>
+    <sys:Double x:Key="HomeFooterBtnH">40</sys:Double>
+    <sys:Double x:Key="HomeFooterBtnGap">16</sys:Double>
+
+    <!--
+        복합 Margin(Thickness) 리소스 — XAML 속성 하나에 여러 {StaticResource}를 섞어 쓸 수 없어
+        (마크업 확장은 속성 값 전체를 단일 확장으로 파싱) 위 개별 치수를 조합한 Thickness를
+        별도 키로 둔다. 값의 출처는 항상 위 개별 리소스와 동일(HomeMarginX/HomeHeaderTop).
+    -->
+    <Thickness x:Key="HomeHeaderMargin">50,38,50,0</Thickness>
+    <Thickness x:Key="HomeCardsAreaMargin">50,0,50,0</Thickness>
+    <Thickness x:Key="HomeDividerMargin">50,0,50,0</Thickness>
+    <Thickness x:Key="HomeFooterBtnMargin">16,0,0,0</Thickness>
+
+    <!-- 카드 내부 콘텐츠 패딩: 좌상단은 HomeCardIconInset(28)과 동일한 값을 사용 -->
+    <Thickness x:Key="HomeCardContentMargin">28,28,20,24</Thickness>
+
+</ResourceDictionary>

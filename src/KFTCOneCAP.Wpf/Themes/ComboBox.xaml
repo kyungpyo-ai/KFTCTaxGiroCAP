@@ -1,0 +1,201 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        CSkinnedComboBox 대응: 라운드 보더(6px), 포커스 시 2px 파란 보더.
+
+        2026-08-13 수정 (사용자 피드백):
+        - "클릭 상태가 다른 창을 누를 때까지 유지됨" → 원인은 IsKeyboardFocusWithin 트리거였다.
+          WPF ComboBox는 항목 선택 후에도 같은 창 안에서 다른 컨트롤로 포커스를 옮기기 전까지
+          키보드 포커스를 계속 들고 있어서, 포커스=파란 보더로 매핑하면 "클릭한 채로 고정된"
+          것처럼 보인다. 활성 상태는 IsDropDownOpen(실제로 드롭다운이 열려있을 때)에만 반응하도록
+          바꿔서, 선택 후 드롭다운이 닫히면 즉시 hover/normal로 돌아가게 했다.
+        - "클릭 효과가 부족함" → 토스/카카오/네이버류 최신 UI 트렌드에 맞춰 클릭 시 살짝
+          눌리는(scale 0.97) 피드백을 추가했다.
+
+        2026-08-13 추가 수정: hover에서 보더 두께(1→2px)까지 같이 바뀌니 눌린 것처럼 보인다는
+        피드백 반영 — hover는 색상만 바꾸고(두께는 계속 1px), 두께 변화(1.6px)는 실제 활성 상태
+        (IsDropDownOpen)에만 남겨서 hover와 클릭 상태가 시각적으로 명확히 구분되게 했다.
+
+        2026-08-13 추가 (최신 UI 트렌드 점검): 드롭다운 항목(ComboBoxItem)에 커스텀 스타일이 없어
+        Windows 기본 파란 선택 하이라이트(각진 사각형)가 그대로 노출되던 문제 발견 — 나머지 요소는
+        전부 플랫 라운드 디자인인데 이 부분만 이질적이었다. SkinnedComboBoxItemStyle을 추가해
+        라운드(4px) 호버(#EFF6FF)/선택(#E0EDFF) 배경으로 통일했다.
+
+        2026-08-13 추가 수정: "hover 효과가 너무 연함" 피드백 — GRAY_200→GRAY_300 보더 색 차이가
+        20 정도밖에 안 나서 눈에 잘 안 띄었다. 보더를 더 진한 회색(#9CA3AF)으로 바꿨다.
+        (배경 틴트도 같이 넣었었으나, 입력 컨테이너 계열은 hover에서 배경까지 칠하면 비활성화
+        상태처럼 보일 수 있어 트렌드에 맞지 않는다는 피드백에 따라 제거 — 보더 색만으로 처리)
+
+        2026-08-13 추가 수정 (레이아웃 흔들림 버그): IsDropDownOpen에서 BorderThickness를
+        1→1.6px로 바꾸던 게 실제로 컨트롤의 렌더링 크기 자체를 키워서(Border는 두께만큼 커짐)
+        Height가 고정 안 된 사용처에서는 아래 요소가 밀리는 문제가 있었다(TextBox.xaml에서
+        실측으로 확인). 두께를 1.5px로 **고정**하고 상태별로 색상만 바꾸는 방식으로 전환해
+        레이아웃이 절대 흔들리지 않게 했다 — 두께 고정 + 색상 전환은 토스류 최신 UI에서도
+        일반적인 패턴이다. 기본 두께도 1→1.5px로 올라가 hover 시인성도 같이 개선됨.
+    -->
+
+    <!-- 원본 KFTCInputTheme: borderN=GRAY_200, borderH=GRAY_300, borderF=BLUE_500 (ModernUI.h) -->
+    <!-- hover 보더는 시인성을 위해 원본 GRAY_300보다 진한 값으로 조정 -->
+    <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#E5E7EB"/>
+    <SolidColorBrush x:Key="ComboBoxHoverBorderBrush" Color="#9CA3AF"/>
+    <SolidColorBrush x:Key="ComboBoxFocusBorderBrush" Color="#0064DD"/>
+
+    <!-- 드롭다운 항목: Windows 기본 파란 선택 하이라이트 대신 플랫 모던 스타일로 교체 -->
+    <SolidColorBrush x:Key="ComboBoxItemHoverBgBrush" Color="#EFF6FF"/>
+    <SolidColorBrush x:Key="ComboBoxItemSelectedBgBrush" Color="#E0EDFF"/>
+    <Style x:Key="SkinnedComboBoxItemStyle" TargetType="ComboBoxItem">
+        <Setter Property="Padding" Value="10,7"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBoxItem">
+                    <Border x:Name="Bd"
+                            Background="Transparent"
+                            CornerRadius="4"
+                            Margin="4,2"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource ComboBoxItemHoverBgBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource ComboBoxItemSelectedBgBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ComboBoxToggleButtonStyle" TargetType="ToggleButton">
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="ClickMode" Value="Press"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border Background="Transparent"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="SkinnedComboBoxStyle" TargetType="ComboBox">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
+        <Setter Property="FontSize" Value="18.67"/>
+        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+        <Setter Property="Background" Value="White"/>
+        <Setter Property="BorderBrush" Value="{StaticResource ComboBoxBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1.5"/>
+        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="ItemContainerStyle" Value="{StaticResource SkinnedComboBoxItemStyle}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBox">
+                    <Grid RenderTransformOrigin="0.5,0.5">
+                        <Grid.RenderTransform>
+                            <ScaleTransform x:Name="PressScale" ScaleX="1" ScaleY="1"/>
+                        </Grid.RenderTransform>
+
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                SnapsToDevicePixels="True">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="24"/>
+                                </Grid.ColumnDefinitions>
+
+                                <ContentPresenter x:Name="ContentSite"
+                                                   Grid.Column="0"
+                                                   Margin="{TemplateBinding Padding}"
+                                                   HorizontalAlignment="Left"
+                                                   VerticalAlignment="Center"
+                                                   IsHitTestVisible="False"
+                                                   Content="{TemplateBinding SelectionBoxItem}"
+                                                   ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                   ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"/>
+
+                                <Path x:Name="Arrow"
+                                      Grid.Column="1"
+                                      Data="M 0 0 L 4 4 L 8 0 Z"
+                                      Fill="{StaticResource SubTextBrush}"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+
+                        <ToggleButton x:Name="PART_Toggle"
+                                      Style="{StaticResource ComboBoxToggleButtonStyle}"
+                                      IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                      Background="Transparent"/>
+
+                        <Popup x:Name="Popup"
+                               Placement="Bottom"
+                               IsOpen="{TemplateBinding IsDropDownOpen}"
+                               AllowsTransparency="True"
+                               Focusable="False"
+                               PopupAnimation="Fade">
+                            <Border Background="White"
+                                    BorderBrush="{StaticResource ComboBoxBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    MinWidth="{TemplateBinding ActualWidth}"
+                                    MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                    Margin="0,4,0,0">
+                                <Border.Effect>
+                                    <DropShadowEffect Color="#1A202C" Opacity="0.15" BlurRadius="12" ShadowDepth="2"/>
+                                </Border.Effect>
+                                <ScrollViewer SnapsToDevicePixels="True">
+                                    <ItemsPresenter/>
+                                </ScrollViewer>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource ComboBoxHoverBorderBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsDropDownOpen" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource ComboBoxFocusBorderBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.5"/>
+                        </Trigger>
+
+                        <!-- 클릭(눌림) 피드백: 토글 버튼이 눌려있는 동안 살짝 축소 -->
+                        <DataTrigger Binding="{Binding IsPressed, ElementName=PART_Toggle}" Value="True">
+                            <DataTrigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleX" To="0.97" Duration="0:0:0.06"/>
+                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleY" To="0.97" Duration="0:0:0.06"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </DataTrigger.EnterActions>
+                            <DataTrigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.1"/>
+                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.1"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </DataTrigger.ExitActions>
+                        </DataTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="ComboBox" BasedOn="{StaticResource SkinnedComboBoxStyle}"/>
+
+</ResourceDictionary>

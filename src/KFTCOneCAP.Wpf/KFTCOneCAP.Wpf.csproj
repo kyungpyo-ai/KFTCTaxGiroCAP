@@ -12,4 +12,11 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Resource Include="Assets\Fonts\Pretendard-Regular.ttf" />
+    <Resource Include="Assets\Fonts\Pretendard-Medium.ttf" />
+    <Resource Include="Assets\Fonts\Pretendard-Bold.ttf" />
+    <Resource Include="Assets\Images\img_ci_mark.png" />
+  </ItemGroup>
+
 </Project>

@@ -1,0 +1,103 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ===================== 홈 화면 ===================== -->
+    <Color x:Key="HomeBgColor">#F8FAFC</Color>
+    <SolidColorBrush x:Key="HomeBgBrush" Color="{StaticResource HomeBgColor}"/>
+
+    <Color x:Key="CardBgColor">#FFFFFF</Color>
+    <SolidColorBrush x:Key="CardBgBrush" Color="{StaticResource CardBgColor}"/>
+
+    <Color x:Key="CardBorderColor">#E8ECF2</Color>
+    <SolidColorBrush x:Key="CardBorderBrush" Color="{StaticResource CardBorderColor}"/>
+
+    <Color x:Key="CardBorderHoverColor">#E2E8F0</Color>
+    <SolidColorBrush x:Key="CardBorderHoverBrush" Color="{StaticResource CardBorderHoverColor}"/>
+
+    <Color x:Key="CardFillPressedColor">#D2E6FF</Color>
+    <SolidColorBrush x:Key="CardFillPressedBrush" Color="{StaticResource CardFillPressedColor}"/>
+
+    <Color x:Key="TitleTextColor">#191F28</Color>
+    <SolidColorBrush x:Key="TitleTextBrush" Color="{StaticResource TitleTextColor}"/>
+
+    <Color x:Key="CardTitleTextColor">#333D4B</Color>
+    <SolidColorBrush x:Key="CardTitleTextBrush" Color="{StaticResource CardTitleTextColor}"/>
+
+    <Color x:Key="SubTextColor">#8B95A1</Color>
+    <SolidColorBrush x:Key="SubTextBrush" Color="{StaticResource SubTextColor}"/>
+
+    <Color x:Key="FooterDividerColor">#DCE2EA</Color>
+    <SolidColorBrush x:Key="FooterDividerBrush" Color="{StaticResource FooterDividerColor}"/>
+
+    <Color x:Key="Blue500Color">#0064DD</Color>
+    <SolidColorBrush x:Key="Blue500Brush" Color="{StaticResource Blue500Color}"/>
+
+    <!-- 카드 아이콘 배경(연한 블루) — docs/screenshots/home_screen.png 실측 픽셀 색상(#EBF4FF) -->
+    <Color x:Key="CardIconBgColor">#EBF4FF</Color>
+    <SolidColorBrush x:Key="CardIconBgBrush" Color="{StaticResource CardIconBgColor}"/>
+
+    <!-- 하단/헤더 버튼 호버 색상 -->
+    <Color x:Key="MinimizeExitHoverBgColor">#E5E8EB</Color>
+    <SolidColorBrush x:Key="MinimizeExitHoverBgBrush" Color="{StaticResource MinimizeExitHoverBgColor}"/>
+
+    <Color x:Key="MinimizeExitTextColor">#8B95A1</Color>
+    <SolidColorBrush x:Key="MinimizeExitTextBrush" Color="{StaticResource MinimizeExitTextColor}"/>
+
+    <Color x:Key="MinimizeExitHoverTextColor">#333D4B</Color>
+    <SolidColorBrush x:Key="MinimizeExitHoverTextBrush" Color="{StaticResource MinimizeExitHoverTextColor}"/>
+
+    <Color x:Key="LogSendHoverBgColor">#E8F3FF</Color>
+    <SolidColorBrush x:Key="LogSendHoverBgBrush" Color="{StaticResource LogSendHoverBgColor}"/>
+
+    <Color x:Key="LogSendHoverTextColor">#3182F6</Color>
+    <SolidColorBrush x:Key="LogSendHoverTextBrush" Color="{StaticResource LogSendHoverTextColor}"/>
+
+    <Color x:Key="UpdateHoverBgColor">#E8FFE8</Color>
+    <SolidColorBrush x:Key="UpdateHoverBgBrush" Color="{StaticResource UpdateHoverBgColor}"/>
+
+    <Color x:Key="UpdateHoverTextColor">#22C55E</Color>
+    <SolidColorBrush x:Key="UpdateHoverTextBrush" Color="{StaticResource UpdateHoverTextColor}"/>
+
+    <!-- ===================== 리더기 설정 화면 ===================== -->
+    <Color x:Key="DialogBgColor">#F9FAFC</Color>
+    <SolidColorBrush x:Key="DialogBgBrush" Color="{StaticResource DialogBgColor}"/>
+
+    <Color x:Key="ReaderBorderColor">#D6E4F7</Color>
+    <SolidColorBrush x:Key="ReaderBorderBrush" Color="{StaticResource ReaderBorderColor}"/>
+
+    <Color x:Key="TblBorderColor">#D6DFEB</Color>
+    <SolidColorBrush x:Key="TblBorderBrush" Color="{StaticResource TblBorderColor}"/>
+
+    <Color x:Key="TblHdrBgColor">#FAFBFD</Color>
+    <SolidColorBrush x:Key="TblHdrBgBrush" Color="{StaticResource TblHdrBgColor}"/>
+
+    <Color x:Key="TblHdrLineColor">#EEF1F7</Color>
+    <SolidColorBrush x:Key="TblHdrLineBrush" Color="{StaticResource TblHdrLineColor}"/>
+
+    <Color x:Key="TblRowLineColor">#F2F5F9</Color>
+    <SolidColorBrush x:Key="TblRowLineBrush" Color="{StaticResource TblRowLineColor}"/>
+
+    <Color x:Key="TblAltRowColor">#FBFCFF</Color>
+    <SolidColorBrush x:Key="TblAltRowBrush" Color="{StaticResource TblAltRowColor}"/>
+
+    <Color x:Key="TblHdrTextColor">#1A202C</Color>
+    <SolidColorBrush x:Key="TblHdrTextBrush" Color="{StaticResource TblHdrTextColor}"/>
+
+    <Color x:Key="TblBodyTextColor">#5C687A</Color>
+    <SolidColorBrush x:Key="TblBodyTextBrush" Color="{StaticResource TblBodyTextColor}"/>
+
+    <Color x:Key="TblEmptyTextColor">#A0A8B4</Color>
+    <SolidColorBrush x:Key="TblEmptyTextBrush" Color="{StaticResource TblEmptyTextColor}"/>
+
+    <!-- 결과 칩 -->
+    <Color x:Key="ResultOkBgColor">#E8FCF1</Color>
+    <SolidColorBrush x:Key="ResultOkBgBrush" Color="{StaticResource ResultOkBgColor}"/>
+    <Color x:Key="ResultOkTextColor">#15803D</Color>
+    <SolidColorBrush x:Key="ResultOkTextBrush" Color="{StaticResource ResultOkTextColor}"/>
+
+    <Color x:Key="ResultErrorBgColor">#FFEBEB</Color>
+    <SolidColorBrush x:Key="ResultErrorBgBrush" Color="{StaticResource ResultErrorBgColor}"/>
+    <Color x:Key="ResultErrorTextColor">#DC2626</Color>
+    <SolidColorBrush x:Key="ResultErrorTextBrush" Color="{StaticResource ResultErrorTextColor}"/>
+
+</ResourceDictionary>

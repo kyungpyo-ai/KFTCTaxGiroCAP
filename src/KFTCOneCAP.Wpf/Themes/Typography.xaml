@@ -1,0 +1,112 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        폰트 우선순위(PRD 2.2): Pretendard → 실패 시 Malgun Gothic.
+        임베딩된 Pretendard-Regular.ttf / Pretendard-Bold.ttf 는 내부 family 이름이 "Pretendard" 로 동일하며
+        FontWeight(Normal/Bold)로 스타일이 구분된다. Pretendard-Medium.ttf 는 내부 family 이름이
+        "Pretendard Medium" 으로 별도이므로 전용 FontFamily 리소스를 둔다.
+
+        ExtraBold(800) 웨이트 폰트 파일이 원본 fonts 폴더에 없어(Regular/Medium/Bold만 존재),
+        PRD가 요구하는 홈 타이틀 ExtraBold는 Bold(700)로 폴백한다. (docs/ROADMAP.md Phase 1 참고)
+
+        PRD 2.2 표의 폰트 크기는 pt 단위(원본 MFC LOGFONT 포인트 크기)이다. WPF FontSize는 1/96인치 단위(px)이므로
+        96dpi 기준 pt→px 변환(× 96/72 ≈ 1.333)을 적용해 시각적 크기를 맞춘다.
+    -->
+    <FontFamily x:Key="PretendardFontFamily">pack://application:,,,/Assets/Fonts/#Pretendard, Malgun Gothic</FontFamily>
+    <FontFamily x:Key="PretendardMediumFontFamily">pack://application:,,,/Assets/Fonts/#Pretendard Medium, Malgun Gothic</FontFamily>
+
+    <!-- ===================== 홈 화면 ===================== -->
+
+    <!-- 타이틀 "KFTCOneCAP" : 19pt / ExtraBold(800) 요구 → Bold(700)로 폴백 -->
+    <Style x:Key="HomeTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="25.33"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+    </Style>
+
+    <!-- 서브타이틀 : 13pt / Regular -->
+    <Style x:Key="HomeSubtitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="17.33"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource SubTextBrush}"/>
+    </Style>
+
+    <!-- 카드 제목 : 15pt / Bold -->
+    <Style x:Key="HomeCardTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="20"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource CardTitleTextBrush}"/>
+    </Style>
+
+    <!-- 카드 설명 : 11pt / Regular -->
+    <Style x:Key="HomeCardDescriptionTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="14.67"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource SubTextBrush}"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+
+    <!-- 하단 버튼(최소화/종료/로그전송/업데이트) : 12pt / Regular -->
+    <Style x:Key="HomeFooterButtonTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="16"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+    </Style>
+
+    <!-- ===================== 리더기 설정 화면 ===================== -->
+
+    <!-- 헤더 타이틀 : 18pt / Bold -->
+    <Style x:Key="ReaderHeaderTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="24"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+    </Style>
+
+    <!-- 헤더 서브타이틀 : 13pt / Bold -->
+    <Style x:Key="ReaderHeaderSubtitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="17.33"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource SubTextBrush}"/>
+    </Style>
+
+    <!-- 섹션 제목 : 15pt / Bold -->
+    <Style x:Key="ReaderSectionTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="20"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+    </Style>
+
+    <!-- 일반 텍스트(콤보/버튼/리스트 본문) : 14pt / Medium -->
+    <Style x:Key="ReaderBodyTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
+        <Setter Property="FontSize" Value="18.67"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+    </Style>
+
+    <!-- 라벨(카드/토글) : 14pt / Bold -->
+    <Style x:Key="ReaderLabelTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="18.67"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+    </Style>
+
+    <!-- 작은 텍스트(리스트 셀, 빈 상태) : 12pt / Regular -->
+    <Style x:Key="ReaderSmallTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="16"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource TblBodyTextBrush}"/>
+    </Style>
+
+</ResourceDictionary>
