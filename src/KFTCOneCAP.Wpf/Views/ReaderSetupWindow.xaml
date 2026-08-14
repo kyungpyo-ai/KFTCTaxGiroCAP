@@ -80,16 +80,16 @@
             <Border Height="1" Background="{StaticResource FooterDividerBrush}" Margin="0,14,0,14"/>
 
             <!-- ===================== 포트 설정 ===================== -->
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                <Border Width="{StaticResource ReaderSectionBarWidth}" Height="{StaticResource ReaderSectionBarHeight}"
-                        Background="{StaticResource Blue500Brush}" CornerRadius="2" VerticalAlignment="Center"/>
-                <TextBlock Text="포트 설정" Style="{StaticResource ReaderSectionTitleTextStyle}" Margin="8,0,0,0"/>
-            </StackPanel>
-
             <Border Background="{StaticResource TblHdrBgBrush}"
                     CornerRadius="{StaticResource ReaderSubCardCornerRadius}"
                     Padding="{StaticResource ReaderSubCardPadding}">
                 <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <Border Width="{StaticResource ReaderSectionBarWidth}" Height="{StaticResource ReaderSectionBarHeight}"
+                                Background="{StaticResource Blue500Brush}" CornerRadius="2" VerticalAlignment="Center"/>
+                        <TextBlock Text="포트 설정" Style="{StaticResource ReaderSectionTitleTextStyle}" Margin="8,0,0,0"/>
+                    </StackPanel>
+
                     <!-- 리더기1 카드 -->
                     <Border Background="{StaticResource CardBgBrush}"
                             BorderBrush="{StaticResource ReaderBorderBrush}" BorderThickness="1"
@@ -232,16 +232,16 @@
             </Border>
 
             <!-- ===================== 무결성 체크 정보 ===================== -->
-            <StackPanel Orientation="Horizontal" Margin="0,14,0,10">
-                <Border Width="{StaticResource ReaderSectionBarWidth}" Height="{StaticResource ReaderSectionBarHeight}"
-                        Background="{StaticResource Blue500Brush}" CornerRadius="2" VerticalAlignment="Center"/>
-                <TextBlock Text="무결성 체크 정보" Style="{StaticResource ReaderSectionTitleTextStyle}" Margin="8,0,0,0"/>
-            </StackPanel>
-
             <Border Background="{StaticResource TblHdrBgBrush}"
                     CornerRadius="{StaticResource ReaderSubCardCornerRadius}"
-                    Padding="{StaticResource ReaderSubCardPadding}">
+                    Padding="{StaticResource ReaderSubCardPadding}"
+                    Margin="0,12,0,0">
                 <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <Border Width="{StaticResource ReaderSectionBarWidth}" Height="{StaticResource ReaderSectionBarHeight}"
+                                Background="{StaticResource Blue500Brush}" CornerRadius="2" VerticalAlignment="Center"/>
+                        <TextBlock Text="무결성 체크 정보" Style="{StaticResource ReaderSectionTitleTextStyle}" Margin="8,0,0,0"/>
+                    </StackPanel>
                     <!-- 조회기간 콤보 + 조회 버튼 -->
                     <StackPanel Orientation="Horizontal">
                         <ComboBox Width="{StaticResource ReaderQueryComboWidth}" SelectedIndex="0">
@@ -279,12 +279,12 @@
                                         <ColumnDefinition Width="23*"/>
                                         <ColumnDefinition Width="20*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="체크일시" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="1" Text="포트" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="2" Text="결과" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="3" Text="모듈ID" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="4" Text="리더기식별번호" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="5" Text="POS식별번호" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="체크일시" Style="{StaticResource ReaderTableHeaderTextStyle}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1" Text="포트" Style="{StaticResource ReaderTableHeaderTextStyle}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="결과" Style="{StaticResource ReaderTableHeaderTextStyle}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="3" Text="모듈ID" Style="{StaticResource ReaderTableHeaderTextStyle}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="4" Text="리더기식별번호" Style="{StaticResource ReaderTableHeaderTextStyle}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="5" Text="POS식별번호" Style="{StaticResource ReaderTableHeaderTextStyle}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Grid>
                             </Border>
 

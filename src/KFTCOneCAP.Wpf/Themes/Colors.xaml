@@ -80,13 +80,13 @@
     <Color x:Key="TblAltRowColor">#FBFCFF</Color>
     <SolidColorBrush x:Key="TblAltRowBrush" Color="{StaticResource TblAltRowColor}"/>
 
-    <Color x:Key="TblHdrTextColor">#1A202C</Color>
+    <Color x:Key="TblHdrTextColor">#6B7684</Color>
     <SolidColorBrush x:Key="TblHdrTextBrush" Color="{StaticResource TblHdrTextColor}"/>
 
     <Color x:Key="TblBodyTextColor">#5C687A</Color>
     <SolidColorBrush x:Key="TblBodyTextBrush" Color="{StaticResource TblBodyTextColor}"/>
 
-    <Color x:Key="TblEmptyTextColor">#A0A8B4</Color>
+    <Color x:Key="TblEmptyTextColor">#8B95A1</Color>
     <SolidColorBrush x:Key="TblEmptyTextBrush" Color="{StaticResource TblEmptyTextColor}"/>
 
     <!-- 결과 칩 -->

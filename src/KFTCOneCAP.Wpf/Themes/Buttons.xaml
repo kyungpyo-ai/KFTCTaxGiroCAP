@@ -137,6 +137,7 @@
         <Setter Property="Background" Value="{StaticResource Blue500Brush}"/>
         <Setter Property="BorderBrush" Value="{StaticResource Blue500Brush}"/>
         <Setter Property="Foreground" Value="White"/>
+        <Setter Property="FontSize" Value="14"/>
         <Setter Property="FontWeight" Value="Bold"/>
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
@@ -161,6 +162,7 @@
         <Setter Property="BorderBrush" Value="{StaticResource TblBorderBrush}"/>
         <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
         <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="Bold"/>
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
                 <Setter Property="Background" Value="#F5F7FA"/>
