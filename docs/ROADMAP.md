@@ -20,7 +20,7 @@
 | 2 | 홈 화면 — 정적 레이아웃 | ✅ 완료 |
 | 3 | 홈 화면 — 인터랙션 & 트레이 | ✅ 완료 |
 | 4 | 리더기 설정 — 정적 레이아웃 | ✅ 완료 |
-| 5 | 리더기 설정 — 비즈니스 로직(스텁) + 레지스트리 저장/dirty-check (AOP 제약·TRANSINFO_AOP 검증·포트열기 토글은 보류) | ⬜ 대기 |
+| 5 | 리더기 설정 — 비즈니스 로직(스텁) + 레지스트리 저장/dirty-check (AOP 제약·TRANSINFO_AOP 검증·포트열기 토글은 보류) | ✅ 완료 |
 | 6 | 리더기 설정 — 실제 COM 포트 연동 | ⬜ 대기 |
 | 7 | 통합 검증 & 마무리 | ⬜ 대기 |
 
@@ -243,13 +243,62 @@
 
 **목표**: PRD 4.7, 4.9, 4.13의 로직을 스텁 수준으로 이식(원본도 실통신 미구현) + 콤보/멀티패드 값의 레지스트리 저장 및 dirty-check.
 
-- [ ] 버튼 클릭(초기화/상태체크/키다운로드/무결성체크/업데이트) → 로딩 상태(스피너+텍스트) → 3초 후 자동 완료 (원본 동작 재현, `Task.Delay` 기반 비동기로 — UI 스레드 블로킹 금지). **실제 리더기 통신 로직은 이 Phase의 범위가 아니며, 원본도 미구현이라 이후에도 별도 단계로 다룰 예정**(사용자 지시).
-- [ ] 조회 버튼 → 로딩(2초) → 더미 데이터로 리스트 갱신 (조회기간별 행 수: 오늘 3 / 7일 5 / 30일·100일 10)
-- [ ] 레지스트리 저장: `COMPORT1_FIELD`/`COMPORT2_FIELD`, `MULTIPAD1_FIELD`/`MULTIPAD2_FIELD`(반전 인코딩), 경로 `HKCU\Software\KFTC_VAN\KFTCTaxGiroCAP\SERIALPORT` — PRD 5장 참고(2026-08-14 확정: 원본과 레지스트리 공유하지 않고 별도 앱 이름 사용)
-- [ ] 정보 팝오버(멀티패드) — PRD 4.10 문구 그대로
-- [ ] 스냅샷/dirty-check(PRD 4.13): 콤보1/2 + 멀티패드1/2 추적, 취소 시 확인창
+- [x] 버튼 클릭(초기화/상태체크/키다운로드/무결성체크/업데이트) → 로딩 상태(스피너+텍스트) → 3초 후 자동 완료 (원본 동작 재현, `Task.Delay` 기반 비동기로 — UI 스레드 블로킹 금지). **실제 리더기 통신 로직은 이 Phase의 범위가 아니며, 원본도 미구현이라 이후에도 별도 단계로 다룰 예정**(사용자 지시).
+- [x] 조회 버튼 → 로딩(2초) → 더미 데이터로 리스트 갱신 (조회기간별 행 수: 오늘 3 / 7일 5 / 30일·100일 10)
+- [x] 레지스트리 저장: `COMPORT1_FIELD`/`COMPORT2_FIELD`, `MULTIPAD1_FIELD`/`MULTIPAD2_FIELD`(반전 인코딩), 경로 `HKCU\Software\KFTC_VAN\KFTCTaxGiroCAP\SERIALPORT` — PRD 5장 참고(2026-08-14 확정: 원본과 레지스트리 공유하지 않고 별도 앱 이름 사용)
+- [x] 정보 팝오버(멀티패드) — PRD 4.10 문구 그대로
+- [x] 스냅샷/dirty-check(PRD 4.13): 콤보1/2 + 멀티패드1/2 추적, 취소 시 확인창
 
-**완료 기준**: 각 액션 버튼/조회 버튼 클릭 시 로딩→완료 흐름 확인. 콤보/멀티패드 값 레지스트리 저장 확인. dirty-check(콤보/토글 변경 후 취소 시 확인창) 동작 확인. (AOP 시나리오 검증, TRANSINFO_AOP 저장 차단, 포트 열기 토글은 위 범위 조정에 따라 이번 완료 기준에서 제외 — 별도 단계에서 다룸)
+**완료 기준**: 각 액션 버튼/조회 버튼 클릭 시 로딩→완료 흐름 확인. 콤보/멀티패드 값 레지스트리 저장 확인. dirty-check(콤보/토글 변경 후 취소 시 확인창) 동작 확인. (AOP 시나리오 검증, TRANSINFO_AOP 저장 차단, 포트 열기 토글은 위 범위 조정에 따라 이번 완료 기준에서 제외 — 별도 단계에서 다룸) — **통과 (2026-08-14)**.
+
+**구현 요약**:
+- `Views/ReaderSetupWindow.xaml.cs`: 액션 버튼 10개(리더기1/2 × 초기화/상태체크/키다운로드/무결성체크/업데이트)가 공용 `ActionButton_Click` 핸들러 하나를 공유한다 — 각 `Button`의 `Tag`에 로딩 문구(예: "초기화중...")를 XAML에서 미리 심어두고, 핸들러는 클릭된 버튼의 `Content`를 그 문구로 바꾼 뒤 `await Task.Delay(3000)`, 완료 후 원래 `Content`로 되돌리는 방식(스피너 애니메이션은 이번 Phase 필수 아님으로 텍스트만 변경 — 아래 "임의 판단" 참고). 조회 버튼(`QueryButton_Click`)도 동일 패턴으로 2초 딜레이 후 더미 데이터를 반영한다.
+- "동시에 하나의 작업만 진행 가능"(PRD 4.7)은 `_isBusy` bool 플래그 + `SetGlobalEnabled(bool)` 헬퍼로 구현 — 작업이 시작되면 리더기1/2 콤보·액션버튼패널·멀티패드토글·조회기간콤보·조회버튼·확인·취소 버튼 전체를 한 번에 잠그고(개별 카드 단위가 아니라 화면 전체 단위), 완료 후 전체를 풀고 나서 기존 `ApplyReaderCardEnabled`(Phase 4에 이미 있던 "미사용" 콤보 기준 활성/비활성 로직)를 리더기1/2 양쪽에 재적용한다. `_isBusy`가 true인 동안의 클릭은 핸들러 최상단에서 즉시 return(추가로 컨트롤 자체도 disabled라 이중 방어).
+- 무결성 체크 리스트: 기존 "항상 빈 상태"였던 정적 `Grid`를 `ItemsControl`(x:Name="IntegrityListItemsControl")로 교체하고, 빈 상태 문구(`IntegrityEmptyText`)/로딩 문구(`IntegrityLoadingText`, "조회 중입니다...")와 함께 같은 `Grid`에 겹쳐 놓은 뒤 코드비하인드에서 `Visibility`로 세 상태를 전환한다. 각 행의 `DataTemplate`은 헤더와 동일한 6열 비율(20/11/8/18/23/20)의 `Grid`를 재사용하고, 결과 칩(정상/오류)은 `Models/IntegrityCheckRow.cs`에 새로 만든 모델이 `Themes/Colors.xaml`의 기존 `ResultOkBgBrush`/`ResultErrorBgBrush` 등 리소스를 `Application.Current.Resources[...]`로 그대로 참조해 리터럴 색상 중복 없이 바인딩한다. 더미 데이터는 `BuildDummyRows(period)`가 조회기간에 따라 3/5/10행을 생성하고, 4번째 행마다 결과코드 "01"(오류)을 섞어 정상/오류 칩이 둘 다 보이도록 구성했다.
+- 정보 팝오버(PRD 4.10): 리더기1/2의 멀티패드 info 버튼("?" 아이콘) 2개가 XAML에 하나만 선언한 공용 `Popup`(`MultipadInfoPopup`, `StaysOpen="False"`)을 공유한다. `MultipadInfoButton_Click`이 클릭된 버튼을 `PlacementTarget`으로 지정해 여는데, 같은 버튼을 다시 클릭하면(= 이미 그 버튼을 대상으로 열려 있으면) 닫고, 다른 버튼을 클릭하면 `PlacementTarget`만 바뀌면서 자연스럽게 이전 팝오버가 닫히고 새 팝오버가 그 자리에 뜬다. "포트 열기" info 버튼은 자리 자체가 `Visibility="Hidden"`이라 배선하지 않음(지시대로).
+- 레지스트리 저장(PRD 5장/4.12): `SaveToRegistry()`가 `Registry.CurrentUser.CreateSubKey(@"Software\KFTC_VAN\KFTCTaxGiroCAP\SERIALPORT")` 하위에 `COMPORT1_FIELD`/`COMPORT2_FIELD`(콤보 선택 텍스트 그대로)와 `MULTIPAD1_FIELD`/`MULTIPAD2_FIELD`(반전 인코딩: `IsChecked==true` → `"0"`, 아니면 `"1"`)를 저장하고, `ConfirmButton_Click`이 저장 직후 `DialogResult=true; Close()`.
+- 스냅샷/dirty-check(PRD 4.12/4.13): `Loaded` 핸들러 마지막에 콤보1/2 선택 텍스트와 멀티패드1/2 `IsChecked` 값을 필드 4개에 저장해두고, `CancelButton_Click`이 열려있는 팝오버를 먼저 닫은 뒤 현재 값과 스냅샷을 비교 — 하나라도 다르면 `MessageBox.Show(..., YesNo)`로 "변경된 내용이 있습니다.\n저장하지 않고 종료하시겠습니까?"를 띄우고, "아니요"면 `return`(창 유지), "예"거나 애초에 변경사항이 없으면 `DialogResult=false; Close()`.
+
+**임의 판단/근사 처리 항목** (PRD/작업 지시에 명시되지 않아 직접 결정한 세부사항):
+- **스피너 없음**: 지시사항이 "여력 되면 작은 회전 스피너 추가"로 선택지를 열어뒀는데, `Themes/ToggleSwitch.xaml`에 이미 있는 회전 링 패턴을 액션 버튼(`ReaderButtonStyle`, `Themes/Buttons.xaml`)에 새로 이식하는 것은 버튼 콘텐츠가 `Content="{TemplateBinding Content}"`를 텍스트 문자열로 직접 바꿔치기하는 현재 코드비하인드 구조와 잘 맞지 않아(스피너를 넣으려면 버튼 템플릿을 아이콘+텍스트 복합 구조로 다시 짜야 함) 이번 Phase에서는 텍스트 전환만으로 로딩 상태를 표현했다. 필요 시 별도 후속 작업으로 추가 가능.
+- **화면 전체 잠금 범위**: PRD 4.7 원문은 "해당 리더기 카드의 콤보/토글/나머지 버튼 4개를 비활성화"라고 카드 단위로 적혀 있지만, 작업 지시가 "화면 전체(리더기1/2 액션버튼 + 조회버튼 전부 포함)에서 하나의 작업만"이라고 명시적으로 확장했으므로 이를 그대로 따라 리더기1/2 카드 전체 + 조회 영역 + 확인/취소까지 전부 잠그도록 구현했다(확인/취소까지 잠그는 것은 작업 지시에 명시되지 않았으나, 비동기 작업 도중 창이 닫히는 경합 상황을 피하기 위한 안전장치로 포함시켰다).
+- **팝오버 스타일**: "화살표 포인터까지는 필수 아님, 심플한 카드형 팝업이면 충분"이라는 지시에 따라 흰 배경 + 얇은 회색 보더 + 라운드 10px + `DropShadowEffect` 카드형 `Popup`으로 구현(화살표 포인터 없음). `Placement="Bottom"`으로 info 버튼 바로 아래 뜨도록 함.
+- **더미 데이터 생성 규칙**: PRD/지시에 정확한 알고리즘이 없어 임의로 결정 — 기준 시각(`2026-03-08 09:12:34`, 원본 PRD 4.6에 언급된 예시 타임스탬프와 동일한 날짜)에서 행마다 `-(i*37)분 -(i*11)초`씩 당겨 서로 다른 값을 만들고, 포트는 짝/홀 인덱스로 "COM 01"/"COM 02"를 번갈아, 결과코드는 4번째 행마다("i % 4 == 3") "01"(오류)을 섞어 정상/오류 칩이 둘 다 렌더링되도록 했다. 모듈ID/리더기식별번호/POS식별번호는 `MD-1000`/`RDR-100000`/`POS-200000` 형태의 순번 문자열로 생성.
+
+**검증 결과**:
+- `dotnet build` 성공(경고 0/오류 0).
+- 액션 버튼(리더기1 "초기화") 클릭 → 버튼 텍스트가 "초기화중..."으로 바뀌고 리더기1/2 카드 전체(콤보/토글/나머지 버튼) + 조회 영역 + 확인/취소가 모두 비활성화되는 것을 `mcp__windows__windows_snapshot`으로 확인. 로딩 중 다른 버튼("상태체크") 클릭 시 무시됨(비활성 상태 유지)을 확인. 3초 후 텍스트가 "초기화"로 원복되고 전체 컨트롤이 재활성화되며, 리더기2는 콤보가 여전히 "미사용"이라 `ApplyReaderCardEnabled` 재적용으로 계속 비활성 상태로 유지되는 것을 확인.
+- 조회 버튼 클릭(조회기간 기본값 "오늘") → 버튼 텍스트가 "조회중..."으로 바뀌고 리스트 영역이 "조회 중입니다..."로 전환된 뒤 2초 후 더미 행 3개(체크일시/포트/결과칩/모듈ID/리더기식별번호/POS식별번호, 결과 "정상" 초록 칩)가 헤더와 컬럼 정렬이 맞게 표시되는 것을 스크린샷으로 확인. 조회기간을 "7일"로 바꿔 재조회 → 5행 표시(가시 3행 고정 + 세로 스크롤바 등장) 및 4번째 행이 "오류" 빨강 칩으로 렌더링되는 것을 확인.
+- 리더기1 멀티패드 토글 ON → info 버튼("?") 클릭 → "멀티패드 여부" 제목과 PRD 4.10 문구(ON/OFF 설명 + 스캐너 각주) 그대로인 팝오버가 버튼 아래에 뜨는 것을 스크린샷으로 확인. 같은 버튼 재클릭 → 팝오버가 닫히는 것을 스크린샷으로 확인.
+- 멀티패드 토글을 켠 상태에서 취소 클릭 → "변경된 내용이 있습니다.\n저장하지 않고 종료하시겠습니까?" 확인창(예/아니요)이 뜨는 것을 확인, "아니요" 클릭 시 창이 닫히지 않고 유지되는 것을 확인(윈도우 목록으로 재확인).
+- 같은 상태에서 확인 클릭 → 창이 닫히고, PowerShell `Get-ItemProperty -Path HKCU:\Software\KFTC_VAN\KFTCTaxGiroCAP\SERIALPORT`로 조회한 결과 `COMPORT1_FIELD=COM 01`, `COMPORT2_FIELD=미사용`, `MULTIPAD1_FIELD=0`(켜짐→반전 "0"), `MULTIPAD2_FIELD=1`(기본 꺼짐)이 실제로 저장된 것을 확인.
+- 새로 리더기 설정 창을 열어(레지스트리 로드는 이번 Phase 범위 아니므로 XAML 기본값으로 리셋된 상태) 값을 전혀 바꾸지 않고 바로 취소 클릭 → 확인창 없이 즉시 창이 닫히는 것을 확인.
+
+---
+
+### Phase 5 보완 (2026-08-14, 사용자 피드백 2건: "레지스트리 값 로드 누락" + "로딩 스피너 없음")
+
+위 Phase 5 1차 구현은 레지스트리 **저장**만 있고 창을 열 때 저장된 값을 다시 **불러오는** 부분이 없었다(항상 XAML 기본값 `SelectedIndex="0"`으로 시작 — 즉 리더기1은 매번 "COM 01"이 기본으로 보임). 또한 액션/조회 버튼의 로딩 상태가 텍스트 전환뿐이라 시각적 스피너가 없었다. 두 가지를 보완했다.
+
+**1) 레지스트리 값 로드 (PRD 4.13/5장)**:
+- `Views/ReaderSetupWindow.xaml.cs`에 `LoadFromRegistry()`를 추가하고 `ReaderSetupWindow_Loaded`의 가장 첫 단계(콤보 `SelectionChanged` 구독/`ApplyReaderCardEnabled`/dirty-check 스냅샷 캡처보다 먼저)에서 호출한다 — `HKCU\Software\KFTC_VAN\KFTCTaxGiroCAP\SERIALPORT`의 `COMPORT1_FIELD`/`COMPORT2_FIELD`/`MULTIPAD1_FIELD`/`MULTIPAD2_FIELD`를 읽어 콤보 선택값/토글 `IsChecked`에 반영한다. 이 순서 덕분에 이후의 활성화 연동과 dirty-check 스냅샷이 "로드된 값" 기준으로 정확히 잡힌다(스냅샷 캡처가 로드 이후 시점이라 순서가 꼬이지 않음을 코드 리뷰로 확인).
+- `SelectComboValue(ComboBox, string?)` 헬퍼: 저장된 값과 문자열이 일치하는 `ComboBoxItem`이 있으면 그 항목을 선택하고, 값이 비어있거나(키/값 없음) 콤보 항목에 없는 값이면 안전하게 "미사용" 항목으로 폴백한다.
+- 토글은 반전 인코딩 규칙 그대로(`MULTIPAD{N}_FIELD == "0"`일 때만 켜짐, 그 외/없음은 꺼짐)를 역방향으로 적용해 `IsChecked`를 초기화한다.
+- 레지스트리 접근 자체(`Registry.CurrentUser.OpenSubKey`)를 `try/catch`로 감싸 권한 문제 등으로 예외가 나도 창 밖으로 전파하지 않고 조용히 기본값(미사용/꺼짐)으로 폴백하도록 했다.
+- `Views/ReaderSetupWindow.xaml`의 `Reader1PortCombo`/`Reader2PortCombo`에 있던 `SelectedIndex="0"` 하드코딩을 제거했다 — 이제 최초 선택은 전적으로 `LoadFromRegistry()`(있으면 저장값, 없으면 "미사용")가 담당한다.
+
+**2) 로딩 스피너 (PRD 4.7 "스피너+텍스트")**:
+- `Controls/ButtonLoadingHelper.cs`(신규) — `Button`에 새 속성을 얹을 수 없어 WPF 표준 패턴인 첨부 속성(`DependencyProperty` `IsLoading`)으로 구현.
+- `Themes/Buttons.xaml`의 `ReaderButtonStyle` `ControlTemplate`을 리팩터링 — 기존에는 `ContentPresenter` 하나만 있던 콘텐츠 영역을 가로 `StackPanel`(스피너 `Ellipse` + `ContentPresenter`)로 재구성하고, `controls:ButtonLoadingHelper.IsLoading=True`일 때만 스피너가 보이며 `RotateTransform` + 무한 반복(`RepeatBehavior="Forever"`) `Storyboard`로 회전한다. `ToggleSwitch.xaml`의 기존 "스피너"(균일한 색의 완전한 원형 `Border` 테두리)는 대칭 도형이라 회전해도 육안상 정지해 보이는 문제가 있어 그대로 재사용하지 않고, `Ellipse.StrokeDashArray="2,1.4"`로 점선 원을 만들어 회전이 실제로 눈에 보이도록 새로 설계했다(주석에 판단 근거 기록).
+- `Views/ReaderSetupWindow.xaml.cs`의 `ActionButton_Click`/`QueryButton_Click`에서 로딩 시작/종료 시점에 각각 `ButtonLoadingHelper.SetIsLoading(button, true/false)`를 호출해 텍스트 전환과 스피너 표시를 함께 토글한다.
+- 로딩 중에는 해당 버튼이 속한 `ActionButtonsPanel` 전체가 `SetGlobalEnabled(false)`로 비활성화되므로(클릭된 버튼 포함), 스피너/텍스트도 `IsEnabled=False` 트리거의 회색 팔레트를 그대로 따라간다(회색 배경 위에 회색 점선 스피너 — 대비는 충분히 확인됨, 아래 검증 스크린샷 참고).
+
+**검증 결과**:
+- `dotnet build` 성공(경고 0/오류 0).
+- (a) 레지스트리에 `COMPORT1_FIELD=COM 01`, `COMPORT2_FIELD=COM 01`, `MULTIPAD1_FIELD=0`, `MULTIPAD2_FIELD=0`을 PowerShell로 미리 저장한 뒤 리더기 설정 창을 열자 두 콤보 모두 "COM 01"로 선택되고 두 멀티패드 토글 모두 ON, 리더기2 액션 버튼 5개도 활성(연한 파랑 톤)으로 뜨는 것을 `mcp__windows__windows_snapshot`/스크린샷으로 확인.
+- (b) 레지스트리 키(`SERIALPORT`) 자체를 삭제한 뒤 다시 열자 두 콤보 모두 "미사용", 두 토글 모두 OFF, 액션 버튼 전부 비활성(연한 회색 톤)으로 뜨는 것을 확인 — 예외 없이 정상 폴백.
+- (c) 액션 버튼(리더기1 "초기화", 이어서 리더기2 "초기화") 클릭 → 버튼 텍스트가 "초기화중..."으로 바뀌는 것과 동시에 텍스트 좌측에 작은 점선 원(스피너)이 표시되는 것을 스크린샷으로 확인(회전 애니메이션 자체는 스크린샷 정지 이미지로는 프레임 하나만 보이지만, `RotateTransform` + `Forever` 반복 `Storyboard`가 트리거에 정상 연결되어 있음을 XAML 리뷰로 확인했고, 스피너 도형 자체가 대칭이 아닌 점선 원이라 실제로 회전 시 시각적 변화가 발생하는 구조임을 확인). 3초 후 텍스트가 원래대로 돌아오며 스피너도 함께 사라지는 것을 확인.
+- 값 로드 후(레지스트리에 저장된 값 그대로) 아무 것도 바꾸지 않고 취소 클릭 → 확인창 없이 즉시 닫힘(dirty-check 스냅샷이 "로드된 값" 기준으로 정확히 잡혀 있음을 재확인).
 
 ---
 

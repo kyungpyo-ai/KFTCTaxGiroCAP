@@ -32,6 +32,12 @@
             <DropShadowEffect Color="#1A202C" Opacity="0.12" BlurRadius="24" ShadowDepth="4"/>
         </Border.Effect>
 
+        <!--
+            2026-08-14 추가(Phase 5): 멀티패드 info 팝오버(PRD 4.10)를 담기 위해 루트를
+            StackPanel 단독에서 Grid(+Popup)로 변경. Popup은 레이아웃 공간을 차지하지 않으므로
+            기존 StackPanel 배치에는 영향 없다.
+        -->
+        <Grid>
         <StackPanel>
             <!-- ===================== 헤더 ===================== -->
             <!--
@@ -119,8 +125,14 @@
 
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="리더기1 - COM 포트" Style="{StaticResource ReaderLabelTextStyle}"/>
-                                    <ComboBox x:Name="Reader1PortCombo" Width="{StaticResource ReaderComboWidth}" Margin="0,8,0,0"
-                                              SelectedIndex="0">
+                                    <!--
+                                        2026-08-14 수정(Phase 5 보완, 사용자 피드백): SelectedIndex="0"
+                                        하드코딩(=항상 "COM 01" 기본 선택)을 제거 — 초기 선택은
+                                        Views/ReaderSetupWindow.xaml.cs Loaded의 LoadFromRegistry()가
+                                        레지스트리 값(있으면 그 값, 없으면 "미사용")으로 명시적으로
+                                        선택한다.
+                                    -->
+                                    <ComboBox x:Name="Reader1PortCombo" Width="{StaticResource ReaderComboWidth}" Margin="0,8,0,0">
                                         <ComboBoxItem Content="COM 01"/>
                                         <ComboBoxItem Content="미사용"/>
                                     </ComboBox>
@@ -143,27 +155,34 @@
                                     <StackPanel Orientation="Horizontal" Margin="{StaticResource ReaderToggleGroupGapMargin}">
                                         <TextBlock Text="멀티패드 여부" Style="{StaticResource ReaderLabelTextStyle}" VerticalAlignment="Center"/>
                                         <ToggleButton x:Name="Reader1MultipadToggle" Style="{StaticResource ModernToggleSwitchStyle}" Margin="10,0,0,0" VerticalAlignment="Center"/>
-                                        <Button Style="{StaticResource InfoButtonStyle}" Margin="{StaticResource ReaderToggleInfoGapMargin}" VerticalAlignment="Center"/>
+                                        <Button x:Name="Reader1MultipadInfoButton" Style="{StaticResource InfoButtonStyle}"
+                                                Margin="{StaticResource ReaderToggleInfoGapMargin}" VerticalAlignment="Center"
+                                                Click="MultipadInfoButton_Click"/>
                                     </StackPanel>
                                 </StackPanel>
                             </Grid>
 
                             <!-- 하단: 액션 버튼 5개 -->
                             <StackPanel x:Name="Reader1ActionButtonsPanel" Orientation="Horizontal" Margin="42,10,0,0">
-                                <Button Content="초기화" Style="{StaticResource ReaderButtonStyle}"
-                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"/>
-                                <Button Content="상태체크" Style="{StaticResource ReaderButtonStyle}"
+                                <Button Content="초기화" Tag="초기화중..." Style="{StaticResource ReaderButtonStyle}"
                                         Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
-                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
-                                <Button Content="키다운로드" Style="{StaticResource ReaderButtonStyle}"
+                                        Click="ActionButton_Click"/>
+                                <Button Content="상태체크" Tag="확인중..." Style="{StaticResource ReaderButtonStyle}"
                                         Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
-                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
-                                <Button Content="무결성체크" Style="{StaticResource ReaderButtonStyle}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"
+                                        Click="ActionButton_Click"/>
+                                <Button Content="키다운로드" Tag="다운로드중..." Style="{StaticResource ReaderButtonStyle}"
                                         Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
-                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
-                                <Button Content="업데이트" Style="{StaticResource ReaderButtonStyle}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"
+                                        Click="ActionButton_Click"/>
+                                <Button Content="무결성체크" Tag="체크중..." Style="{StaticResource ReaderButtonStyle}"
                                         Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
-                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"
+                                        Click="ActionButton_Click"/>
+                                <Button Content="업데이트" Tag="업데이트중..." Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"
+                                        Click="ActionButton_Click"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -195,8 +214,8 @@
 
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="리더기2 - COM 포트" Style="{StaticResource ReaderLabelTextStyle}"/>
-                                    <ComboBox x:Name="Reader2PortCombo" Width="{StaticResource ReaderComboWidth}" Margin="0,8,0,0"
-                                              SelectedIndex="0">
+                                    <!-- 2026-08-14 수정: 위 Reader1PortCombo와 동일 사유로 SelectedIndex 하드코딩 제거. -->
+                                    <ComboBox x:Name="Reader2PortCombo" Width="{StaticResource ReaderComboWidth}" Margin="0,8,0,0">
                                         <ComboBoxItem Content="미사용"/>
                                         <ComboBoxItem Content="COM 01"/>
                                     </ComboBox>
@@ -206,25 +225,32 @@
                                 <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Text="멀티패드 여부" Style="{StaticResource ReaderLabelTextStyle}" VerticalAlignment="Center"/>
                                     <ToggleButton x:Name="Reader2MultipadToggle" Style="{StaticResource ModernToggleSwitchStyle}" Margin="10,0,0,0" VerticalAlignment="Center"/>
-                                    <Button Style="{StaticResource InfoButtonStyle}" Margin="{StaticResource ReaderToggleInfoGapMargin}" VerticalAlignment="Center"/>
+                                    <Button x:Name="Reader2MultipadInfoButton" Style="{StaticResource InfoButtonStyle}"
+                                            Margin="{StaticResource ReaderToggleInfoGapMargin}" VerticalAlignment="Center"
+                                            Click="MultipadInfoButton_Click"/>
                                 </StackPanel>
                             </Grid>
 
                             <StackPanel x:Name="Reader2ActionButtonsPanel" Orientation="Horizontal" Margin="42,10,0,0">
-                                <Button Content="초기화" Style="{StaticResource ReaderButtonStyle}"
-                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"/>
-                                <Button Content="상태체크" Style="{StaticResource ReaderButtonStyle}"
+                                <Button Content="초기화" Tag="초기화중..." Style="{StaticResource ReaderButtonStyle}"
                                         Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
-                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
-                                <Button Content="키다운로드" Style="{StaticResource ReaderButtonStyle}"
+                                        Click="ActionButton_Click"/>
+                                <Button Content="상태체크" Tag="확인중..." Style="{StaticResource ReaderButtonStyle}"
                                         Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
-                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
-                                <Button Content="무결성체크" Style="{StaticResource ReaderButtonStyle}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"
+                                        Click="ActionButton_Click"/>
+                                <Button Content="키다운로드" Tag="다운로드중..." Style="{StaticResource ReaderButtonStyle}"
                                         Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
-                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
-                                <Button Content="업데이트" Style="{StaticResource ReaderButtonStyle}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"
+                                        Click="ActionButton_Click"/>
+                                <Button Content="무결성체크" Tag="체크중..." Style="{StaticResource ReaderButtonStyle}"
                                         Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
-                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"
+                                        Click="ActionButton_Click"/>
+                                <Button Content="업데이트" Tag="업데이트중..." Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"
+                                        Click="ActionButton_Click"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -244,16 +270,17 @@
                     </StackPanel>
                     <!-- 조회기간 콤보 + 조회 버튼 -->
                     <StackPanel Orientation="Horizontal">
-                        <ComboBox Width="{StaticResource ReaderQueryComboWidth}" SelectedIndex="0">
+                        <ComboBox x:Name="QueryPeriodCombo" Width="{StaticResource ReaderQueryComboWidth}" SelectedIndex="0">
                             <ComboBoxItem Content="오늘"/>
                             <ComboBoxItem Content="7일"/>
                             <ComboBoxItem Content="30일"/>
                             <ComboBoxItem Content="100일"/>
                         </ComboBox>
                         <!-- 2026-08-14 변경: "확인" 전용 진한 파랑(PrimaryButtonStyle) 대신 액션 버튼과 동일한 연한 파랑 스타일(ReaderButtonStyle) 사용(스크린샷 실측) -->
-                        <Button Content="조회" Style="{StaticResource ReaderButtonStyle}"
+                        <Button x:Name="QueryButton" Content="조회" Style="{StaticResource ReaderButtonStyle}"
                                 Width="{StaticResource ReaderQueryButtonWidth}" Height="{StaticResource ReaderQueryButtonHeight}"
-                                Margin="10,0,0,0"/>
+                                Margin="10,0,0,0"
+                                Click="QueryButton_Click"/>
                     </StackPanel>
 
                     <!-- 리스트: 헤더 + 본문(고정 높이 166, Phase 4는 항상 빈 상태) -->
@@ -289,17 +316,65 @@
                             </Border>
 
                             <!--
-                                본문: Phase 4는 조회 로직이 없어(Phase 5) 항상 빈 상태(PRD 4.6)로
-                                고정 표시. ScrollViewer로 감싼 이유는 Phase 5에서 실제 행이 채워질 때
-                                가시 3행 고정 + 스크롤 요구사항(PRD 4.3/4.6)을 그대로 살리기 위함.
+                                본문: Phase 5(ROADMAP.md) — 조회 버튼 클릭 시 더미 데이터로 채워지는
+                                ItemsControl(가시 3행 고정 + ScrollViewer, PRD 4.3/4.6)로 교체.
+                                데이터가 없는 초기 상태는 기존과 동일하게 빈 상태 문구를 유지하고,
+                                조회 중(2초)에는 "조회 중입니다..." 로 전환한다. 세 상태는
+                                Views/ReaderSetupWindow.xaml.cs QueryButton_Click 에서 Visibility로 전환.
                             -->
                             <Border Grid.Row="1" CornerRadius="0,0,8,8">
                                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                                     <Grid>
-                                        <TextBlock Text="조회된 무결성 체크 정보가 없습니다."
+                                        <ItemsControl x:Name="IntegrityListItemsControl" Visibility="Collapsed">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{StaticResource TblRowLineBrush}" BorderThickness="0,0,0,1">
+                                                        <Grid Height="36">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="20*"/>
+                                                                <ColumnDefinition Width="11*"/>
+                                                                <ColumnDefinition Width="8*"/>
+                                                                <ColumnDefinition Width="18*"/>
+                                                                <ColumnDefinition Width="23*"/>
+                                                                <ColumnDefinition Width="20*"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Grid.Column="0" Text="{Binding CheckTime}"
+                                                                       Style="{StaticResource ReaderSmallTextStyle}"
+                                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                            <TextBlock Grid.Column="1" Text="{Binding Port}"
+                                                                       Style="{StaticResource ReaderSmallTextStyle}"
+                                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                            <Border Grid.Column="2" Background="{Binding ResultBackground}"
+                                                                    CornerRadius="10" Padding="8,2"
+                                                                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                                <TextBlock Text="{Binding ResultText}" Foreground="{Binding ResultForeground}"
+                                                                           FontFamily="{StaticResource PretendardMediumFontFamily}" FontSize="12.67"/>
+                                                            </Border>
+                                                            <TextBlock Grid.Column="3" Text="{Binding ModuleId}"
+                                                                       Style="{StaticResource ReaderSmallTextStyle}"
+                                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                            <TextBlock Grid.Column="4" Text="{Binding ReaderId}"
+                                                                       Style="{StaticResource ReaderSmallTextStyle}"
+                                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                            <TextBlock Grid.Column="5" Text="{Binding PosId}"
+                                                                       Style="{StaticResource ReaderSmallTextStyle}"
+                                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <TextBlock x:Name="IntegrityEmptyText" Text="조회된 무결성 체크 정보가 없습니다."
                                                    Style="{StaticResource ReaderSmallTextStyle}"
                                                    Foreground="{StaticResource TblEmptyTextBrush}"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                                        <TextBlock x:Name="IntegrityLoadingText" Text="조회 중입니다..."
+                                                   Style="{StaticResource ReaderSmallTextStyle}"
+                                                   Foreground="{StaticResource TblEmptyTextBrush}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   Visibility="Collapsed"/>
                                     </Grid>
                                 </ScrollViewer>
                             </Border>
@@ -319,5 +394,30 @@
                         Click="CancelButton_Click"/>
             </StackPanel>
         </StackPanel>
+
+        <!--
+            멀티패드 info 팝오버(PRD 4.10) — 두 버튼(리더기1/2)이 공유하는 단일 Popup.
+            PlacementTarget을 클릭된 버튼으로 바꿔가며 재사용한다(Views/ReaderSetupWindow.xaml.cs
+            MultipadInfoButton_Click 참고). "포트 열기" info 버튼은 자리 자체가 Hidden이라
+            이번 Phase에서 배선하지 않는다.
+        -->
+        <Popup x:Name="MultipadInfoPopup" AllowsTransparency="True" StaysOpen="False" Placement="Bottom">
+            <Border Background="White" BorderBrush="{StaticResource TblBorderBrush}" BorderThickness="1"
+                    CornerRadius="10" Padding="14,12" MaxWidth="260" Margin="0,6,0,0">
+                <Border.Effect>
+                    <DropShadowEffect Color="#1A202C" Opacity="0.18" BlurRadius="16" ShadowDepth="3"/>
+                </Border.Effect>
+                <StackPanel>
+                    <TextBlock Text="멀티패드 여부" Style="{StaticResource ReaderSectionTitleTextStyle}" FontSize="13.33"/>
+                    <TextBlock Margin="0,8,0,0" Style="{StaticResource ReaderSmallTextStyle}" TextWrapping="Wrap">
+                        <Run Text="멀티패드 여부 설정"/><LineBreak/>
+                        <Run Text="· ON : QR 기능 사용 가능"/><LineBreak/>
+                        <Run Text="· OFF : QR 기능 사용 불가"/><LineBreak/>
+                        <Run Text="※스캐너가 부착된 리더기의 경우에도 ON 설정"/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </Popup>
+        </Grid>
     </Border>
 </Window>
