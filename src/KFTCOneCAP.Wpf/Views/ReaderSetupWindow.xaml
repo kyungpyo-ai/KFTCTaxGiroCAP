@@ -1,0 +1,323 @@
+<Window x:Class="KFTCOneCAP.Wpf.Views.ReaderSetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="리더기 설정"
+        SizeToContent="WidthAndHeight"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource DialogBgBrush}"
+        Loaded="ReaderSetupWindow_Loaded">
+    <!--
+        리더기 설정 화면 — 정적 레이아웃 (Phase 4, docs/ROADMAP.md).
+        치수는 전부 Themes/Layout.xaml 리소스 키를 참조한다(리터럴 금지 — 홈 화면과 동일 규칙).
+
+        창 크기: PRD 4.2 "최초 1회 레이아웃 계산 후 창 크기 확정"을 SizeToContent="WidthAndHeight"
+        (레이아웃 계산 1회) + ResizeMode="NoResize"(그 이후 고정)로 재현. 홈 화면처럼 전체
+        Width/Height를 리터럴로 박지 않고, 내부 컴포넌트별 고정 치수(콤보 178, 버튼 100 등,
+        Layout.xaml)가 자연스럽게 전체 창 크기를 결정하도록 구성했다.
+
+        버튼 클릭(초기화/상태체크/.../확인/취소), AOP 뱃지, 포트 열기 토글의 실제 동작은
+        Phase 5~6 범위. 이번 Phase는 정적 배치만 다룬다. "포트 열기" 토글은 지시에 따라
+        이번 Phase에서 아예 만들지 않고(Phase 6에서 배선), 자리만 빈 공간(Visibility=Hidden)으로
+        남겨 리더기2 카드와 "멀티패드 여부" 위치를 맞췄다(아래 리더기1 카드 참고).
+    -->
+    <Border CornerRadius="{StaticResource ReaderMainCardCornerRadius}"
+            Background="{StaticResource CardBgBrush}"
+            Padding="{StaticResource ReaderMainCardPadding}"
+            Margin="16">
+        <Border.Effect>
+            <DropShadowEffect Color="#1A202C" Opacity="0.12" BlurRadius="24" ShadowDepth="4"/>
+        </Border.Effect>
+
+        <StackPanel>
+            <!-- ===================== 헤더 ===================== -->
+            <!--
+                2026-08-14 수정(사용자 피드백): Phase 4에서는 홈 화면의 "리더기 설정" 카드
+                아이콘(카드리더 단말기 상세 벡터)을 그대로 재사용했으나, 스크린샷 확대 실측 결과
+                실제 헤더 아이콘은 그와 다른 단순한 그리드 형태였다 — 아래 Path는 더 이상 홈 화면
+                아이콘과 공유하지 않고 이 화면 전용의 단순 그리드 글리프를 사용한다.
+            -->
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Top">
+                <Border Width="{StaticResource ReaderHeaderIconBoxSize}" Height="{StaticResource ReaderHeaderIconBoxSize}"
+                        Background="{StaticResource Blue500Brush}"
+                        CornerRadius="{StaticResource ReaderHeaderIconCornerRadius}"
+                        VerticalAlignment="Top">
+                    <!--
+                        2026-08-14 재설계(사용자 피드백: "아이콘이 부자연스럽다, 더 이쁘고 자연스럽게"):
+                        HomeWindow.xaml ReaderSetupCardButton과 완전히 동일한 지오메트리(대칭 재설계
+                        버전)를 공유한다 — 상세 사유는 그쪽 주석 참고.
+                    -->
+                    <Viewbox Width="28" Height="28">
+                        <Canvas Width="28" Height="28">
+                            <Path Fill="White">
+                                <Path.Data>
+                                    <GeometryGroup FillRule="EvenOdd">
+                                        <RectangleGeometry Rect="4.5,2.25,19,23.5" RadiusX="3" RadiusY="3"/>
+                                        <RectangleGeometry Rect="7.5,5.25,13,8" RadiusX="1.5" RadiusY="1.5"/>
+                                        <RectangleGeometry Rect="7.5,15,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                        <RectangleGeometry Rect="12.3,15,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                        <RectangleGeometry Rect="17.1,15,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                        <RectangleGeometry Rect="7.5,18.8,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                        <RectangleGeometry Rect="12.3,18.8,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                        <RectangleGeometry Rect="17.1,18.8,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                        <RectangleGeometry Rect="8.5,23,11,1.2" RadiusX="0.6" RadiusY="0.6"/>
+                                    </GeometryGroup>
+                                </Path.Data>
+                            </Path>
+                        </Canvas>
+                    </Viewbox>
+                </Border>
+
+                <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="리더기 설정" Style="{StaticResource ReaderHeaderTitleTextStyle}"/>
+                    <TextBlock Text="리더기 연결 및 제어 설정을 관리합니다" Style="{StaticResource ReaderHeaderSubtitleTextStyle}" Margin="0,4,0,0"/>
+                </StackPanel>
+            </StackPanel>
+
+            <Border Height="1" Background="{StaticResource FooterDividerBrush}" Margin="0,14,0,14"/>
+
+            <!-- ===================== 포트 설정 ===================== -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                <Border Width="{StaticResource ReaderSectionBarWidth}" Height="{StaticResource ReaderSectionBarHeight}"
+                        Background="{StaticResource Blue500Brush}" CornerRadius="2" VerticalAlignment="Center"/>
+                <TextBlock Text="포트 설정" Style="{StaticResource ReaderSectionTitleTextStyle}" Margin="8,0,0,0"/>
+            </StackPanel>
+
+            <Border Background="{StaticResource TblHdrBgBrush}"
+                    CornerRadius="{StaticResource ReaderSubCardCornerRadius}"
+                    Padding="{StaticResource ReaderSubCardPadding}">
+                <StackPanel>
+                    <!-- 리더기1 카드 -->
+                    <Border Background="{StaticResource CardBgBrush}"
+                            BorderBrush="{StaticResource ReaderBorderBrush}" BorderThickness="1"
+                            CornerRadius="{StaticResource ReaderSubCardCornerRadius}"
+                            MinHeight="{StaticResource ReaderCardMinHeight}"
+                            Padding="{StaticResource ReaderCardPadding}">
+                        <StackPanel>
+                            <!-- 상단: 번호뱃지 + 라벨/콤보 + 포트열기/멀티패드 -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <!-- 번호 뱃지 -->
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <!-- 라벨/콤보 -->
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <!-- 포트열기/멀티패드 -->
+                                </Grid.ColumnDefinitions>
+
+                                <Border Grid.Column="0" Width="{StaticResource ReaderBadgeSize}" Height="{StaticResource ReaderBadgeSize}"
+                                        Background="{StaticResource Blue500Brush}" CornerRadius="{StaticResource ReaderBadgeCornerRadius}"
+                                        VerticalAlignment="Top">
+                                    <TextBlock Text="1" Foreground="White" FontFamily="{StaticResource PretendardFontFamily}"
+                                               FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="리더기1 - COM 포트" Style="{StaticResource ReaderLabelTextStyle}"/>
+                                    <ComboBox x:Name="Reader1PortCombo" Width="{StaticResource ReaderComboWidth}" Margin="0,8,0,0"
+                                              SelectedIndex="0">
+                                        <ComboBoxItem Content="COM 01"/>
+                                        <ComboBoxItem Content="미사용"/>
+                                    </ComboBox>
+                                </StackPanel>
+
+                                <!--
+                                    포트열기/멀티패드 그룹. "포트 열기"는 지시에 따라 이번 Phase에서
+                                    토글을 만들지 않는다 — 라벨/토글/info 자리를 Visibility="Hidden"
+                                    빈 공간으로만 남겨(ReaderPortOpenPlaceholderWidth) 리더기2 카드의
+                                    "멀티패드 여부" 위치와 좌우가 어긋나지 않게 했다.
+                                -->
+                                <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Width="{StaticResource ReaderPortOpenPlaceholderWidth}"
+                                                Visibility="Hidden" HorizontalAlignment="Right">
+                                        <TextBlock Text="포트 열기" Style="{StaticResource ReaderLabelTextStyle}" VerticalAlignment="Center"/>
+                                        <ToggleButton Style="{StaticResource ModernToggleSwitchStyle}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                                        <Button Style="{StaticResource InfoButtonStyle}" Margin="{StaticResource ReaderToggleInfoGapMargin}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" Margin="{StaticResource ReaderToggleGroupGapMargin}">
+                                        <TextBlock Text="멀티패드 여부" Style="{StaticResource ReaderLabelTextStyle}" VerticalAlignment="Center"/>
+                                        <ToggleButton x:Name="Reader1MultipadToggle" Style="{StaticResource ModernToggleSwitchStyle}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                                        <Button Style="{StaticResource InfoButtonStyle}" Margin="{StaticResource ReaderToggleInfoGapMargin}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- 하단: 액션 버튼 5개 -->
+                            <StackPanel x:Name="Reader1ActionButtonsPanel" Orientation="Horizontal" Margin="42,10,0,0">
+                                <Button Content="초기화" Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"/>
+                                <Button Content="상태체크" Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
+                                <Button Content="키다운로드" Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
+                                <Button Content="무결성체크" Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
+                                <Button Content="업데이트" Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 리더기2 카드 -->
+                    <Border Background="{StaticResource CardBgBrush}"
+                            BorderBrush="{StaticResource ReaderBorderBrush}" BorderThickness="1"
+                            CornerRadius="{StaticResource ReaderSubCardCornerRadius}"
+                            MinHeight="{StaticResource ReaderCardMinHeight}"
+                            Padding="{StaticResource ReaderCardPadding}"
+                            Margin="{StaticResource ReaderCardGapMargin}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- 리더기2는 AOP 미적용 시(원본 기본) 비활성 회색 뱃지 — PRD 4.4 -->
+                                <Border Grid.Column="0" Width="{StaticResource ReaderBadgeSize}" Height="{StaticResource ReaderBadgeSize}"
+                                        Background="#BEC7D1" CornerRadius="{StaticResource ReaderBadgeCornerRadius}"
+                                        VerticalAlignment="Top">
+                                    <TextBlock Text="2" Foreground="White" FontFamily="{StaticResource PretendardFontFamily}"
+                                               FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="리더기2 - COM 포트" Style="{StaticResource ReaderLabelTextStyle}"/>
+                                    <ComboBox x:Name="Reader2PortCombo" Width="{StaticResource ReaderComboWidth}" Margin="0,8,0,0"
+                                              SelectedIndex="0">
+                                        <ComboBoxItem Content="미사용"/>
+                                        <ComboBoxItem Content="COM 01"/>
+                                    </ComboBox>
+                                </StackPanel>
+
+                                <!-- 리더기2는 "포트 열기" 토글 자체가 UI에 없음(PRD 4.4, 원본 사양) -->
+                                <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="멀티패드 여부" Style="{StaticResource ReaderLabelTextStyle}" VerticalAlignment="Center"/>
+                                    <ToggleButton x:Name="Reader2MultipadToggle" Style="{StaticResource ModernToggleSwitchStyle}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                                    <Button Style="{StaticResource InfoButtonStyle}" Margin="{StaticResource ReaderToggleInfoGapMargin}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <StackPanel x:Name="Reader2ActionButtonsPanel" Orientation="Horizontal" Margin="42,10,0,0">
+                                <Button Content="초기화" Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"/>
+                                <Button Content="상태체크" Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
+                                <Button Content="키다운로드" Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
+                                <Button Content="무결성체크" Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
+                                <Button Content="업데이트" Style="{StaticResource ReaderButtonStyle}"
+                                        Width="{StaticResource ReaderActionButtonWidth}" Height="{StaticResource ReaderActionButtonHeight}"
+                                        Margin="{StaticResource ReaderActionButtonGapMargin}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- ===================== 무결성 체크 정보 ===================== -->
+            <StackPanel Orientation="Horizontal" Margin="0,14,0,10">
+                <Border Width="{StaticResource ReaderSectionBarWidth}" Height="{StaticResource ReaderSectionBarHeight}"
+                        Background="{StaticResource Blue500Brush}" CornerRadius="2" VerticalAlignment="Center"/>
+                <TextBlock Text="무결성 체크 정보" Style="{StaticResource ReaderSectionTitleTextStyle}" Margin="8,0,0,0"/>
+            </StackPanel>
+
+            <Border Background="{StaticResource TblHdrBgBrush}"
+                    CornerRadius="{StaticResource ReaderSubCardCornerRadius}"
+                    Padding="{StaticResource ReaderSubCardPadding}">
+                <StackPanel>
+                    <!-- 조회기간 콤보 + 조회 버튼 -->
+                    <StackPanel Orientation="Horizontal">
+                        <ComboBox Width="{StaticResource ReaderQueryComboWidth}" SelectedIndex="0">
+                            <ComboBoxItem Content="오늘"/>
+                            <ComboBoxItem Content="7일"/>
+                            <ComboBoxItem Content="30일"/>
+                            <ComboBoxItem Content="100일"/>
+                        </ComboBox>
+                        <!-- 2026-08-14 변경: "확인" 전용 진한 파랑(PrimaryButtonStyle) 대신 액션 버튼과 동일한 연한 파랑 스타일(ReaderButtonStyle) 사용(스크린샷 실측) -->
+                        <Button Content="조회" Style="{StaticResource ReaderButtonStyle}"
+                                Width="{StaticResource ReaderQueryButtonWidth}" Height="{StaticResource ReaderQueryButtonHeight}"
+                                Margin="10,0,0,0"/>
+                    </StackPanel>
+
+                    <!-- 리스트: 헤더 + 본문(고정 높이 166, Phase 4는 항상 빈 상태) -->
+                    <Border Background="{StaticResource CardBgBrush}"
+                            BorderBrush="{StaticResource TblBorderBrush}" BorderThickness="1"
+                            CornerRadius="8" Margin="0,12,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="{StaticResource ReaderListHeaderHeightGridLength}"/>
+                                <RowDefinition Height="{StaticResource ReaderListHeightGridLength}"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- 헤더: PRD 4.6 실측 컬럼 문구/폭 비율 -->
+                            <Border Grid.Row="0" Background="{StaticResource TblHdrBgBrush}"
+                                    BorderBrush="{StaticResource TblHdrLineBrush}" BorderThickness="0,0,0,1"
+                                    CornerRadius="8,8,0,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="20*"/>
+                                        <ColumnDefinition Width="11*"/>
+                                        <ColumnDefinition Width="8*"/>
+                                        <ColumnDefinition Width="18*"/>
+                                        <ColumnDefinition Width="23*"/>
+                                        <ColumnDefinition Width="20*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="체크일시" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1" Text="포트" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="결과" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="3" Text="모듈ID" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="4" Text="리더기식별번호" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="5" Text="POS식별번호" Style="{StaticResource ReaderSmallTextStyle}" Foreground="{StaticResource TblHdrTextBrush}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+
+                            <!--
+                                본문: Phase 4는 조회 로직이 없어(Phase 5) 항상 빈 상태(PRD 4.6)로
+                                고정 표시. ScrollViewer로 감싼 이유는 Phase 5에서 실제 행이 채워질 때
+                                가시 3행 고정 + 스크롤 요구사항(PRD 4.3/4.6)을 그대로 살리기 위함.
+                            -->
+                            <Border Grid.Row="1" CornerRadius="0,0,8,8">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <Grid>
+                                        <TextBlock Text="조회된 무결성 체크 정보가 없습니다."
+                                                   Style="{StaticResource ReaderSmallTextStyle}"
+                                                   Foreground="{StaticResource TblEmptyTextBrush}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </ScrollViewer>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- ===================== 확인 / 취소 ===================== -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,14,0,0">
+                <Button x:Name="ConfirmButton" Content="확인" Style="{StaticResource PrimaryButtonStyle}"
+                        Width="{StaticResource ReaderBottomBtnW}" Height="{StaticResource ReaderBottomBtnH}"
+                        Click="ConfirmButton_Click"/>
+                <Button x:Name="CancelButton" Content="취소" Style="{StaticResource ReaderSecondaryButtonStyle}"
+                        Width="{StaticResource ReaderBottomBtnW}" Height="{StaticResource ReaderBottomBtnH}"
+                        Margin="{StaticResource ReaderBottomBtnGapMargin}"
+                        Click="CancelButton_Click"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

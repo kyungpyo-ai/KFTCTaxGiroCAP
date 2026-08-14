@@ -140,18 +140,27 @@
                             HorizontalAlignment="Left">
                         <Viewbox Width="28" Height="28">
                             <Canvas Width="28" Height="28">
+                                <!--
+                                    2026-08-14 재설계(사용자 피드백: "아이콘이 부자연스럽다, 더 이쁘고
+                                    자연스럽게"): 기존 지오메트리는 화면/키패드 6개가 각각 다른
+                                    간격·크기로 비대칭이고, 하단의 얇은 슬롯 선(rect 8,23,11,0.9)이
+                                    독립된 잔여물처럼 붕 떠 보였다. 본체(EvenOdd cutout) 하나에 화면/
+                                    키패드 6개/하단 슬롯을 전부 "구멍"으로 통일해 모든 요소가 같은
+                                    시각적 두께로 보이도록 하고, 좌우 대칭·행간/열간 간격을 동일하게
+                                    맞춰 재설계했다(카드 아이콘, 리더기 설정 헤더 아이콘 공용).
+                                -->
                                 <Path Style="{StaticResource HomeCardIconGlyphStyle}">
                                     <Path.Data>
                                         <GeometryGroup FillRule="EvenOdd">
                                             <RectangleGeometry Rect="4.5,2.25,19,23.5" RadiusX="3" RadiusY="3"/>
-                                            <RectangleGeometry Rect="7.5,5.25,13,8" RadiusX="1" RadiusY="1"/>
-                                            <RectangleGeometry Rect="7,15,3.2,2.8" RadiusX="0.7" RadiusY="0.7"/>
-                                            <RectangleGeometry Rect="11.4,15,3.2,2.8" RadiusX="0.7" RadiusY="0.7"/>
-                                            <RectangleGeometry Rect="15.8,15,3.2,2.8" RadiusX="0.7" RadiusY="0.7"/>
-                                            <RectangleGeometry Rect="7,18.6,3.2,2.8" RadiusX="0.7" RadiusY="0.7"/>
-                                            <RectangleGeometry Rect="11.4,18.6,3.2,2.8" RadiusX="0.7" RadiusY="0.7"/>
-                                            <RectangleGeometry Rect="15.8,18.6,3.2,2.8" RadiusX="0.7" RadiusY="0.7"/>
-                                            <RectangleGeometry Rect="8,23,11,0.9"/>
+                                            <RectangleGeometry Rect="7.5,5.25,13,8" RadiusX="1.5" RadiusY="1.5"/>
+                                            <RectangleGeometry Rect="7.5,15,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                            <RectangleGeometry Rect="12.3,15,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                            <RectangleGeometry Rect="17.1,15,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                            <RectangleGeometry Rect="7.5,18.8,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                            <RectangleGeometry Rect="12.3,18.8,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                            <RectangleGeometry Rect="17.1,18.8,3.4,2.6" RadiusX="0.7" RadiusY="0.7"/>
+                                            <RectangleGeometry Rect="8.5,23,11,1.2" RadiusX="0.6" RadiusY="0.6"/>
                                         </GeometryGroup>
                                     </Path.Data>
                                 </Path>

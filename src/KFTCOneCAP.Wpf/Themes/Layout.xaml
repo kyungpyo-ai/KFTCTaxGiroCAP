@@ -77,4 +77,94 @@
     <!-- 카드 내부 콘텐츠 패딩: 좌상단은 HomeCardIconInset(28)과 동일한 값을 사용 -->
     <Thickness x:Key="HomeCardContentMargin">28,28,20,24</Thickness>
 
+    <!--
+        ===================== 리더기 설정 화면 (Phase 4, docs/ROADMAP.md / PRD 4장) =====================
+        원본은 "최초 1회 레이아웃 계산 후 창 크기 확정"(PRD 4.2) 방식이라, 홈 화면처럼 창
+        전체 Width/Height를 리터럴로 고정하지 않고 Window.SizeToContent="WidthAndHeight" +
+        아래 컴포넌트별 고정 치수(PRD 4.3~4.6 수치)로 자연스럽게 크기가 결정되도록
+        Views/ReaderSetupWindow.xaml에서 구성한다(치수 리터럴 금지 규칙은 각 컴포넌트 치수에
+        동일하게 적용).
+    -->
+
+    <!--
+        2026-08-14 수정(사용자 피드백: "창이 세로로 너무 길고 글자가 큼"): 아래 리더기 설정
+        전용 치수들을 docs/screenshots/reader_setup.png 픽셀 실측(전체 캡처 776x883 중 다이얼로그
+        자체가 약 762x875, 세로/가로 비율 ≈1.15) 대비 직전 구현(772x1005, 비율 ≈1.30)이 약 13%
+        더 세로로 길었던 것을 보정하기 위해 각 섹션의 상하 패딩/마진 위주로 축소함(가로 폭은
+        원본과 이미 거의 일치했으므로 유지). 아래 각 항목의 새 값은 실행 캡처 재대조로 확정.
+    -->
+
+    <!-- 메인 카드(다이얼로그 전체를 감싸는 흰색 라운드 카드) -->
+    <CornerRadius x:Key="ReaderMainCardCornerRadius">16</CornerRadius>
+    <Thickness x:Key="ReaderMainCardPadding">28,20,28,20</Thickness>
+
+    <!-- 헤더 아이콘(홈 화면 리더기 카드 아이콘과 동일 글리프를 공유, 배경만 진한 블루로 고정) -->
+    <sys:Double x:Key="ReaderHeaderIconBoxSize">46</sys:Double>
+    <CornerRadius x:Key="ReaderHeaderIconCornerRadius">12</CornerRadius>
+
+    <!-- 섹션 제목 좌측 블루 바("▍포트 설정" 등) -->
+    <sys:Double x:Key="ReaderSectionBarWidth">4</sys:Double>
+    <sys:Double x:Key="ReaderSectionBarHeight">14</sys:Double>
+
+    <!-- 서브 카드(포트 설정 / 무결성 체크 정보), 배경 DialogBg 계열(TblHdrBgBrush #FAFBFD) -->
+    <CornerRadius x:Key="ReaderSubCardCornerRadius">16</CornerRadius>
+    <Thickness x:Key="ReaderSubCardPadding">18,12,18,12</Thickness>
+
+    <!-- 리더기 카드(1/2 공통) — PRD 4.3 기준값(128/12)에서 세로 축소 보정 적용 -->
+    <sys:Double x:Key="ReaderCardMinHeight">112</sys:Double>
+    <sys:Double x:Key="ReaderCardGap">8</sys:Double>
+    <!-- Margin 속성에 직접 넣기 위한 Thickness 버전(ReaderCardGap과 동일 값 유지) -->
+    <Thickness x:Key="ReaderCardGapMargin">0,8,0,0</Thickness>
+    <Thickness x:Key="ReaderCardPadding">14,10,14,10</Thickness>
+
+    <!-- 좌측 번호 뱃지 — PRD 4.4 기준값(34, radius 6)에서 축소 보정 -->
+    <sys:Double x:Key="ReaderBadgeSize">30</sys:Double>
+    <CornerRadius x:Key="ReaderBadgeCornerRadius">5</CornerRadius>
+
+    <!-- COM 포트 콤보 — PRD 4.3/4.4: 178/152(일반/컴팩트), 폭은 원본과 이미 일치해 유지 -->
+    <sys:Double x:Key="ReaderComboWidth">178</sys:Double>
+
+    <!-- 액션 버튼(초기화/상태체크/키다운로드/무결성체크/업데이트) — 폭은 PRD 100 유지, 높이만 축소 -->
+    <sys:Double x:Key="ReaderActionButtonWidth">100</sys:Double>
+    <sys:Double x:Key="ReaderActionButtonHeight">32</sys:Double>
+    <sys:Double x:Key="ReaderActionButtonGap">8</sys:Double>
+
+    <!-- info 버튼(CInfoIconButton 대응) — PRD 2.3: 18~22px 원형, 축소 보정 -->
+    <sys:Double x:Key="ReaderInfoButtonSize">18</sys:Double>
+
+    <!--
+        "포트 열기" 토글 자리 — Phase 4에서는 토글 자체를 만들지 않고(작업 지시 명시,
+        Phase 6에서 배선) 리더기2 카드와 좌우 위치를 맞추기 위한 빈 공간(Visibility=Hidden)만
+        확보한다. 폭은 스크린샷 실측(라벨 "포트 열기" + 토글 44 + info 20 + 내부 간격)에 근사한 값.
+    -->
+    <sys:Double x:Key="ReaderPortOpenPlaceholderWidth">148</sys:Double>
+
+    <!--
+        토글-info 버튼 사이 간격 / 토글 그룹 사이 간격 / 액션버튼 사이 간격 / 하단버튼 사이 간격.
+        Margin 속성에는 {StaticResource}와 리터럴 콤마를 함께 쓸 수 없어(마크업 확장은 속성값
+        전체를 단일 확장으로 파싱, Layout.xaml 상단 HomeHeaderMargin 주석과 동일 사유) Thickness
+        완제품 리소스로 별도 제공한다.
+    -->
+    <Thickness x:Key="ReaderToggleInfoGapMargin">6,0,0,0</Thickness>
+    <Thickness x:Key="ReaderToggleGroupGapMargin">24,0,0,0</Thickness>
+    <Thickness x:Key="ReaderActionButtonGapMargin">8,0,0,0</Thickness>
+    <Thickness x:Key="ReaderBottomBtnGapMargin">16,0,0,0</Thickness>
+
+    <!-- 무결성 체크 정보: 조회기간 콤보 / 조회 버튼 -->
+    <sys:Double x:Key="ReaderQueryComboWidth">110</sys:Double>
+    <sys:Double x:Key="ReaderQueryButtonWidth">72</sys:Double>
+    <sys:Double x:Key="ReaderQueryButtonHeight">32</sys:Double>
+
+    <!-- 무결성 체크 리스트 — PRD 4.3/4.6 기준값(166/36)에서 세로 축소 보정, 가시 3행 고정 유지 -->
+    <sys:Double x:Key="ReaderListHeight">142</sys:Double>
+    <sys:Double x:Key="ReaderListHeaderHeight">32</sys:Double>
+    <!-- GridLength 버전(RowDefinition.Height 바인딩용, HomeCardVisualHGridLength와 동일 사유) -->
+    <GridLength x:Key="ReaderListHeightGridLength">142</GridLength>
+    <GridLength x:Key="ReaderListHeaderHeightGridLength">32</GridLength>
+
+    <!-- 하단 확인/취소 버튼 — PRD 4.3 기준값(110x36)에서 높이 축소 보정, 간격은 기존 패턴(16) 유지 -->
+    <sys:Double x:Key="ReaderBottomBtnW">110</sys:Double>
+    <sys:Double x:Key="ReaderBottomBtnH">32</sys:Double>
+    <sys:Double x:Key="ReaderBottomBtnGap">16</sys:Double>
+
 </ResourceDictionary>

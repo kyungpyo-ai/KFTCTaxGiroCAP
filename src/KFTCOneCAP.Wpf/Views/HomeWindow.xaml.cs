@@ -63,11 +63,11 @@ public partial class HomeWindow : Window
     // ===================== 카드 클릭 (PRD 3.7) =====================
 
     /// <summary>
-    /// 리더기 설정 카드. 실제 리더기 설정 화면은 Phase 4(ROADMAP.md)에서 정적 레이아웃부터
-    /// 새로 만든다 — 지금은 존재하지 않으므로 임시 플레이스홀더 안내창으로 대체한다.
-    /// TODO(Phase 4): 여기를 실제 ReaderSetupWindow.ShowDialog(this) 호출로 교체할 것.
+    /// 리더기 설정 카드. Phase 4(ROADMAP.md)부터 실제 ReaderSetupWindow를 모달로 연다
+    /// (PRD 3.7/4.2). 확인/취소 버튼의 실제 저장/검증 로직은 Phase 5~6에서 배선 예정 —
+    /// 지금은 창을 닫는 동작만 있다.
     /// </summary>
-    private void ReaderSetupCardButton_Click(object sender, RoutedEventArgs e) => OpenReaderSetupPlaceholder();
+    private void ReaderSetupCardButton_Click(object sender, RoutedEventArgs e) => OpenReaderSetup();
 
     /// <summary>
     /// 가맹점 설정/결제/전표 설정 카드는 본 프로젝트 범위 밖 화면(PRD 1.3 비범위, PRD 6장 미확정
@@ -81,14 +81,10 @@ public partial class HomeWindow : Window
 
     private void ReceiptSetupCardButton_Click(object sender, RoutedEventArgs e) => ShowNotImplementedCard("전표 설정");
 
-    private void OpenReaderSetupPlaceholder()
+    private void OpenReaderSetup()
     {
-        MessageBox.Show(
-            this,
-            "리더기 설정 화면은 Phase 4(정적 레이아웃)부터 순차 구현될 예정입니다.\n(docs/ROADMAP.md 참고)",
-            "리더기 설정",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
+        var dialog = new ReaderSetupWindow { Owner = this };
+        dialog.ShowDialog();
     }
 
     private void ShowNotImplementedCard(string name)
@@ -185,7 +181,7 @@ public partial class HomeWindow : Window
         menu.Items.Add("리더기 설정", null, (_, _) =>
         {
             RestoreFromTray();
-            OpenReaderSetupPlaceholder();
+            OpenReaderSetup();
         });
         menu.Items.Add("가맹점 설정", null, (_, _) =>
         {

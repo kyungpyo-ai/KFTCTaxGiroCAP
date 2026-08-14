@@ -19,7 +19,7 @@
 | 1 | 디자인 시스템(색상/폰트/공용 컨트롤 스타일) | ✅ 완료 |
 | 2 | 홈 화면 — 정적 레이아웃 | ✅ 완료 |
 | 3 | 홈 화면 — 인터랙션 & 트레이 | ✅ 완료 |
-| 4 | 리더기 설정 — 정적 레이아웃 | ⬜ 대기 |
+| 4 | 리더기 설정 — 정적 레이아웃 | ✅ 완료 |
 | 5 | 리더기 설정 — 비즈니스 로직(스텁) | ⬜ 대기 |
 | 6 | 리더기 설정 — 포트열기 토글 & 레지스트리 | ⬜ 대기 |
 | 7 | 리더기 설정 — 실제 COM 포트 연동 | ⬜ 대기 |
@@ -133,17 +133,64 @@
 
 ---
 
+### 알려진 이슈 (보류, 2026-08-14): 카드 클릭 후 그 카드만 hover 리프트 재발동 안 됨
+
+**증상**: 카드 4개 중 하나에 처음 마우스를 올리면 리프트(-5px)+글로우가 정상 발동한다. 그 카드를 **한 번이라도 클릭**하면(모달 `MessageBox` 오픈→닫힘), **그 카드에서만** 이후 마우스를 올려도 리프트가 다시 발동하지 않는다. 색상/눌림 등 다른 반응, 그리고 클릭하지 않은 다른 카드는 계속 정상.
+
+**시도했다가 실패한 접근들** (전부 되돌림, `Themes/Buttons.xaml`은 Phase 3 커밋 상태 그대로):
+1. `Window.Activated`에서 `Mouse.Synchronize()` 호출(모달로 인한 히트테스트 stuck 가설) — 효과 없음.
+2. `IsMouseOver`/`IsPressed` 두 Trigger가 진입할 때 서로의 `BeginStoryboard`를 `<StopStoryboard>`로 정지(애니메이션 클록 충돌 가설) — 클록이 로컬 기본값으로 순간 스냅되는 새 결함만 만들고 되돌림.
+3. 호버 애니메이션을 `IsMouseOver` Trigger에서 빼서 `MouseEnter`/`MouseLeave`(진단 로그로 100% 신뢰성 확인됨) 코드비하인드에서 `Button.BeginStoryboard(...)`로 직접 구동 — `Storyboard.TargetName`이 Button이 아니라 `ControlTemplate` 내부 네임스코프에 속해 `ResolveTargetName`에서 `InvalidOperationException` 크래시. `Storyboard.Begin(button, button.Template, true)`로 수정했으나 사용자 재현 결과 여전히 이상함.
+4. `Storyboard`를 완전히 걷어내고 `Template.FindName(...)`으로 찾은 `TranslateTransform`/`ScaleTransform`/`DropShadowEffect`에 `DependencyObject.BeginAnimation(...)`을 직접 호출(가장 저수준 API, 클록 트리/타겟이름 해석을 전혀 거치지 않음) — 이것도 사용자 재현 결과 여전히 이상함.
+
+**진단으로 확정된 사실** (임시 로그로 실측, 이후 제거): `IsMouseOver` 프로퍼티와 raw `MouseEnter`/`MouseLeave` 이벤트는 모달 오픈/닫기 이후에도 매번 정확하게 True/False를 오간다 — 즉 프로퍼티/이벤트 레벨은 문제가 없다.
+
+**현재 평가**: 애니메이션을 "발동시키는" 트리거/이벤트 경로는 여러 방식으로 교체해봐도 전부 실패했다는 것은, 문제가 발동 코드 자체가 아니라 **모달(`MessageBox`)이 닫힌 뒤 그 특정 카드의 렌더링/컴포지션(예: `DropShadowEffect`나 `RenderTransform`의 화면 갱신)이 깨지는 쪽**일 가능성이 높다는 뜻이다. 이 가설은 아직 검증 전이며, 다음에 다시 붙잡을 때는 애니메이션 발동 코드보다 렌더링/컴포지션 쪽(`InvalidateVisual`, `RenderOptions`, `CacheMode` 등)을 먼저 의심할 것.
+
+**현재 상태**: 사소한 시각적 흠으로 남겨두고 보류. 기능(클릭/색상/눌림)에는 영향 없음. Phase 4로 진행.
+
+---
+
 ## Phase 4 — 리더기 설정: 정적 레이아웃
 
 **목표**: `docs/screenshots/reader_setup.png`과 일치하는 정적 화면.
 
-- [ ] 창 크롬: 고정 크기, 타이틀 "리더기 설정"
-- [ ] 헤더(아이콘+제목+부제) — 공용 `ModernUIHeader` 대응 컴포넌트로 홈 화면과 스타일 공유 검토
-- [ ] "포트 설정" 섹션 카드: 리더기1/2 카드 2개 정적 배치(콤보, 버튼 5개, 토글, info 버튼) — PRD 4.4
-- [ ] "무결성 체크 정보" 섹션: 조회기간 콤보 + 조회 버튼 + 리스트(컬럼 헤더는 PRD 4.6 실측값 사용)
-- [ ] 하단 확인/취소 버튼
+- [x] 창 크롬: 고정 크기, 타이틀 "리더기 설정"
+- [x] 헤더(아이콘+제목+부제) — 공용 `ModernUIHeader` 대응 컴포넌트로 홈 화면과 스타일 공유 검토
+- [x] "포트 설정" 섹션 카드: 리더기1/2 카드 2개 정적 배치(콤보, 버튼 5개, info 버튼) — PRD 4.4. **포트 열기 토글은 이번 Phase에서 만들지 않음**(Phase 6에서 비즈니스 로직과 함께 구현 — 사용자 명시적 지시).
+- [x] "무결성 체크 정보" 섹션: 조회기간 콤보 + 조회 버튼 + 리스트(컬럼 헤더는 PRD 4.6 실측값 사용)
+- [x] 하단 확인/취소 버튼
 
-**완료 기준**: 실행 화면 캡처를 `docs/screenshots/reader_setup.png`과 대조.
+**완료 기준**: 실행 화면 캡처를 `docs/screenshots/reader_setup.png`과 대조 — **통과 (2026-08-14)**. 홈 화면의 "리더기 설정" 카드 클릭 → 새 `ReaderSetupWindow`가 `ShowDialog(owner=this)`로 열리는 것을 실측 확인. 헤더(아이콘/제목/부제), "포트 설정"/"무결성 체크 정보" 섹션 제목(블루 바), 리더기1/2 카드(번호 뱃지, 라벨, 콤보, 액션 버튼 5개, 멀티패드 토글+info), 무결성 리스트(조회기간 콤보+조회 버튼, 컬럼 헤더 6개, 빈 상태 문구), 하단 확인/취소 버튼까지 스크린샷 크롭 대조 결과 레이아웃·문구·색상이 원본과 육안상 사실상 동일. 확인/취소 버튼 클릭 시 예외 없이 다이얼로그가 닫히고 홈 화면으로 정상 복귀하는 것도 확인(재오픈까지 2회 반복 테스트).
+
+**구현 요약**:
+- `Views/ReaderSetupWindow.xaml`/`.xaml.cs` 신규 생성. 창 크기는 PRD 4.2 "최초 1회 레이아웃 계산 후 창 크기 확정" 동작을, 홈 화면처럼 전체 Width/Height를 리터럴로 고정하는 대신 `SizeToContent="WidthAndHeight"` + `ResizeMode="NoResize"` + 내부 컴포넌트별 고정 치수(콤보 178, 액션버튼 100 등)로 재현 — 컴포넌트 치수가 자연스럽게 전체 창 크기를 한 번 계산해서 고정시키는 방식이라 원본 동작 취지에 더 부합한다고 판단.
+- 흰색 타이틀바 적용 로직(`DwmSetWindowAttribute`, OS 버전 체크)은 `HomeWindow.xaml.cs`와 동일한 코드를 그대로 복제 — 서브 창이 이 화면 하나뿐이라 공용 헬퍼로 추출하는 것은 과도한 추상화로 판단해 보류(주석에 사유 명시, 필요 시 Phase 8 정리 단계에서 재검토 가능).
+- 헤더 아이콘: 홈 화면 "리더기 설정" 카드의 글리프(`GeometryGroup`, 카드리더 단말기 형태)를 완전히 동일하게 재사용하고 배경만 진한 블루(`Blue500Brush`) 고정 + 글리프 흰색으로 바꿔 두 화면 간 스타일을 공유했다(ROADMAP 체크리스트의 "공용 ModernUIHeader 대응 컴포넌트로 스타일 공유 검토" 항목 반영). 별도 `UserControl`로 분리하지는 않음(1곳에서만 사용 — 과도한 추상화 방지 원칙).
+- `Themes/Buttons.xaml`에 `InfoButtonStyle` 신규 추가(PRD 2.3 `CInfoIconButton` 대응). PRD 원문은 "i" 아이콘이라고 되어 있으나 `docs/screenshots/reader_setup.png` 실측 결과 물음표(?) 글리프였음 — 스크린샷을 우선하는 프로젝트 원칙(CLAUDE.md)에 따라 "?" 로 구현.
+- `Themes/Layout.xaml`에 리더기 설정 화면 전용 리소스 키 대거 추가(메인/서브 카드 radius·padding, 헤더 아이콘 56, 카드 높이 128/간격 12, 뱃지 34, 콤보 178, 액션버튼 100×36/간격 8, info버튼 20, 리스트 높이 166 등 — 전부 PRD 4.3~4.6 수치). `RowDefinition.Height`/`Margin`에 바인딩할 값은 기존 `HomeCardVisualHGridLength`/`HomeHeaderMargin` 패턴과 동일하게 `GridLength`/`Thickness` 완제품 리소스를 별도로 마련(WPF는 속성 값 하나에 `{StaticResource}`와 리터럴 텍스트를 섞어 쓸 수 없어 `"{StaticResource X},0,0,0"` 같은 표현이 `XamlParseException`을 던짐 — 개발 중 직접 겪고 수정).
+- `Views/HomeWindow.xaml.cs`: `ReaderSetupCardButton_Click`/트레이 메뉴의 "리더기 설정" 항목이 기존 플레이스홀더 `MessageBox` 대신 `new ReaderSetupWindow { Owner = this }.ShowDialog()`를 호출하도록 교체.
+- 확인/취소 버튼은 지시대로 실제 검증/저장 로직 없이 `DialogResult` 설정 후 `Close()`만 수행(Phase 5~6에서 TRANSINFO_AOP 검증, 레지스트리 저장, dirty-check 확인창 배선 예정 — 코드에 TODO 주석 남김).
+
+**"포트 열기" 토글 처리 (임의 판단)**: 작업 지시에서 허용한 두 옵션(빈 공간 남기기 / 자리 자체를 아예 안 넣기) 중 **빈 공간을 남기는 쪽**을 선택했다 — 리더기1 카드의 "포트 열기" 자리에 라벨/토글/info로 구성된 `StackPanel`을 `Visibility="Hidden"`으로 렌더링해 폭(`ReaderPortOpenPlaceholderWidth=148`, 스크린샷 실측 근사값)만 차지하게 했다. 이렇게 하면 리더기1/2 카드의 "멀티패드 여부" 토글이 좌우로 동일한 x 위치에 정렬되어(`docs/screenshots/reader_setup.png` 실측과 동일한 정렬) 시각적으로 원본에 더 가깝다고 판단했다. "멀티패드 여부" 토글 자체는 PRD 4.9(비동기 처리 없는 단순 UI 토글)를 근거로 이번 Phase에 시각 요소로 포함했다(클릭 가능하지만 상태 변경이 어디에도 반영되지 않는 정적 배치 — Phase 5~6에서 실제 저장 로직 배선).
+
+**기타 임의 판단/근사 처리 항목**:
+- 콤보박스 항목은 PRD 4.13(실제 COM 포트 열거)이 Phase 7 범위라 이번 Phase에서는 정적 더미 항목("COM 01"/"미사용")만 하드코딩.
+- 리더기1/2 카드 번호 뱃지 색상(활성 Blue500 / 비활성 회색 `#BEC7D1`)은 PRD 4.11(AOP 제약)의 최종 상태가 아니라 "AOP 미적용 기본값" 스크린샷 실측을 그대로 반영 — INTERLOCK 값에 따른 동적 전환은 Phase 5 범위.
+- 무결성 체크 리스트는 항상 빈 상태로 고정 표시(조회 버튼 클릭 시 동작 없음 — Phase 5 범위). `ScrollViewer`로 감싸 Phase 5에서 실제 행이 채워질 때 가시 3행 고정 요구사항(PRD 4.3/4.6)을 그대로 살릴 수 있게 미리 구조를 잡아둠.
+
+---
+
+### Phase 4 보정 (2026-08-14, 사용자 실행 화면 피드백 기반)
+
+사용자가 Phase 4 산출물을 직접 실행해 `docs/screenshots/reader_setup.png`와 대조한 결과 4가지 수정 요청이 있었고, 전부 반영 완료:
+
+1. **헤더 아이콘 교체 + 창 세로 길이/폰트 축소**: 기존에는 홈 화면 "리더기 설정" 카드의 상세 벡터(본체+화면 컷아웃+키패드+슬롯 라인)를 그대로 재사용했으나, 스크린샷 확대 실측 결과 실제 헤더 아이콘은 3열×2행 둥근 사각형 6개로 구성된 단순 그리드 형태였다 — `Views/ReaderSetupWindow.xaml`의 `GeometryGroup`을 그리드 6개로 교체(더 이상 홈 화면과 아이콘을 공유하지 않음). 또한 직전 구현이 스크린샷 대비 세로로 약 13% 더 길었던 것(전 772×1005, 참고 캡처 다이얼로그 실측 약 762×875, 세로/가로 비율 1.30 vs 1.15)을 `Themes/Layout.xaml`(메인/서브 카드 패딩, 헤더 아이콘 46(기존 56), 카드 높이 112(기존 128), 뱃지 30(기존 34), 액션버튼/조회/하단버튼 높이 32(기존 36), 리스트 높이 142(기존 166) 등)과 `Themes/Typography.xaml`/`Themes/ComboBox.xaml`의 리더기 화면 전용 폰트 크기(헤더 타이틀 24→19, 서브타이틀 17.33→13.33, 섹션 제목 20→15.33, 라벨/본문/콤보 18.67→14.67, 작은 텍스트 16→12.67) 축소로 보정. 실행 캡처 결과 744×824(비율 1.108)로 참고 캡처(비율 1.148)와 육안상 사실상 동일한 비율까지 근접.
+2. **액션 버튼(초기화/상태체크/키다운로드/무결성체크/업데이트)/"조회" 버튼 색상 재작업**: `Themes/Buttons.xaml`의 `ReaderButtonStyle`을 흰 배경+회색 보더 고정(hover 시에만 파랑)에서 IsEnabled 기준 2단계 상시 톤(활성: 연한 파랑 `#DCEBFF` 배경+Blue500 텍스트 / 비활성: 연한 회색 `#F1F3F5` 배경+회색 `#9AA5B1` 텍스트, 테두리 없음, `IsEnabled=False`에서도 반투명 처리하지 않음)으로 전면 재작성. "조회" 버튼도 `PrimaryButtonStyle`(진한 파랑 solid) 대신 동일한 `ReaderButtonStyle`로 교체. 기존에 이 스타일을 공유하던 "취소" 버튼은 원본이 흰 배경+회색 보더 중립 톤이라 별도 `ReaderSecondaryButtonStyle`을 신설해 분리.
+3. **COM 콤보 "미사용" ↔ 카드 버튼/토글 활성화 연동**: `Views/ReaderSetupWindow.xaml.cs`에 리더기1/2 각각의 콤보 `SelectionChanged`(코드비하인드, `Window.Loaded` 시점에 이벤트 구독 — XAML에서 바로 구독하면 `SelectedIndex="0"` 초기화 중 `x:Name` 필드가 아직 연결되지 않아 `NullReferenceException` 위험이 있어 회피) 핸들러를 추가해, 콤보가 "미사용"이면 해당 카드의 액션 버튼 5개(`StackPanel`)와 멀티패드 토글의 `IsEnabled`를 false로, 아니면 true로 설정. `Loaded`에서 최초 1회도 동일하게 반영. 레지스트리/AOP 연동은 이번 수정 범위가 아님(Phase 5~6). "포트 열기" 토글은 아직 만들지 않았으므로(Hidden 자리만 존재) 연동 대상에서 제외.
+4. **콤보박스 눌림(scale) 효과 제거**: `Themes/ComboBox.xaml`의 `SkinnedComboBoxStyle`에서 `PART_Toggle`의 `IsPressed=True`를 감지해 `PressScale`을 0.97로 축소하던 `DataTrigger`를 제거(버튼과 달리 콤보박스는 누른다고 눌리는 시각 효과가 있으면 안 된다는 피드백). 이 스타일은 앱 전역 공용 리소스라 다른 화면의 콤보박스에도 동일하게 반영됨(의도된 변경). 겸사겸사 `SkinnedComboBoxStyle`의 전역 `FontSize`도 18.67→14.67로 축소(리더기 설정 화면 외 사용처가 없음을 확인 후 적용).
+
+**검증**: `dotnet build` 성공(경고 0/오류 0). 홈 화면 → 리더기 설정 카드 클릭 → 캡처 결과를 참고 스크린샷과 크롭 대조(헤더 아이콘 그리드 형태, 창 세로 비율, 액션 버튼 활성/비활성 색상, "취소" 버튼 중립 톤)하여 일치 확인. 리더기1 콤보를 "COM 01"→"미사용"으로 바꾸면 리더기1 카드의 버튼 5개+멀티패드 토글이 즉시 비활성화(연한 회색 톤)되고, 리더기2 콤보를 "미사용"→"COM 01"로 바꾸면 반대로 활성화(연한 파랑 톤)되는 것을 실제 클릭으로 재현 확인. 콤보 드롭다운을 열고 닫는 과정에서 콤보 자체의 크기/스케일이 변하지 않는 것을 스크린샷으로 확인(이전의 눌림 효과 제거 확인).
 
 ---
 

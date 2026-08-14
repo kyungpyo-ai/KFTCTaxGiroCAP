@@ -86,7 +86,7 @@
 
     <Style x:Key="SkinnedComboBoxStyle" TargetType="ComboBox">
         <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
-        <Setter Property="FontSize" Value="18.67"/>
+        <Setter Property="FontSize" Value="14.67"/>
         <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
         <Setter Property="Background" Value="White"/>
         <Setter Property="BorderBrush" Value="{StaticResource ComboBoxBorderBrush}"/>
@@ -171,25 +171,13 @@
                             <Setter TargetName="Bd" Property="Opacity" Value="0.5"/>
                         </Trigger>
 
-                        <!-- 클릭(눌림) 피드백: 토글 버튼이 눌려있는 동안 살짝 축소 -->
-                        <DataTrigger Binding="{Binding IsPressed, ElementName=PART_Toggle}" Value="True">
-                            <DataTrigger.EnterActions>
-                                <BeginStoryboard>
-                                    <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleX" To="0.97" Duration="0:0:0.06"/>
-                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleY" To="0.97" Duration="0:0:0.06"/>
-                                    </Storyboard>
-                                </BeginStoryboard>
-                            </DataTrigger.EnterActions>
-                            <DataTrigger.ExitActions>
-                                <BeginStoryboard>
-                                    <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.1"/>
-                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.1"/>
-                                    </Storyboard>
-                                </BeginStoryboard>
-                            </DataTrigger.ExitActions>
-                        </DataTrigger>
+                        <!--
+                            2026-08-14 제거(사용자 피드백): 이전에는 PART_Toggle의 IsPressed=True일 때
+                            PressScale을 0.97로 축소하는 "클릭(눌림) 피드백"이 여기 있었다. 콤보박스는
+                            버튼과 달리 누른다고 눌리는(scale) 시각 효과가 있으면 안 된다는 피드백에
+                            따라 제거함 — Grid의 PressScale ScaleTransform 자체는 다른 트리거가 쓰지
+                            않으므로 템플릿에는 남겨두되(향후 참조 편의) 더 이상 애니메이션되지 않는다.
+                        -->
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

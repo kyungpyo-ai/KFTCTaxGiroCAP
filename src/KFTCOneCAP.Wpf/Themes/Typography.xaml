@@ -60,51 +60,57 @@
     </Style>
 
     <!-- ===================== 리더기 설정 화면 ===================== -->
+    <!--
+        2026-08-14 수정(사용자 피드백: "글자가 커 보인다"): docs/screenshots/reader_setup.png
+        실측 대조 결과 PRD 표의 pt→px 기계적 환산값(× 96/72)이 실제 화면보다 눈에 띄게 크게
+        렌더링되어, 아래 크기들을 스크린샷 재대조로 축소 보정함(창 세로 길이 보정과 함께
+        Layout.xaml 패딩/마진 축소와 동시에 적용 — 자세한 배경은 Layout.xaml 상단 주석 참고).
+    -->
 
-    <!-- 헤더 타이틀 : 18pt / Bold -->
+    <!-- 헤더 타이틀 -->
     <Style x:Key="ReaderHeaderTitleTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
-        <Setter Property="FontSize" Value="24"/>
+        <Setter Property="FontSize" Value="19"/>
         <Setter Property="FontWeight" Value="Bold"/>
         <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
     </Style>
 
-    <!-- 헤더 서브타이틀 : 13pt / Bold -->
+    <!-- 헤더 서브타이틀 -->
     <Style x:Key="ReaderHeaderSubtitleTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
-        <Setter Property="FontSize" Value="17.33"/>
+        <Setter Property="FontSize" Value="13.33"/>
         <Setter Property="FontWeight" Value="Bold"/>
         <Setter Property="Foreground" Value="{StaticResource SubTextBrush}"/>
     </Style>
 
-    <!-- 섹션 제목 : 15pt / Bold -->
+    <!-- 섹션 제목 -->
     <Style x:Key="ReaderSectionTitleTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
-        <Setter Property="FontSize" Value="20"/>
+        <Setter Property="FontSize" Value="15.33"/>
         <Setter Property="FontWeight" Value="Bold"/>
         <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
     </Style>
 
-    <!-- 일반 텍스트(콤보/버튼/리스트 본문) : 14pt / Medium -->
+    <!-- 일반 텍스트(콤보/버튼/리스트 본문) -->
     <Style x:Key="ReaderBodyTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
-        <Setter Property="FontSize" Value="18.67"/>
+        <Setter Property="FontSize" Value="14.67"/>
         <Setter Property="FontWeight" Value="Normal"/>
         <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
     </Style>
 
-    <!-- 라벨(카드/토글) : 14pt / Bold -->
+    <!-- 라벨(카드/토글) -->
     <Style x:Key="ReaderLabelTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
-        <Setter Property="FontSize" Value="18.67"/>
+        <Setter Property="FontSize" Value="14.67"/>
         <Setter Property="FontWeight" Value="Bold"/>
         <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
     </Style>
 
-    <!-- 작은 텍스트(리스트 셀, 빈 상태) : 12pt / Regular -->
+    <!-- 작은 텍스트(리스트 셀, 빈 상태) -->
     <Style x:Key="ReaderSmallTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
-        <Setter Property="FontSize" Value="16"/>
+        <Setter Property="FontSize" Value="12.67"/>
         <Setter Property="FontWeight" Value="Normal"/>
         <Setter Property="Foreground" Value="{StaticResource TblBodyTextBrush}"/>
     </Style>
