@@ -75,11 +75,17 @@
         <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
     </Style>
 
-    <!-- 헤더 서브타이틀 -->
+    <!--
+        헤더 서브타이틀
+        2026-08-14 수정(가독성 개선): docs/screenshots/reader_setup.png 실측 결과 서브타이틀은
+        타이틀(Bold)과 뚜렷이 대비되는 가는 굵기(Regular)로 렌더링되어 있음을 확인 — 기존 Bold는
+        타이틀과 위계 구분이 안 되는 원인이었다. 최신 UI 트렌드(제목=굵게, 설명=가늘게+연한 색)에도
+        부합하므로 Normal로 변경.
+    -->
     <Style x:Key="ReaderHeaderSubtitleTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
         <Setter Property="FontSize" Value="13.33"/>
-        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="FontWeight" Value="Normal"/>
         <Setter Property="Foreground" Value="{StaticResource SubTextBrush}"/>
     </Style>
 
@@ -99,18 +105,40 @@
         <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
     </Style>
 
-    <!-- 라벨(카드/토글) -->
+    <!--
+        라벨(카드/토글)
+        2026-08-14 수정(트렌디 가독성 개선, 사용자 요청: "원본말고 더 트랜디하고 가독성있게").
+        원본 스크린샷 대조 목적이 아니라 원본 제약을 벗어난 개선이 목적 — docs/ROADMAP.md Phase 4
+        "트렌디 타이포그래피 개선" 절 참고.
+
+        문제 진단: 기존엔 라벨(Bold 14.67, 진한 남색)과 실제 값(콤보 선택값, Medium 14.67)이
+        크기가 완전히 같아 "무엇이 캡션이고 무엇이 실제 값/콘텐츠인지"가 시각적으로 구분되지
+        않았다 — 토스/카카오/네이버 등 최신 핀테크 UI는 캡션(라벨)을 값보다 작고 연하게 낮춰
+        실제 값(콤보 선택값 "COM 01" 등)이 상대적으로 더 크고 진하게 도드라지도록 위계를 준다.
+
+        변경: Bold → Medium 폰트(PretendardMediumFontFamily)+Normal 굵기로 낮추고, 크기를
+        14.67→12.67(캡션 크기)로 축소, 색상도 진한 남색(TitleTextBrush)에서 한 단계 옅은
+        회색(CardTitleTextBrush)으로 낮췄다(완전히 옅은 SubTextBrush까지는 안 낮춘 이유: 토글
+        옆 인라인 라벨은 "무엇을 켜고 끄는지" 바로 읽혀야 하는 조작 대상 설명이라 가독성을 위해
+        최소한의 대비는 유지). 굵기 대비 대신 크기+색상 대비로 위계를 표현하는 것도 최신 트렌드에
+        더 부합한다(과도한 Bold 남용 지양).
+    -->
     <Style x:Key="ReaderLabelTextStyle" TargetType="TextBlock">
-        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
-        <Setter Property="FontSize" Value="14.67"/>
-        <Setter Property="FontWeight" Value="Bold"/>
-        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+        <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
+        <Setter Property="FontSize" Value="12.67"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource CardTitleTextBrush}"/>
     </Style>
 
-    <!-- 작은 텍스트(리스트 셀, 빈 상태) -->
+    <!--
+        작은 텍스트(리스트 컬럼 헤더, 빈 상태 문구)
+        2026-08-14 수정(트렌디 가독성 개선): 12.67px는 리스트 헤더/빈 상태 안내문 치고 다소
+        빽빽하게 느껴져 13.33px로 소폭 확대(콤보/버튼 본문 14.67px보다는 작게 유지해 "표는 보조
+        정보"라는 위계는 그대로 살림).
+    -->
     <Style x:Key="ReaderSmallTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
-        <Setter Property="FontSize" Value="12.67"/>
+        <Setter Property="FontSize" Value="13.33"/>
         <Setter Property="FontWeight" Value="Normal"/>
         <Setter Property="Foreground" Value="{StaticResource TblBodyTextBrush}"/>
     </Style>

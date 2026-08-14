@@ -33,6 +33,15 @@
         실측으로 확인). 두께를 1.5px로 **고정**하고 상태별로 색상만 바꾸는 방식으로 전환해
         레이아웃이 절대 흔들리지 않게 했다 — 두께 고정 + 색상 전환은 토스류 최신 UI에서도
         일반적인 패턴이다. 기본 두께도 1→1.5px로 올라가 hover 시인성도 같이 개선됨.
+
+        2026-08-14 수정(트렌디 가독성 개선, docs/ROADMAP.md Phase 4 "트렌디 타이포그래피 개선"):
+        Typography.xaml의 ReaderLabelTextStyle을 캡션 크기(12.67, Medium, 옅은 색)로 낮춘 것과
+        짝을 맞춰, 실제 선택값("COM 01", "오늘" 등)을 담는 이 콤보 텍스트는 반대로 더 크고 진하게
+        올렸다 — 캡션(라벨)은 작게/연하게, 실제 값(콘텐츠)은 크게/진하게 보여주는 최신 핀테크 UI
+        위계 패턴. Medium 폰트+14.67px(라벨과 크기가 같아 구분이 안 됐던 상태) →
+        Bold(실제 Bold 웨이트 폰트 파일 사용)+15.33px로 변경. 이 스타일은 현재 리더기 설정
+        화면에서만 쓰이는 것을 확인한 뒤 전역 리소스에 바로 적용함(다른 화면에 콤보박스 사용처가
+        생기면 재검토 필요 — Buttons.xaml ReaderButtonStyle 관련 기존 주석과 동일한 판단 근거).
     -->
 
     <!-- 원본 KFTCInputTheme: borderN=GRAY_200, borderH=GRAY_300, borderF=BLUE_500 (ModernUI.h) -->
@@ -85,8 +94,9 @@
     </Style>
 
     <Style x:Key="SkinnedComboBoxStyle" TargetType="ComboBox">
-        <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
-        <Setter Property="FontSize" Value="14.67"/>
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="15.33"/>
+        <Setter Property="FontWeight" Value="Bold"/>
         <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
         <Setter Property="Background" Value="White"/>
         <Setter Property="BorderBrush" Value="{StaticResource ComboBoxBorderBrush}"/>
