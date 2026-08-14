@@ -259,12 +259,25 @@ public partial class ReaderSetupWindow : Window
             IntegrityEmptyText.Visibility = Visibility.Collapsed;
         }
 
+        IntegrityScrollViewer.ScrollToTop();
+
         QueryButton.Content = originalContent;
         ButtonLoadingHelper.SetIsLoading(QueryButton, false);
         SetGlobalEnabled(true);
         ApplyReaderCardEnabled(Reader1PortCombo, Reader1ActionButtonsPanel, Reader1MultipadToggle);
         ApplyReaderCardEnabled(Reader2PortCombo, Reader2ActionButtonsPanel, Reader2MultipadToggle);
         _isBusy = false;
+    }
+
+    /// <summary>
+    /// 무결성 체크 테이블의 ScrollViewer에 스크롤바가 생기면 본문 데이터 영역의 너비가 스크롤바 폭만큼 줄어들어
+    /// 헤더와 데이터 열의 정렬이 어긋나는 것을 방지하기 위해 헤더 Border의 우측 Padding을 스크롤바 너비만큼 동적 동기화한다.
+    /// </summary>
+    private void IntegrityScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        var hasScrollbar = e.ExtentHeight > e.ViewportHeight;
+        var scrollBarWidth = hasScrollbar ? SystemParameters.VerticalScrollBarWidth : 0;
+        TableHeaderBorder.Padding = new Thickness(0, 0, scrollBarWidth, 0);
     }
 
     /// <summary>

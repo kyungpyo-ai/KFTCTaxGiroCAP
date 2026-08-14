@@ -62,24 +62,28 @@
                     <TextBlock Text="DialogBg #F9FAFC" FontSize="11"/>
                 </StackPanel>
                 <StackPanel Margin="0,0,12,12" Width="140">
+                    <Border Height="50" Background="{StaticResource ReaderSubCardBgBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"/>
+                    <TextBlock Text="ReaderSubCardBg #FAFBFD" FontSize="11"/>
+                </StackPanel>
+                <StackPanel Margin="0,0,12,12" Width="140">
                     <Border Height="50" Background="{StaticResource ReaderBorderBrush}"/>
                     <TextBlock Text="Border(리더기) #D6E4F7" FontSize="11"/>
                 </StackPanel>
                 <StackPanel Margin="0,0,12,12" Width="140">
                     <Border Height="50" Background="{StaticResource TblBorderBrush}"/>
-                    <TextBlock Text="TblBorder #D6DFEB" FontSize="11"/>
+                    <TextBlock Text="TblBorder #D1D9E6" FontSize="11"/>
                 </StackPanel>
                 <StackPanel Margin="0,0,12,12" Width="140">
                     <Border Height="50" Background="{StaticResource TblHdrBgBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"/>
-                    <TextBlock Text="TblHdrBg #FAFBFD" FontSize="11"/>
+                    <TextBlock Text="TblHdrBg #F0F3F8" FontSize="11"/>
                 </StackPanel>
                 <StackPanel Margin="0,0,12,12" Width="140">
                     <Border Height="50" Background="{StaticResource TblHdrLineBrush}"/>
-                    <TextBlock Text="TblHdrLine #EEF1F7" FontSize="11"/>
+                    <TextBlock Text="TblHdrLine #D5DCE8" FontSize="11"/>
                 </StackPanel>
                 <StackPanel Margin="0,0,12,12" Width="140">
                     <Border Height="50" Background="{StaticResource TblRowLineBrush}"/>
-                    <TextBlock Text="TblRowLine #F2F5F9" FontSize="11"/>
+                    <TextBlock Text="TblRowLine #E4E8F0" FontSize="11"/>
                 </StackPanel>
                 <StackPanel Margin="0,0,12,12" Width="140">
                     <Border Height="50" Background="{StaticResource TblAltRowBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"/>
@@ -87,11 +91,11 @@
                 </StackPanel>
                 <StackPanel Margin="0,0,12,12" Width="140">
                     <Border Height="50" Background="{StaticResource TblHdrTextBrush}"/>
-                    <TextBlock Text="TblHdrText #1A202C" FontSize="11"/>
+                    <TextBlock Text="TblHdrText #4E5968" FontSize="11"/>
                 </StackPanel>
                 <StackPanel Margin="0,0,12,12" Width="140">
                     <Border Height="50" Background="{StaticResource TblBodyTextBrush}"/>
-                    <TextBlock Text="TblBodyText #5C687A" FontSize="11"/>
+                    <TextBlock Text="TblBodyText #191F28" FontSize="11"/>
                 </StackPanel>
                 <StackPanel Margin="0,0,12,12" Width="140">
                     <Border Height="50" Background="{StaticResource TblEmptyTextBrush}"/>

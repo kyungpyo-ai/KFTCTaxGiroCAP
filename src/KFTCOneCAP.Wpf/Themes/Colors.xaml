@@ -62,28 +62,34 @@
     <Color x:Key="DialogBgColor">#F9FAFC</Color>
     <SolidColorBrush x:Key="DialogBgBrush" Color="{StaticResource DialogBgColor}"/>
 
+    <Color x:Key="ReaderSubCardBgColor">#FAFBFD</Color>
+    <SolidColorBrush x:Key="ReaderSubCardBgBrush" Color="{StaticResource ReaderSubCardBgColor}"/>
+
     <Color x:Key="ReaderBorderColor">#D6E4F7</Color>
     <SolidColorBrush x:Key="ReaderBorderBrush" Color="{StaticResource ReaderBorderColor}"/>
 
-    <Color x:Key="TblBorderColor">#D6DFEB</Color>
+    <Color x:Key="TblBorderColor">#D1D9E6</Color>
     <SolidColorBrush x:Key="TblBorderBrush" Color="{StaticResource TblBorderColor}"/>
 
-    <Color x:Key="TblHdrBgColor">#FAFBFD</Color>
+    <Color x:Key="TblHdrBgColor">#F0F3F8</Color>
     <SolidColorBrush x:Key="TblHdrBgBrush" Color="{StaticResource TblHdrBgColor}"/>
 
-    <Color x:Key="TblHdrLineColor">#EEF1F7</Color>
+    <Color x:Key="TblHdrLineColor">#D5DCE8</Color>
     <SolidColorBrush x:Key="TblHdrLineBrush" Color="{StaticResource TblHdrLineColor}"/>
 
-    <Color x:Key="TblRowLineColor">#F2F5F9</Color>
+    <Color x:Key="TblRowLineColor">#E4E8F0</Color>
     <SolidColorBrush x:Key="TblRowLineBrush" Color="{StaticResource TblRowLineColor}"/>
 
     <Color x:Key="TblAltRowColor">#FBFCFF</Color>
     <SolidColorBrush x:Key="TblAltRowBrush" Color="{StaticResource TblAltRowColor}"/>
 
-    <Color x:Key="TblHdrTextColor">#6B7684</Color>
+    <Color x:Key="TblRowHoverColor">#F8FAFC</Color>
+    <SolidColorBrush x:Key="TblRowHoverBrush" Color="{StaticResource TblRowHoverColor}"/>
+
+    <Color x:Key="TblHdrTextColor">#4E5968</Color>
     <SolidColorBrush x:Key="TblHdrTextBrush" Color="{StaticResource TblHdrTextColor}"/>
 
-    <Color x:Key="TblBodyTextColor">#5C687A</Color>
+    <Color x:Key="TblBodyTextColor">#191F28</Color>
     <SolidColorBrush x:Key="TblBodyTextBrush" Color="{StaticResource TblBodyTextColor}"/>
 
     <Color x:Key="TblEmptyTextColor">#8B95A1</Color>

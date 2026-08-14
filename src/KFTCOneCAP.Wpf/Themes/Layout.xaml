@@ -120,7 +120,7 @@
     <sys:Double x:Key="ReaderSectionBarWidth">4</sys:Double>
     <sys:Double x:Key="ReaderSectionBarHeight">14</sys:Double>
 
-    <!-- 서브 카드(포트 설정 / 무결성 체크 정보), 배경 DialogBg 계열(TblHdrBgBrush #FAFBFD) -->
+    <!-- 서브 카드(포트 설정 / 무결성 체크 정보), 배경 (ReaderSubCardBgBrush #FAFBFD) -->
     <CornerRadius x:Key="ReaderSubCardCornerRadius">16</CornerRadius>
     <Thickness x:Key="ReaderSubCardPadding">18,12,18,12</Thickness>
 
