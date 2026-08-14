@@ -400,15 +400,19 @@
                         <ContentPresenter/>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <!-- 호버: 5px 리프트 + 미세 확대(1.005) + 글로우, back-ease-out 근사 -->
+                        <!--
+                            호버: 미세 확대(1.005) + 글로우만(리프트 없음).
+                            2026-08-14 변경(사용자 지시): 기존엔 5px 위로 뜨는 리프트(TranslateTransform
+                            Y)도 있었으나, 모달(리더기 설정 등)을 한 번이라도 연 카드에서만 그 카드의
+                            리프트가 다시 발동하지 않는 렌더링/컴포지션 버그(docs/ROADMAP.md "알려진
+                            이슈" 참고, 여러 방식으로 시도했으나 원인 미해결)가 있어 리프트 자체를
+                            없앴다. 리프트를 뺀 뒤로는 이 버그의 발동 조건(리프트 트랜스폼 재생)이
+                            사라지므로 증상도 함께 사라진다.
+                        -->
                         <Trigger Property="IsMouseOver" Value="True">
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="CardTranslate" Storyboard.TargetProperty="Y"
-                                                          To="-5" Duration="0:0:0.22">
-                                            <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.5"/></DoubleAnimation.EasingFunction>
-                                        </DoubleAnimation>
                                         <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX"
                                                           To="1.005" Duration="0:0:0.22"/>
                                         <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY"
@@ -421,8 +425,6 @@
                             <Trigger.ExitActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="CardTranslate" Storyboard.TargetProperty="Y"
-                                                          To="0" Duration="0:0:0.18"/>
                                         <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX"
                                                           To="1" Duration="0:0:0.18"/>
                                         <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY"
@@ -455,7 +457,7 @@
                                 <BeginStoryboard>
                                     <Storyboard>
                                         <DoubleAnimation Storyboard.TargetName="CardTranslate" Storyboard.TargetProperty="Y"
-                                                          To="-5" Duration="0:0:0.15"/>
+                                                          To="0" Duration="0:0:0.15"/>
                                         <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX"
                                                           To="1.005" Duration="0:0:0.15"/>
                                         <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY"

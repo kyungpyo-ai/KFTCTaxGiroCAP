@@ -10,6 +10,7 @@
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource HomeBgBrush}"
+        Loaded="HomeWindow_Loaded"
         Closing="HomeWindow_Closing">
     <!--
         홈 화면 — 정적 레이아웃 (Phase 2, docs/ROADMAP.md).

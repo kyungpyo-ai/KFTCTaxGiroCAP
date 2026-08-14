@@ -2,6 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Threading;
 
 namespace KFTCOneCAP.Wpf.Views;
 
@@ -66,8 +67,16 @@ public partial class HomeWindow : Window
     /// 리더기 설정 카드. Phase 4(ROADMAP.md)부터 실제 ReaderSetupWindow를 모달로 연다
     /// (PRD 3.7/4.2). 확인/취소 버튼의 실제 저장/검증 로직은 Phase 5~6에서 배선 예정 —
     /// 지금은 창을 닫는 동작만 있다.
+    ///
+    /// 2026-08-14 수정(사용자 피드백: "리더기 버튼 눌렀을때만 살짝 끊기는것처럼 보임"): 클릭
+    /// 즉시(Click 핸들러 안에서) 무거운 ReaderSetupWindow를 생성+ShowDialog()하면, 카드의
+    /// 눌림 애니메이션(HomeCardButtonStyle, PRD 3.4)이 아직 재생 중인데 UI 스레드가 창 생성으로
+    /// 막혀 그 프레임이 스킵되어 끊김으로 보인다 — PRD 3.4가 이미 예상한 케이스("클릭 즉시
+    /// ShowDialog() 호출 전 짧은 딜레이 또는 Dispatcher.BeginInvoke로 근사 재현"). 창 생성/오픈을
+    /// 한 프레임 뒤(Input 우선순위)로 미뤄 눌림 애니메이션이 먼저 렌더링을 마치도록 한다.
     /// </summary>
-    private void ReaderSetupCardButton_Click(object sender, RoutedEventArgs e) => OpenReaderSetup();
+    private void ReaderSetupCardButton_Click(object sender, RoutedEventArgs e) =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(OpenReaderSetup));
 
     /// <summary>
     /// 가맹점 설정/결제/전표 설정 카드는 본 프로젝트 범위 밖 화면(PRD 1.3 비범위, PRD 6장 미확정
@@ -85,6 +94,46 @@ public partial class HomeWindow : Window
     {
         var dialog = new ReaderSetupWindow { Owner = this };
         dialog.ShowDialog();
+    }
+
+    /// <summary>
+    /// 홈 화면이 다 뜬 뒤 유휴 시간에 ReaderSetupWindow를 한 번 미리 만들었다가 바로 닫아
+    /// "워밍업"한다(화면에 실제로 보이지 않도록 화면 밖에 배치 + 작업표시줄 숨김).
+    ///
+    /// 2026-08-14 추가(사용자 요청: "리더기설정창이 띄어질때 자체의 렉을 줄일방법은없어?"):
+    /// 사용자가 실제로 카드를 처음 클릭하는 시점에 ReaderSetupWindow를 생성하면, 이 창의
+    /// XAML(BAML) 최초 로드, 관련 .NET 타입(ItemsControl/Popup 등)의 최초 JIT, 리소스
+    /// 딕셔너리 스타일의 최초 lookup/캐싱 비용이 전부 "그 클릭 순간"에 한꺼번에 발생해
+    /// 체감 렉의 원인이 된다. 앱이 유휴 상태일 때 미리 한 번 만들어 버리면 이 비용들이
+    /// 대부분 캐시/JIT되어, 실제 사용자가 여는 시점에는 새 인스턴스를 만들더라도 훨씬 빠르다.
+    /// 워밍업 인스턴스는 화면 밖 좌표에 표시했다가 Loaded 직후 바로 닫아 사용자 눈에 보이지
+    /// 않게 한다. 실패해도 앱 동작에 영향 없도록 전체를 try/catch로 감싼다.
+    /// </summary>
+    private void HomeWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(WarmUpReaderSetupWindow));
+    }
+
+    private void WarmUpReaderSetupWindow()
+    {
+        try
+        {
+            var warmup = new ReaderSetupWindow
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -32000,
+                Top = -32000,
+                ShowInTaskbar = false,
+                ShowActivated = false,
+            };
+            warmup.Loaded += (_, _) => warmup.Close();
+            warmup.Show();
+        }
+        catch
+        {
+            // 워밍업은 순수 최적화 목적 — 실패해도 실제 카드 클릭 시 정상 경로(OpenReaderSetup)로
+            // 창이 열리므로 조용히 무시한다.
+        }
     }
 
     private void ShowNotImplementedCard(string name)
