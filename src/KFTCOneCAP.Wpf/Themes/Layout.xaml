@@ -4,9 +4,9 @@
 
     <!--
         홈 화면(및 향후 리더기 설정 화면) 레이아웃 치수 — "일반" 모드(96dpi 기준, PRD 3.3).
-        Phase 8에서 컴팩트 모드(세로 해상도 ≤800px) 대응 시 이 파일과 동일한 키 셋을 가진
+        Phase 6에서 컴팩트 모드(세로 해상도 ≤800px) 대응 시 이 파일과 동일한 키 셋을 가진
         Themes/Layout.Compact.xaml을 추가하고 런타임에 ResourceDictionary를 스왑하는 방식으로
-        전환한다(docs/ROADMAP.md Phase 2/8 참고). 그러므로 홈/리더기설정 XAML에서는 치수를
+        전환한다(docs/ROADMAP.md Phase 2/6 참고). 그러므로 홈/리더기설정 XAML에서는 치수를
         리터럴로 적지 말고 항상 이 파일의 키를 참조할 것.
 
         수치 출처: docs/PRD_WPF.md 3.3장 + docs/screenshots/home_screen.png 실측 대조.
@@ -89,7 +89,7 @@
         나온다 — 그래서 그 계산 결과값을 아래 ReaderWindowWidth/Height로 한 번 고정해두고
         Views/ReaderSetupWindow.xaml에서 SizeToContent 대신 이 리소스 키를 직접 참조하도록
         바꿨다(PRD 4.2 "최초 1회 레이아웃 계산 후 창 크기 확정"의 취지 그대로 — 매번이 아니라
-        "최초 1회"만 계산해서 고정). 리터럴이 아니라 리소스 키로 두었으므로, 나중에 Phase 7
+        "최초 1회"만 계산해서 고정). 리터럴이 아니라 리소스 키로 두었으므로, 나중에 Phase 6
         컴팩트 모드에서 이 파일과 동일한 키 셋을 가진 컴팩트 전용 Layout 딕셔너리로 스왑하면
         창 크기도 자동으로 같이 바뀐다 — 컴팩트 모드 계획과 충돌하지 않음.
         값 출처: 기존 SizeToContent 결과를 96dpi 환경에서 GetWindowRect로 실측(744×820, 타이틀바/
@@ -147,9 +147,11 @@
     <sys:Double x:Key="ReaderInfoButtonSize">18</sys:Double>
 
     <!--
-        "포트 열기" 토글 자리 — Phase 4에서는 토글 자체를 만들지 않고(작업 지시 명시,
-        Phase 6에서 배선) 리더기2 카드와 좌우 위치를 맞추기 위한 빈 공간(Visibility=Hidden)만
-        확보한다. 폭은 스크린샷 실측(라벨 "포트 열기" + 토글 44 + info 20 + 내부 간격)에 근사한 값.
+        "포트 열기" 토글 자리 — 실제 배선(확인창→백그라운드 처리→레지스트리 저장, PRD 4.8)은
+        외부 DLL 연동과 함께 별도 PRD/단계에서 다루기로 확정(2026-08-14, docs/ROADMAP.md Phase 6
+        상단 안내 참고)되어 있어, 지금은 토글 자체를 만들지 않고 리더기2 카드와 좌우 위치를
+        맞추기 위한 빈 공간(Visibility=Hidden)만 확보한다. 폭은 스크린샷 실측(라벨 "포트 열기" +
+        토글 44 + info 20 + 내부 간격)에 근사한 값.
     -->
     <sys:Double x:Key="ReaderPortOpenPlaceholderWidth">148</sys:Double>
 

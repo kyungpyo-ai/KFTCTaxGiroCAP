@@ -21,10 +21,11 @@
         결과값을 Layout.xaml의 ReaderWindowWidth/Height 리소스로 고정해 직접 참조한다(매번
         SizeToContent 레이아웃 패스를 태우지 않도록) — 상세 사유는 Layout.xaml 해당 키 주석 참고.
 
-        버튼 클릭(초기화/상태체크/.../확인/취소), AOP 뱃지, 포트 열기 토글의 실제 동작은
-        Phase 5~6 범위. 이번 Phase는 정적 배치만 다룬다. "포트 열기" 토글은 지시에 따라
-        이번 Phase에서 아예 만들지 않고(Phase 6에서 배선), 자리만 빈 공간(Visibility=Hidden)으로
-        남겨 리더기2 카드와 "멀티패드 여부" 위치를 맞췄다(아래 리더기1 카드 참고).
+        버튼 클릭(초기화/상태체크/.../확인/취소) 로딩 스텁, 레지스트리 저장/dirty-check는
+        Phase 5에서 구현 완료. AOP 뱃지, 포트 열기 토글의 실제 동작(PRD 4.8/4.11)은 외부 DLL
+        연동과 함께 별도 PRD/단계에서 다루기로 확정(2026-08-14, docs/ROADMAP.md Phase 6 상단
+        안내 참고) — "포트 열기" 토글은 자리만 빈 공간(Visibility=Hidden)으로 남겨 리더기2
+        카드와 "멀티패드 여부" 위치를 맞췄다(아래 리더기1 카드 참고).
     -->
     <Border CornerRadius="{StaticResource ReaderMainCardCornerRadius}"
             Background="{StaticResource CardBgBrush}"

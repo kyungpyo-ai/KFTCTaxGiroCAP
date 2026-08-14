@@ -14,7 +14,7 @@
         Closing="HomeWindow_Closing">
     <!--
         홈 화면 — 정적 레이아웃 (Phase 2, docs/ROADMAP.md).
-        치수는 전부 Themes/Layout.xaml 리소스 키를 참조한다(리터럴 금지 — Phase 8 컴팩트 모드
+        치수는 전부 Themes/Layout.xaml 리소스 키를 참조한다(리터럴 금지 — Phase 6 컴팩트 모드
         리소스 스왑 대비, docs/ROADMAP.md Phase 2 안내 참고).
         카드 호버/눌림 애니메이션, 카드 클릭 동작, 트레이 아이콘은 Phase 3에서 배선한다.
 

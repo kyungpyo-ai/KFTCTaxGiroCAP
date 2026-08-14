@@ -21,8 +21,7 @@
 | 3 | 홈 화면 — 인터랙션 & 트레이 | ✅ 완료 |
 | 4 | 리더기 설정 — 정적 레이아웃 | ✅ 완료 |
 | 5 | 리더기 설정 — 비즈니스 로직(스텁) + 레지스트리 저장/dirty-check (AOP 제약·TRANSINFO_AOP 검증·포트열기 토글은 보류) | ✅ 완료 |
-| 6 | 리더기 설정 — 실제 COM 포트 연동 | ⬜ 대기 |
-| 7 | 통합 검증 & 마무리 | ⬜ 대기 |
+| 6 | 통합 검증 & 마무리 | ⬜ 대기 |
 
 (상태 값: ⬜ 대기 / 🔄 진행중 / ✅ 완료 / ⏸ 보류)
 
@@ -48,7 +47,7 @@
 **목표**: PRD 2장(색상/타이포그래피/공용 컨트롤)을 리소스로 코드화.
 
 - [x] `Themes/Colors.xaml` — PRD 2.1 색상 팔레트 전체를 `SolidColorBrush` 리소스로 정의 (홈 화면/리더기설정 화면 토큰 전체, 결과 정상/오류 칩 포함)
-- [x] `Themes/Typography.xaml` — Pretendard/Malgun Gothic 폰트 리소스 + 화면별 크기/굵기 `Style` (일반 모드 기준값 우선, 컴팩트 분기는 Phase 7 이후 별도 검토). PRD 표의 pt 값은 96dpi 기준 `pt × 96/72` 로 환산해 WPF `FontSize`(px 단위)에 적용
+- [x] `Themes/Typography.xaml` — Pretendard/Malgun Gothic 폰트 리소스 + 화면별 크기/굵기 `Style` (일반 모드 기준값 우선, 컴팩트 분기는 Phase 6 이후 별도 검토). PRD 표의 pt 값은 96dpi 기준 `pt × 96/72` 로 환산해 WPF `FontSize`(px 단위)에 적용
 - [x] Pretendard 폰트 파일 확보 및 포함 — 원본 `C:\Project\MerchantSetup_OnPaintIcons_Clean_CP949\fonts\`의 Regular/Medium/Bold 3종을 `src/KFTCOneCAP.Wpf/Assets/Fonts/`에 복사, `Resource` 빌드 액션으로 csproj에 포함(OFL 라이선스라 임베딩 문제 없음). **ExtraBold(800) 파일이 원본에 없어 홈 타이틀은 Bold(700)로 폴백** — 추후 ExtraBold 파일이 확보되면 `Typography.xaml`의 `HomeTitleTextStyle`만 교체하면 됨
 - [x] `Themes/Buttons.xaml` — `CModernButton` 대응 `Button` Style: `AutoButtonStyle`/`DefaultButtonStyle`/`PrimaryButtonStyle`/`ReaderButtonStyle` 4종, 호버/눌림 Trigger 포함
 - [x] `Themes/ComboBox.xaml` — `CSkinnedComboBox` 대응 라운드(6px) 콤보 Style, 포커스 시 2px 파란 보더로 전환하는 커스텀 `ControlTemplate`
@@ -77,7 +76,7 @@
 
 **목표**: `docs/screenshots/home_screen.png`과 레이아웃이 일치하는 정적 화면(애니메이션/트레이 제외).
 
-> **컴팩트 모드 대응 방침 (2026-08-13 확정, PRD 미확정 사항 #6)**: 원본처럼 세로 해상도 ≤800px에서 별도 치수 세트로 전환하는 기능을 최종적으로 구현한다(전환 메커니즘: 런타임 작업영역 높이 감지 + `ResourceDictionary` 스왑 — Phase 7에서 배선). 실제 배선/컴팩트 값 확정은 Phase 7 몫이지만, **Phase 2부터 지금** 지켜야 할 규칙이 하나 있다 — 홈/리더기설정 화면에서 쓰는 폭/높이/폰트크기 등 치수는 XAML에 리터럴로 박지 말고 `Themes/Layout.xaml`(신규, 이번 Phase에서 생성) 같은 전용 리소스 딕셔너리에 일반 모드 값으로 키를 만들어 참조한다. 이렇게 해두면 Phase 7에서 컴팩트 세트를 가진 두 번째 딕셔너리를 만들어 스왑하는 것만으로 끝나고, Phase 2~6에서 이미 만든 XAML을 다시 고칠 필요가 없다.
+> **컴팩트 모드 대응 방침 (2026-08-13 확정, PRD 미확정 사항 #6)**: 원본처럼 세로 해상도 ≤800px에서 별도 치수 세트로 전환하는 기능을 최종적으로 구현한다(전환 메커니즘: 런타임 작업영역 높이 감지 + `ResourceDictionary` 스왑 — Phase 6에서 배선). 실제 배선/컴팩트 값 확정은 Phase 6 몫이지만, **Phase 2부터 지금** 지켜야 할 규칙이 하나 있다 — 홈/리더기설정 화면에서 쓰는 폭/높이/폰트크기 등 치수는 XAML에 리터럴로 박지 말고 `Themes/Layout.xaml`(신규, 이번 Phase에서 생성) 같은 전용 리소스 딕셔너리에 일반 모드 값으로 키를 만들어 참조한다. 이렇게 해두면 Phase 6에서 컴팩트 세트를 가진 두 번째 딕셔너리를 만들어 스왑하는 것만으로 끝나고, Phase 2~5에서 이미 만든 XAML을 다시 고칠 필요가 없다.
 
 - [x] 창 크롬: 고정 크기(1104×567, `ResizeMode=NoResize`), 흰 타이틀바(Win10 1809+ `DwmSetWindowAttribute` 조건부 적용, 미지원 OS는 no-op), 타이틀 "KFTCOneCAP Plus Ver 3.0.9 | 모듈 Ver 524" — **PRD 3.2/6장 #7 미확정**: 버전 조합 규칙(런타임에 앱버전/모듈버전을 어디서 읽어와 조합하는지)은 원본 소스에서도 확인 불가(빌드-소스 불일치, PRD #7) → 스크린샷 실측 문자열을 정적 리터럴로 임시 적용, TODO 주석으로 남김
 - [x] 헤더: 로고(`Assets/Images/img_ci_mark.png` 실제 자산, 아래 "추가 보정" 참고) + "KFTCOneCAP" + "Plus" 뱃지 + 서브타이틀
@@ -106,7 +105,7 @@
 
 - [x] 카드 호버 애니메이션(리프트 + 글로우) — PRD 3.4, `Storyboard`/`EasingFunction`으로 근사
 - [x] 카드 눌림 애니메이션(축소 + 배경색 보간 + 아이콘 색 반전)
-- [x] 카드 클릭 → 해당 서브 창 `ShowDialog()` (리더기 설정만 우선 연결, 나머지는 Phase 7 이전까지 비활성/플레이스홀더 — PRD 미확정 사항 #5 확인)
+- [x] 카드 클릭 → 해당 서브 창 `ShowDialog()` (리더기 설정만 우선 연결, 나머지는 Phase 6 이전까지 비활성/플레이스홀더 — PRD 미확정 사항 #5 확인)
 - [x] 최소화 버튼 → 트레이로 이동 (`System.Windows.Forms.NotifyIcon` interop)
 - [x] 트레이 우클릭 커스텀 메뉴(PRD 3.6: 열기/리더기 설정/가맹점 설정/구분선/종료)
 - [x] 트레이 더블클릭 → 창 복원
@@ -170,7 +169,7 @@
 
 **구현 요약**:
 - `Views/ReaderSetupWindow.xaml`/`.xaml.cs` 신규 생성. 창 크기는 PRD 4.2 "최초 1회 레이아웃 계산 후 창 크기 확정" 동작을, 홈 화면처럼 전체 Width/Height를 리터럴로 고정하는 대신 `SizeToContent="WidthAndHeight"` + `ResizeMode="NoResize"` + 내부 컴포넌트별 고정 치수(콤보 178, 액션버튼 100 등)로 재현 — 컴포넌트 치수가 자연스럽게 전체 창 크기를 한 번 계산해서 고정시키는 방식이라 원본 동작 취지에 더 부합한다고 판단.
-- 흰색 타이틀바 적용 로직(`DwmSetWindowAttribute`, OS 버전 체크)은 `HomeWindow.xaml.cs`와 동일한 코드를 그대로 복제 — 서브 창이 이 화면 하나뿐이라 공용 헬퍼로 추출하는 것은 과도한 추상화로 판단해 보류(주석에 사유 명시, 필요 시 Phase 7 정리 단계에서 재검토 가능).
+- 흰색 타이틀바 적용 로직(`DwmSetWindowAttribute`, OS 버전 체크)은 `HomeWindow.xaml.cs`와 동일한 코드를 그대로 복제 — 서브 창이 이 화면 하나뿐이라 공용 헬퍼로 추출하는 것은 과도한 추상화로 판단해 보류(주석에 사유 명시, 필요 시 Phase 6 정리 단계에서 재검토 가능).
 - 헤더 아이콘: 홈 화면 "리더기 설정" 카드의 글리프(`GeometryGroup`, 카드리더 단말기 형태)를 완전히 동일하게 재사용하고 배경만 진한 블루(`Blue500Brush`) 고정 + 글리프 흰색으로 바꿔 두 화면 간 스타일을 공유했다(ROADMAP 체크리스트의 "공용 ModernUIHeader 대응 컴포넌트로 스타일 공유 검토" 항목 반영). 별도 `UserControl`로 분리하지는 않음(1곳에서만 사용 — 과도한 추상화 방지 원칙).
 - `Themes/Buttons.xaml`에 `InfoButtonStyle` 신규 추가(PRD 2.3 `CInfoIconButton` 대응). PRD 원문은 "i" 아이콘이라고 되어 있으나 `docs/screenshots/reader_setup.png` 실측 결과 물음표(?) 글리프였음 — 스크린샷을 우선하는 프로젝트 원칙(CLAUDE.md)에 따라 "?" 로 구현.
 - `Themes/Layout.xaml`에 리더기 설정 화면 전용 리소스 키 대거 추가(메인/서브 카드 radius·padding, 헤더 아이콘 56, 카드 높이 128/간격 12, 뱃지 34, 콤보 178, 액션버튼 100×36/간격 8, info버튼 20, 리스트 높이 166 등 — 전부 PRD 4.3~4.6 수치). `RowDefinition.Height`/`Margin`에 바인딩할 값은 기존 `HomeCardVisualHGridLength`/`HomeHeaderMargin` 패턴과 동일하게 `GridLength`/`Thickness` 완제품 리소스를 별도로 마련(WPF는 속성 값 하나에 `{StaticResource}`와 리터럴 텍스트를 섞어 쓸 수 없어 `"{StaticResource X},0,0,0"` 같은 표현이 `XamlParseException`을 던짐 — 개발 중 직접 겪고 수정).
@@ -180,7 +179,7 @@
 **"포트 열기" 토글 처리 (임의 판단)**: 작업 지시에서 허용한 두 옵션(빈 공간 남기기 / 자리 자체를 아예 안 넣기) 중 **빈 공간을 남기는 쪽**을 선택했다 — 리더기1 카드의 "포트 열기" 자리에 라벨/토글/info로 구성된 `StackPanel`을 `Visibility="Hidden"`으로 렌더링해 폭(`ReaderPortOpenPlaceholderWidth=148`, 스크린샷 실측 근사값)만 차지하게 했다. 이렇게 하면 리더기1/2 카드의 "멀티패드 여부" 토글이 좌우로 동일한 x 위치에 정렬되어(`docs/screenshots/reader_setup.png` 실측과 동일한 정렬) 시각적으로 원본에 더 가깝다고 판단했다. "멀티패드 여부" 토글 자체는 PRD 4.9(비동기 처리 없는 단순 UI 토글)를 근거로 이번 Phase에 시각 요소로 포함했다(클릭 가능하지만 상태 변경이 어디에도 반영되지 않는 정적 배치 — Phase 5에서 실제 저장 로직 배선).
 
 **기타 임의 판단/근사 처리 항목**:
-- 콤보박스 항목은 PRD 4.13(실제 COM 포트 열거)이 Phase 6 범위라 이번 Phase에서는 정적 더미 항목("COM 01"/"미사용")만 하드코딩.
+- 콤보박스 항목은 PRD 4.13(실제 COM 포트 열거)이 이 저장소 범위 밖(외부 DLL 연동, 별도 PRD — 위 Phase 6 상단 안내 참고)이라 정적 더미 항목("COM 01"/"미사용")만 하드코딩.
 - 리더기1/2 카드 번호 뱃지 색상(활성 Blue500 / 비활성 회색 `#BEC7D1`)은 PRD 4.11(AOP 제약)의 최종 상태가 아니라 "AOP 미적용 기본값" 스크린샷 실측을 그대로 반영 — INTERLOCK 값에 따른 동적 전환(AOP 제약 로직)은 2026-08-14 범위 조정으로 Phase 5에서 제외되어 별도 단계로 보류(아래 Phase 5 상단 안내 참고).
 - 무결성 체크 리스트는 항상 빈 상태로 고정 표시(조회 버튼 클릭 시 동작 없음 — Phase 5 범위). `ScrollViewer`로 감싸 Phase 5에서 실제 행이 채워질 때 가시 3행 고정 요구사항(PRD 4.3/4.6)을 그대로 살릴 수 있게 미리 구조를 잡아둠.
 
@@ -308,18 +307,20 @@
 
 ---
 
-## Phase 6 — 실제 COM 포트 연동
+## Phase 6 — 통합 검증 & 마무리
 
-**목표**: 더미 콤보 대신 실제 시스템 COM 포트 목록 사용.
+> **2026-08-14 범위 조정(사용자 지시)**: 기존 "Phase 6 — 실제 COM 포트 연동"(더미 콤보 대신
+> `System.IO.Ports.SerialPort.GetPortNames()`로 실제 COM 포트 열거, PRD 4.13)을 이 저장소의
+> 로드맵에서 제거했다. 실제 리더기 연동은 **외부 DLL을 붙이는 방식으로 진행될 예정이며, 별도
+> PRD 문서로 범위/요구사항을 새로 정의해서 진행**하기로 했다 — 이 프로젝트(KFTCTAXGIROCAP)는
+> "리더기 설정 화면의 UX/UI 구현"까지가 목표이고, 실제 하드웨어/DLL 연동은 그 후속 작업(별도
+> 문서·별도 단계)으로 명확히 분리한다. 그래서 원래 Phase 7이었던 "통합 검증 & 마무리"가 이
+> 저장소 기준 마지막 단계(Phase 6)가 된다.
 
-- [ ] `System.IO.Ports.SerialPort.GetPortNames()`로 포트 열거, "미사용" 항목 최상단 고정
-- [ ] 저장된 포트가 목록에 없으면 `"<port>(사용불가)"` 형태로 유지 (PRD 4.13)
-
-**완료 기준**: 실제 COM 포트 연결/해제 시 콤보 목록이 갱신되는지 확인(가능한 환경에서).
-
----
-
-## Phase 7 — 통합 검증 & 마무리
+- [ ] 홈 화면 + 리더기 설정 화면 전체를 원본과 나란히 스크린샷 비교
+- [ ] PRD 6장 "미확정 사항" 전체 재확인 — 남은 항목 있으면 명시적으로 보류 처리
+- [ ] 컴팩트 모드(≤800px 높이) 대응 구현 — 방침은 확정됨(PRD 미확정 사항 #6, Phase 2 안내 참고): 일반/컴팩트 두 번째 `Themes/Layout.xaml` 세트 작성 + 런타임 작업영역 높이 감지로 시작 시(및 필요시 화면 전환 시) `ResourceDictionary` 스왑 배선
+- [ ] 코드 정리 (사용하지 않는 리소스/스타일 정리)
 
 - [ ] 홈 화면 + 리더기 설정 화면 전체를 원본과 나란히 스크린샷 비교
 - [ ] PRD 6장 "미확정 사항" 전체 재확인 — 남은 항목 있으면 명시적으로 보류 처리

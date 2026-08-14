@@ -29,7 +29,9 @@ public partial class ReaderSetupWindow : Window
     private bool _isBusy;
 
     // PRD 4.13/4.12: 콤보1/2 선택값 + 멀티패드1/2 토글 상태 스냅샷(취소 시 dirty-check용).
-    // 포트열기 토글은 아직 없고(Phase 6 예정), 있더라도 PRD 4.12는 dirty-check 대상에서 제외한다.
+    // 포트열기 토글은 아직 없고(외부 DLL 연동과 함께 별도 PRD/단계에서 다룰 예정 —
+    // 2026-08-14, docs/ROADMAP.md Phase 6 상단 안내 참고), 있더라도 PRD 4.12는
+    // dirty-check 대상에서 제외한다.
     private string _snapshotReader1Port = string.Empty;
     private string _snapshotReader2Port = string.Empty;
     private bool _snapshotReader1Multipad;
