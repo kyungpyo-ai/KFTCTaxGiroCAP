@@ -372,7 +372,12 @@ WPF 구현: `System.Windows.Forms.NotifyIcon` (WPF에 네이티브 트레이 API
 
 ## 5. 데이터/레지스트리 매핑
 
-| 레지스트리 키 (root: `KFTC_VAN\SERIALPORT`) | 의미 | 인코딩 |
+> **전체 경로 (2026-08-14 확정, 사용자 지시)**: `HKEY_CURRENT_USER\Software\KFTC_VAN\KFTCTaxGiroCAP\SERIALPORT\<FIELD>`.
+> - 원본 MFC 앱(`MerchantSetupApp.cpp`)은 `m_pszAppName = "KFTCOneCAP"` + `SetRegistryKey(_T("KFTC_VAN"))`로 `HKCU\Software\KFTC_VAN\KFTCOneCAP\` 하위에 키를 생성한다(`RegistryUtil.cpp`의 `GetRegisterData()`도 동일 경로를 하드코딩해서 사용 — 두 경로 일치 확인됨).
+> - 이 WPF 프로젝트(`KFTCTaxGiroCAP`)는 원본과 **레지스트리를 공유하지 않고 별도 앱 이름(`KFTCTaxGiroCAP`)으로 저장**하기로 확정 — PRD 6장 미확정 사항 #1("레지스트리 공유 여부")이 이 결정으로 해소됨.
+> - 섹션명은 원본과 동일하게 `"SERIALPORT"`(`common.h`의 `SERIAL_PORT_SECTION` 매크로) 유지. 아래 표의 `root: KFTC_VAN\KFTCTaxGiroCAP\SERIALPORT`는 이 전체 경로의 축약 표기.
+
+| 레지스트리 키 (root: `HKCU\Software\KFTC_VAN\KFTCTaxGiroCAP\SERIALPORT`) | 의미 | 인코딩 |
 |---|---|---|
 | `COMPORT1_FIELD` | 리더기1 COM 포트 | 문자열 그대로 ("COM 01", "미사용" 등) |
 | `COMPORT2_FIELD` | 리더기2 COM 포트 | 상동 |
@@ -381,18 +386,18 @@ WPF 구현: `System.Windows.Forms.NotifyIcon` (WPF에 네이티브 트레이 API
 | `MULTIPAD2_FIELD` | 리더기2 멀티패드 | **반전**: "0"=켜짐, "1"=꺼짐(기본) |
 | `INTERLOCK` | 인터락 모드 | "NORMAL" / "AOP" / "TRANSINFO_AOP" |
 
-> WPF에서는 `Microsoft.Win32.Registry` 또는 설정 저장소(App.config/JSON) 중 무엇을 쓸지 결정 필요 — 기존 MFC 앱과 레지스트리를 공유해야 하는지(마이그레이션 중 병행 운영 여부)가 관건이므로 **PM 확인 필요**.
+> WPF 구현체는 `Microsoft.Win32.Registry`로 위 경로에 직접 읽고 쓴다(원본과 레지스트리를 공유하지 않기로 확정됐으므로 마이그레이션/병행 운영 이슈 없음).
 
 ---
 
 ## 6. 미확정 사항 (PM/이해관계자 확인 필요)
 
-1. **레지스트리 공유 여부**: WPF 버전이 기존 MFC 앱과 같은 레지스트리 키(`KFTC_VAN`)를 읽고 쓸지, 별도 저장소를 쓸지
+1. ~~**레지스트리 공유 여부**~~ — **확정 (2026-08-14, 사용자 지시)**: 원본과 공유하지 않고 별도 앱 이름(`HKCU\Software\KFTC_VAN\KFTCTaxGiroCAP\...`)으로 저장한다. 상세: 5장 상단 안내.
 2. **포트 열기 확인 문구**: 원본이 영문 placeholder("Open port?"/"Close port?")로 남아있음 — 정식 한글 문구 확정 필요
 3. **무결성 리스트 데이터 소스**: 더미 데이터 유지 여부, 또는 실제 이력 조회 API/DB 연동 일정
 4. **리더기 버튼 실동작**: 초기화/상태체크/키다운로드/무결성체크/업데이트/포트열기의 실제 시리얼 통신 구현 범위와 일정 (본 PRD 화면 구현 범위에서는 원본과 동일하게 스텁 유지)
 5. **트레이 메뉴의 가맹점 설정 진입**: 가맹점 설정 화면은 범위 외인데 트레이 메뉴/홈 카드에서는 진입 가능해야 하는지 — 1차 릴리스에서 해당 카드/메뉴를 비활성화할지 플레이스홀더로 둘지
-6. ~~**DPI 대응**~~ — **확정 (2026-08-13)**: 원본과 동일하게 일반/컴팩트(≤800px 높이) 두 세트 수치 분기를 유지한다. 전환 메커니즘은 런타임 작업영역 높이 감지 + `ResourceDictionary` 스왑(코드 분기 대신 리소스 교체) 방식으로 구현. 실제 컴팩트 수치 구현/전환 로직 배선은 **Phase 8**에서 진행하되, Phase 2~7에서 화면별 치수(폭/높이/폰트크기 등)를 만들 때는 리터럴 대신 항상 리소스 키를 참조하도록 해서 Phase 8에서 세트만 추가하면 되게 한다 — 상세: `docs/ROADMAP.md` Phase 2 안내 및 Phase 8 체크리스트.
+6. ~~**DPI 대응**~~ — **확정 (2026-08-13)**: 원본과 동일하게 일반/컴팩트(≤800px 높이) 두 세트 수치 분기를 유지한다. 전환 메커니즘은 런타임 작업영역 높이 감지 + `ResourceDictionary` 스왑(코드 분기 대신 리소스 교체) 방식으로 구현. 실제 컴팩트 수치 구현/전환 로직 배선은 **Phase 7**에서 진행하되, Phase 2~6에서 화면별 치수(폭/높이/폰트크기 등)를 만들 때는 리터럴 대신 항상 리소스 키를 참조하도록 해서 Phase 7에서 세트만 추가하면 되게 한다 — 상세: `docs/ROADMAP.md` Phase 2 안내 및 Phase 7 체크리스트.
 7. **소스-빌드 불일치**: 현재 작업 디렉토리의 소스(.cpp)와 실행 중인 바이너리(Release) 사이에 텍스트 차이가 발견됨(타이틀 버전 조합 방식, 무결성 리스트 컬럼 헤더 문구). 실행 파일이 최신 소스로 빌드된 것이 맞는지, 혹은 소스에 아직 반영되지 않은 변경이 실행 파일에만 있는지 확인 필요 — WPF 이식 전 소스 기준을 명확히 할 것
 
 ---
