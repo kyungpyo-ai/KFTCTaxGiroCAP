@@ -31,4 +31,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 서브에이전트
 
-`.claude/agents/csharp-wpf-developer.md` — 이 프로젝트의 WPF 개발 전담 에이전트. UX/UI(XAML)와 비즈니스 로직(ViewModel/서비스)을 통합해서 다룬다. `mcp__windows__*` 도구(스크린샷/클릭/스냅샷 등)를 갖추고 있어 빌드 후 실제 화면을 캡처해 원본과 대조하는 검증까지 책임진다 — 코드 작성만 하고 검증을 생략하지 않는다.
+- `.claude/agents/csharp-wpf-developer.md` — 이 프로젝트의 WPF 개발 전담 에이전트. UX/UI(XAML)와 비즈니스 로직(ViewModel/서비스)을 통합해서 다룬다. `mcp__windows__*` 도구(스크린샷/클릭/스냅샷 등)를 갖추고 있어 빌드 후 실제 화면을 캡처해 원본과 대조하는 검증까지 책임진다 — 코드 작성만 하고 검증을 생략하지 않는다.
+- `.claude/agents/reader-pinpad-spec-expert.md` — 리더기/핀패드 SPEC 원문 및 `ReaderSerial.dll` API 계약 확인 전담(아래 "리더기 연동 DLL" 절 참고).
+- `.claude/agents/reader-dll-integration-developer.md` — `ReaderSerial.dll` P/Invoke 연동 개발 전담(아래 "리더기 연동 DLL" 절 참고).
+
+## 리더기 연동 DLL (2차 개발, 준비 단계)
+
+리더기 설정/결제 화면에 실제 하드웨어를 연동할 `ReaderSerial.dll`은 별도 저장소 `C:\Project\KFTCReaderDLL`에서
+이미 완성되어 있다(Win32/x86 전용, 공개 API 5종 + CALLBACK 2종). 이 저장소는 그 DLL을 **소비하는** 입장이며,
+연동에 필요한 참조 자료를 `docs/reader_dll/`(연동 가이드·API 명세·오류 코드·SPEC PDF)와
+`vendor/ReaderSerial/`(DLL/헤더/lib, 검증된 C# P/Invoke 예제)에 스냅샷으로 가져와 뒀다 — 먼저
+`docs/reader_dll/00_OVERVIEW.md`를 읽는다. DLL 연동 SPEC 확인은 `reader-pinpad-spec-expert`, 실제 P/Invoke
+구현은 `reader-dll-integration-developer` 서브에이전트에 위임한다. 이 DLL 자체의 소스 수정은 이 저장소의
+범위 밖이다(원본 저장소에서 진행). 실제 연동 요구사항은 아직 PRD로 정리되지 않았다 — 새 PRD 문서 작성 후
+`docs/home_reader_setup/ROADMAP.md`를 Phase 7부터 이어서 진행한다.
