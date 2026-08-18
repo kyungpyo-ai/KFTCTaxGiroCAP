@@ -210,11 +210,22 @@ POS로부터 결제 요청 전문을 수신하면 다음 순서로 결제를 처
 
 ### 5.2 화면 종류
 
-- IC 카드 요청: `BG_IMG_IC.bmp`
-- FALLBACK 카드 요청: `BG_IMG_MS`
-- VAN 서버 통신 중: `BG_IMG_PROCESSING`
-- 실제 UI 디자인은 기존 이미지 파일 기준으로 구현한다. 확보되는 대로 `docs/payment_relay/images/`(신설
-  예정)에 모은다 — §10.
+이미지 자산은 `docs/payment_relay/images/`에 확보되어 있다(2026-08-18). 각 화면마다 **기본 크기(750×650)**
+와 **`_VERYSMALL` 접미사가 붙은 축소 크기(375×325, 정확히 1/2 배율)** 두 벌이 제공된다 — 추후 알림창
+크기 조절 기능(사용자 확정, 아직 상세 요구사항 미정) 대비용으로 보인다. 지금 단계에서는 두 크기 모두
+그대로 보관하고, 실제 "크기 조절" 요구사항이 확정되면 그때 배율/전환 트리거를 정의한다.
+
+| 화면 | 기본(750×650) | 축소(375×325) | 용도 |
+|---|---|---|---|
+| IC 카드 요청 | `BG_IMG_IC.bmp` | `BG_IMG_IC_VERYSMALL.bmp` | §4.3 |
+| FALLBACK 카드 요청 | `BG_IMG_MS.bmp` | `BG_IMG_MS_VERYSMALL.bmp` | §4.4 |
+| VAN 서버 통신 중 | `BG_IMG_PROCESSING.bmp` | `BG_IMG_PROCESSING_VERYSMALL.bmp` | §4.10 |
+
+**이 PRD 범위 밖(요구사항 원문에 없음, 자산만 먼저 확보됨)**: `BG_IMG_LOCK.bmp`/`BG_IMG_QR.bmp`(및 각
+`_VERYSMALL` 버전)도 `docs/payment_relay/images/`에 있다 — 이름으로 미루어 잠금 화면/QR 결제용으로
+추정되나 이번 PRD의 어떤 흐름과도 아직 연결되지 않았다. 용도가 확정되기 전까지는 사용하지 않는다.
+
+실제 UI 디자인은 이 이미지 파일 기준으로 구현한다.
 
 ### 5.3 ESC 키 처리
 
@@ -327,7 +338,8 @@ POS로부터 결제 요청 전문을 수신하면 다음 순서로 결제를 처
 - KFTCTaxGiroCAP ↔ VAN 요청/응답 전문
 - `KFTC_GIRO.dll`에 전달할 VAN 입력 전문의 정확한 길이/구성, `outData` 출력 전문 길이/필요 Buffer 크기
 - `KFTC_GIRO.dll`용 `KFTC_GIROPOS.ini` 설정 파일(아직 이 저장소에 없음 — 배포 환경에서 별도 확보 필요)
-- 결제 알림창 이미지 자산(`BG_IMG_IC.bmp`, `BG_IMG_MS`, `BG_IMG_PROCESSING`) — 원본 파일 확보 필요
+- 알림창 "크기 조절" 기능의 상세 요구사항(트리거 조건, 기본/축소 중 무엇을 기본값으로 할지 등) — 이미지
+  자산(§5.2)만 먼저 확보된 상태이며 동작 요구사항은 아직 사용자로부터 정의되지 않음
 
 따라서 현재 개발 단계에서는 **임시 테스트 전문**을 정의해 다음 기능 위주로 로직을 검증한다: 소켓 요청
 수신/Queue 처리, Reader 제어, 무결성 체크, 카드 리딩, FALLBACK, 사용자 취소, Timeout, VAN DLL 호출(실제
