@@ -73,7 +73,8 @@ POS 프로그램
 
 - VAN 서버 통신은 `KFTC_GIRO.dll`을 사용한다. **이 DLL은 별도 SPEC 문서·샘플 소스가 없다** — 아래 함수
   시그니처와 사용 규칙이 현재 확보된 유일한 계약 정보다. DLL 파일 자체는
-  `docs/home_reader_setup/dll/KFTC_GIRO.dll`에 이미 있다(32bit/x86).
+  `docs/payment_relay/dll/KFTC_GIRO.dll`에 이미 있다(32bit/x86). 결제 알림창 이미지 자산(§5.2)도 확보되는
+  대로 같은 `docs/payment_relay/`(예: `docs/payment_relay/images/`) 아래에 모은다.
 - `KFTC_GIRO.dll`은 32bit(x86) DLL이므로 KFTCTaxGiroCAP(=`KFTCOneCAP.Wpf`)도 이 DLL을 직접 연동할 수
   있도록 **Win32(x86) 환경을 기준으로 구성**해야 한다 — `ReaderSerial.dll`과 동일한 제약(x86 전용,
   `PlatformTarget`을 `x86`으로 명시해야 함).
@@ -212,7 +213,8 @@ POS로부터 결제 요청 전문을 수신하면 다음 순서로 결제를 처
 - IC 카드 요청: `BG_IMG_IC.bmp`
 - FALLBACK 카드 요청: `BG_IMG_MS`
 - VAN 서버 통신 중: `BG_IMG_PROCESSING`
-- 실제 UI 디자인은 기존 이미지 파일 기준으로 구현한다(이미지 파일 확보 필요 — §10).
+- 실제 UI 디자인은 기존 이미지 파일 기준으로 구현한다. 확보되는 대로 `docs/payment_relay/images/`(신설
+  예정)에 모은다 — §10.
 
 ### 5.3 ESC 키 처리
 
