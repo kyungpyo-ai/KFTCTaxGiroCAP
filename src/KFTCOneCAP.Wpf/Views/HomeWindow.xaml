@@ -28,11 +28,11 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <!-- 헤더 -->
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="{StaticResource HomeHeaderCardGapGridLength}"/>
             <!-- 헤더-카드 사이 유연 간격 -->
             <RowDefinition Height="{StaticResource HomeCardVisualHGridLength}"/>
             <!-- 카드 4개 -->
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="{StaticResource HomeCardDividerGapGridLength}"/>
             <!-- 카드-구분선 사이 유연 간격 -->
             <RowDefinition Height="Auto"/>
             <!-- 하단 구분선 -->
@@ -87,9 +87,9 @@
                         Width="{StaticResource HomeHeaderLogSendBtnW}"
                         Height="{StaticResource HomeHeaderLogSendBtnH}">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#x2193;" FontSize="16" FontWeight="Bold"
+                        <TextBlock Text="&#x2193;" FontSize="{StaticResource HomeFooterButtonFontSize}" FontWeight="Bold"
                                    Foreground="{StaticResource LogSendHoverTextBrush}" VerticalAlignment="Center"/>
-                        <TextBlock Text="로그 전송" FontSize="16" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="로그 전송" FontSize="{StaticResource HomeFooterButtonFontSize}" Margin="6,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
                 <Button Style="{StaticResource UpdateButtonStyle}"
@@ -97,9 +97,9 @@
                         Height="{StaticResource HomeHeaderUpdateBtnH}"
                         Margin="0,6,0,0">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#x21BB;" FontSize="16" FontWeight="Bold"
+                        <TextBlock Text="&#x21BB;" FontSize="{StaticResource HomeFooterButtonFontSize}" FontWeight="Bold"
                                    Foreground="{StaticResource UpdateHoverTextBrush}" VerticalAlignment="Center"/>
-                        <TextBlock Text="최신 버전 업데이트" FontSize="16" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="최신 버전 업데이트" FontSize="{StaticResource HomeFooterButtonFontSize}" Margin="6,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -335,15 +335,15 @@
             테두리가 배경색과 같아 사실상 보이지 않음). Buttons.xaml AutoButtonStyle에서
             BorderThickness=0으로 교체.
         -->
-        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,20">
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Center" Margin="{StaticResource HomeFooterAreaMargin}">
             <Button x:Name="MinimizeButton" Style="{StaticResource AutoButtonStyle}"
                     Width="{StaticResource HomeFooterBtnW}" Height="{StaticResource HomeFooterBtnH}"
-                    FontSize="16" Click="MinimizeButton_Click">
+                    FontSize="{StaticResource HomeFooterButtonFontSize}" Click="MinimizeButton_Click">
                 <TextBlock Text="&#x2212; 최소화" FontFamily="{StaticResource PretendardFontFamily}"/>
             </Button>
             <Button x:Name="ExitButton" Style="{StaticResource AutoButtonStyle}"
                     Width="{StaticResource HomeFooterBtnW}" Height="{StaticResource HomeFooterBtnH}"
-                    FontSize="16" Margin="{StaticResource HomeFooterBtnMargin}" Click="ExitButton_Click">
+                    FontSize="{StaticResource HomeFooterButtonFontSize}" Margin="{StaticResource HomeFooterBtnMargin}" Click="ExitButton_Click">
                 <TextBlock Text="&#x23FB; 프로그램 종료" FontFamily="{StaticResource PretendardFontFamily}"/>
             </Button>
         </StackPanel>

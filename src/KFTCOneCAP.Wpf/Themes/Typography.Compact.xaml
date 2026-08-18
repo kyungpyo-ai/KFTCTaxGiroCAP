@@ -1,0 +1,162 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <!--
+        컴팩트 모드(화면 높이 ≤800px, PRD 미확정 사항 #6/2.2) 전용 타이포그래피 세트.
+        Themes/Typography.xaml(일반 모드)과 정확히 동일한 x:Key 셋을 갖는다 — App.xaml.cs가
+        시작 시 둘 중 하나만 MergedDictionaries에 등록하는 방식으로 스왑하므로, 이 파일 단독으로도
+        앱이 참조하는 모든 타이포그래피 키(PretendardFontFamily 포함)가 채워져 있어야 한다.
+
+        값 산출 방법(임의 판단, 2026-08-14 Phase 6):
+        PRD 2.2 표는 일반/컴팩트 각각의 pt 값을 제공하지만, 이 프로젝트의 실제 "일반" 모드 값은
+        Phase 4 가독성 개선/트렌디 개선을 거치며 PRD pt 값을 기계적으로 96/72 환산한 값에서 여러 번
+        축소 보정되어 있다(Typography.xaml 상단 주석 참고, 특히 리더기설정 화면). 컴팩트 세트도
+        같은 트렌디 보정을 유지해야 하므로, PRD가 제시하는 "그 항목의 컴팩트/일반 pt 비율"을
+        구해서 그 비율을 (PRD 리터럴이 아니라) Typography.xaml에 실제로 적용된 현재 값에 곱하는
+        방식으로 산출했다. 즉 "PRD 비율 상속 + 현재 트렌디 값 유지"가 원칙.
+
+        홈 화면 타이포그래피는 Phase 1~3에서 트렌디 보정 없이 PRD pt를 그대로 96/72 환산해서 썼기
+        때문에(HomeTitleTextStyle 25.33=19pt, HomeSubtitleTextStyle 17.33=13pt 등, 아래 계산에서
+        비율을 곱한 결과가 PRD 컴팩트 pt의 96/72 환산값과 정확히 일치함을 교차 검증함), 홈 화면은
+        비율을 적용하나 사실상 PRD 컴팩트 pt 값을 그대로 쓰는 것과 동일하다.
+    -->
+    <!--
+        2026-08-14 수정(사용자 피드백, 1024×768 실측: "이전 MFC에서도 이 해상도에서 Pretendard가
+        살짝 깨져 보이는 현상이 있었는데 지금도 있다"): PRD 1.5가 애초에 "컴팩트 화면에서도
+        Malgun Gothic"이라고 명시하고 있었는데(Pretendard 자체가 작은 픽셀 크기에서 최적화된
+        TrueType 힌팅이 없어 작은 한글 획이 흐려 보이는 게 원인 — 원본 MFC도 같은 폰트 파일을 쓰는
+        한 동일 현상을 겪었을 것), 구현 시 이 부분을 놓치고 일반 모드와 동일하게 Pretendard를
+        먼저 쓰도록 해뒀었다. `TextOptions.TextFormattingMode="Display"` 적용도 시도했으나 실제
+        해상도에서 체감 차이가 없어 되돌리고(HomeWindow.xaml/ReaderSetupWindow.xaml 참고), PRD
+        원문대로 컴팩트 모드는 Malgun Gothic을 폰트로 직접 사용하도록 변경 — Windows 내장 시스템
+        폰트라 ClearType 힌팅이 잘 되어 있어 작은 크기에서도 획이 깨끗하다. 키 이름(Pretendard*)은
+        일반/컴팩트 양쪽에서 View가 참조하는 이름을 그대로 유지하기 위해 안 바꿈(다른 리소스 키와
+        동일한 패턴 — 같은 키, 모드별로 다른 값).
+    -->
+    <FontFamily x:Key="PretendardFontFamily">Malgun Gothic</FontFamily>
+    <FontFamily x:Key="PretendardMediumFontFamily">Malgun Gothic</FontFamily>
+
+    <!-- ===================== 홈 화면 ===================== -->
+
+    <!-- 타이틀 "KFTCOneCAP" : PRD 컴팩트 16pt → 96/72 환산 21.33px (비율 16/19 = 0.842 적용과 동일) -->
+    <Style x:Key="HomeTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="21.33"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+    </Style>
+
+    <!-- 서브타이틀 : PRD 컴팩트 10pt → 13.33px -->
+    <Style x:Key="HomeSubtitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="13.33"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource SubTextBrush}"/>
+    </Style>
+
+    <!-- 카드 제목 : PRD 컴팩트 12pt → 16px -->
+    <Style x:Key="HomeCardTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="16"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource CardTitleTextBrush}"/>
+    </Style>
+
+    <!-- 카드 설명 : PRD 컴팩트 8pt → 10.67px -->
+    <Style x:Key="HomeCardDescriptionTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="10.67"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource SubTextBrush}"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+
+    <!-- 하단 버튼(최소화/종료/로그전송/업데이트) 폰트 크기 : PRD 컴팩트 10pt → 13.33px -->
+    <sys:Double x:Key="HomeFooterButtonFontSize">13.33</sys:Double>
+
+    <!-- ===================== 리더기 설정 화면 ===================== -->
+    <!--
+        아래는 전부 "PRD 컴팩트/일반 pt 비율 × Typography.xaml(일반)의 실제 트렌디 보정값"으로 산출.
+        헤더 타이틀/섹션 제목: 비율 15/18=0.833·13/15=0.867. 서브타이틀: 11/13=0.846.
+        본문/라벨/콤보 계열(PRD "일반 텍스트"/"라벨"): 비율 12/14=0.857.
+        작은 텍스트(리스트 셀/헤더/빈 상태, PRD "작은 텍스트" 10/12): 비율 0.833.
+    -->
+
+    <!-- 헤더 타이틀 : 19 × 0.833 ≈ 15.83 -->
+    <Style x:Key="ReaderHeaderTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="15.83"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+    </Style>
+
+    <!-- 헤더 서브타이틀 : 13.33 × 0.846 ≈ 11.28 -->
+    <Style x:Key="ReaderHeaderSubtitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="11.28"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource SubTextBrush}"/>
+    </Style>
+
+    <!-- 섹션 제목 : 15.33 × 0.867 ≈ 13.29 -->
+    <Style x:Key="ReaderSectionTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="13.29"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource CardTitleTextBrush}"/>
+    </Style>
+
+    <!-- 일반 텍스트(콤보/버튼/리스트 본문) : 14.67 × 0.857 ≈ 12.57 -->
+    <Style x:Key="ReaderBodyTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
+        <Setter Property="FontSize" Value="12.57"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+    </Style>
+
+    <!-- 콤보박스 폰트 크기 : 15.33 × 0.857 ≈ 13.14 (같은 "일반 텍스트" 비율 적용) -->
+    <sys:Double x:Key="ReaderComboFontSize">13.14</sys:Double>
+
+    <!-- 라벨(카드/토글) : 13.0 × 0.857 ≈ 11.14 -->
+    <Style x:Key="ReaderLabelTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
+        <Setter Property="FontSize" Value="11.14"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource CardTitleTextBrush}"/>
+    </Style>
+
+    <!-- 리스트 테이블 컬럼 헤더 : 12.67 × 0.833 ≈ 10.56 -->
+    <Style x:Key="ReaderTableHeaderTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
+        <Setter Property="FontSize" Value="10.56"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource TblHdrTextBrush}"/>
+        <Setter Property="TextAlignment" Value="Center"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <!-- 리스트 테이블 데이터 셀 : 13.0 × 0.833 ≈ 10.83 -->
+    <Style x:Key="ReaderTableCellTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="10.83"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource TblBodyTextBrush}"/>
+        <Setter Property="TextAlignment" Value="Center"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <!-- 작은 텍스트(빈 상태 문구 등) : 13.33 × 0.833 ≈ 11.11 -->
+    <Style x:Key="ReaderSmallTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontSize" Value="11.11"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource TblBodyTextBrush}"/>
+    </Style>
+
+    <!-- 확인/취소 버튼 폰트 크기 : 14 × 0.889(버튼 높이 비율과 동일) ≈ 12.44 -->
+    <sys:Double x:Key="ReaderBottomBtnFontSize">12.44</sys:Double>
+
+</ResourceDictionary>

@@ -1,0 +1,191 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <!--
+        컴팩트 모드(화면 높이 ≤800px, PRD 미확정 사항 #6/3.2/3.3) 전용 레이아웃 치수 세트.
+        Themes/Layout.xaml(일반 모드)과 정확히 동일한 x:Key 셋을 갖는다 — App.xaml.cs가 시작 시
+        SystemParameters 기준으로 두 파일 중 하나만 MergedDictionaries에 등록해서 스왑한다
+        (docs/ROADMAP.md Phase 2/6 안내 참고).
+
+        값 산출 방법(임의 판단, 2026-08-14 Phase 6):
+        - 홈 화면(3.3장)은 PRD가 일반/컴팩트 리터럴을 직접 제공하는 항목(창 크기 840×420,
+          marginX 36, cardGap 12, cardVisualH 210)은 그 값을 그대로 채택.
+        - PRD가 컴팩트 값을 명시하지 않은 홈 화면 세부 수치(로고 크기, 아이콘-제목 간격, 카드
+          콘텐츠 패딩 등)와 리더기 설정 화면 전체(PRD 4장은 컴팩트 수치를 부분적으로만 제공,
+          그마저도 Phase 4~5에서 트렌디 보정이 들어가 있음)는, "PRD가 제공하는 그 항목의
+          컴팩트/일반 비율"을 구해서 그 비율을 현재 Layout.xaml의 실제(보정 후) 값에 곱하는
+          방식으로 근사했다(Typography.Compact.xaml과 동일한 원칙).
+        - 리더기 설정 화면에서 사용한 비율: 콤보 폭 178→152(PRD 4.4)에서 유도한 폭 비율
+          ≈0.854, 확인/취소 버튼 높이 36→32(PRD 4.3)에서 유도한 높이 비율 ≈0.889, 카드 높이
+          128→102(PRD 4.3)에서 유도한 카드높이 비율 ≈0.797, 카드 간격 12→8(PRD 4.3)에서 유도한
+          간격 비율 ≈0.667, 리스트 높이 166→138(PRD 4.3)에서 유도한 리스트높이 비율 ≈0.831.
+          PRD가 컴팩트 값을 별도로 주지 않은 항목(번호 뱃지 34×34, 액션버튼 폭 100, info버튼
+          18~22px)은 원본 표기 자체가 두 모드 공통이라고 해석해 값을 그대로 유지했다.
+        - 리더기 설정 창 크기(ReaderWindowWidth/Height)는 위 축소된 컴포넌트 치수를 실제로
+          SizeToContent="WidthAndHeight"로 1회 렌더링해 실측한 결과값을 고정한 것이다(일반 모드와
+          동일한 방법론, Layout.xaml 해당 키 주석 참고) — 실측 절차: 아래 검증 참고.
+    -->
+
+    <!-- 창 크기 (고정, ResizeMode=NoResize) — PRD 3.2 "컴팩트 모드는 840×420(96dpi 기준) 사용" -->
+    <sys:Double x:Key="HomeWindowWidth">840</sys:Double>
+    <sys:Double x:Key="HomeWindowHeight">420</sys:Double>
+
+    <!--
+        좌우 여백(36)/헤더 상단(27, marginX 비율 36/50=0.72로 근사) — Layout.xaml과 동일하게
+        개별 sys:Double 키(HomeMarginX/HomeHeaderTop)는 어디서도 StaticResource로 참조되지 않아
+        2026-08-14 Phase 6 코드 정리에서 제거, 값은 아래 Thickness에만 반영.
+    -->
+
+    <!-- 헤더 로고 — cardVisualH 비율(210/260≈0.808)로 근사 -->
+    <sys:Double x:Key="HomeLogoBoxSize">44</sys:Double>
+
+    <!-- 카드 영역 — PRD 3.3 cardGap=12, cardVisualH=210(GridLength 버전만 실사용) -->
+    <CornerRadius x:Key="HomeCardCornerRadius">16</CornerRadius>
+
+    <GridLength x:Key="HomeCardGapGridLength">12</GridLength>
+    <GridLength x:Key="HomeCardVisualHGridLength">210</GridLength>
+
+    <!--
+        2026-08-18 추가(사용자 피드백, 1024×768 컴팩트 모드 실측: "최소화/종료 버튼과 카드들을
+        구분하는 가로선이 너무 위에 붙어있다, 중간에 위치시켜달라"): 헤더-카드 사이(Row1)/
+        카드-구분선 사이(Row3) 간격 비율을 분리해, 카드-구분선 사이(Row3) 쪽 비중을 더 크게 줘서
+        구분선이 카드-푸터버튼 사이 공간의 중앙 쪽으로 내려오도록 했다(Layout.xaml은 1:1 유지,
+        회귀 없음). 1*:2*, 1*:2.8*로 시도했으나 실측 스크린샷 대조 결과 육안으로 거의 체감이
+        안 될 만큼 미미한 변화였다(전체 여유 공간 자체가 작아 비율을 조금 바꾸는 정도로는 눈에
+        띄는 차이가 안 남) — 1*:6*으로 크게 올려서야 카드-구분선 간격이 뚜렷하게 벌어지는 것을
+        확인, 이 값으로 확정.
+    -->
+    <GridLength x:Key="HomeHeaderCardGapGridLength">1*</GridLength>
+    <GridLength x:Key="HomeCardDividerGapGridLength">6*</GridLength>
+
+    <!-- 카드 아이콘 — 인셋(22, PRD 3.4)은 HomeCardContentMargin에 반영되어 별도 키 불필요 -->
+    <sys:Double x:Key="HomeCardIconBoxSize">45</sys:Double>
+    <CornerRadius x:Key="HomeCardIconCornerRadius">10</CornerRadius>
+
+    <!-- 카드 내부 아이콘-제목 간격 — Layout.xaml 24를 cardVisualH 비율(0.808)로 근사 -->
+    <GridLength x:Key="HomeCardIconTitleGapGridLength">19</GridLength>
+
+    <!-- 헤더 버튼(로그 전송 / 최신 버전 업데이트) — PRD 3.3 컴팩트 리터럴 -->
+    <sys:Double x:Key="HomeHeaderLogSendBtnW">125</sys:Double>
+    <sys:Double x:Key="HomeHeaderLogSendBtnH">32</sys:Double>
+    <sys:Double x:Key="HomeHeaderUpdateBtnW">180</sys:Double>
+    <sys:Double x:Key="HomeHeaderUpdateBtnH">32</sys:Double>
+
+    <!-- 하단 버튼(최소화 / 종료) — PRD 3.3 컴팩트 리터럴, 간격(12)은 HomeFooterBtnMargin만 실사용 -->
+    <sys:Double x:Key="HomeFooterBtnW">156</sys:Double>
+    <sys:Double x:Key="HomeFooterBtnH">34</sys:Double>
+
+    <Thickness x:Key="HomeHeaderMargin">36,27,36,0</Thickness>
+    <Thickness x:Key="HomeCardsAreaMargin">36,0,36,0</Thickness>
+    <Thickness x:Key="HomeDividerMargin">36,0,36,0</Thickness>
+    <Thickness x:Key="HomeFooterBtnMargin">12,0,0,0</Thickness>
+
+    <!-- 하단 버튼 행 상하 여백 — 컴팩트 예산(420px 중 카드 210px 고정)이 빠듯해 20→10으로 축소 -->
+    <Thickness x:Key="HomeFooterAreaMargin">0,10,0,10</Thickness>
+
+    <!-- 카드 내부 콘텐츠 패딩 — Layout.xaml "28,28,20,24"를 cardVisualH 비율(0.808)로 근사 -->
+    <Thickness x:Key="HomeCardContentMargin">23,23,16,19</Thickness>
+
+    <!-- ===================== 리더기 설정 화면 (PRD 4장) ===================== -->
+
+    <!--
+        창 크기 — 아래 컴포넌트 치수를 SizeToContent="WidthAndHeight"로 1회 렌더링해 GetWindowRect로
+        실측한 값(2026-08-14 Phase 6, 일반 모드와 동일한 방법론). 액션 버튼 폭(100, PRD 4.4가
+        컴팩트 값을 별도로 주지 않아 양쪽 모드 동일 유지)이 카드 폭의 하한선이 되어, 다른 요소들이
+        줄어든 것에 비해 창 폭 자체는 일반 모드(744) 대비 소폭만 줄어든다(측정값 722).
+
+        2026-08-14 재실측 #1(사용자 피드백, 1024×768 컴팩트 모드 실측: "COM 01 콤보박스만 엄청 큼" +
+        "창이 너무 화면을 꽉채워"): 최초 측정(749) 당시 ComboBox.xaml의 FontSize/Padding이
+        리터럴(15.33/10,6)로 고정돼 있어 컴팩트 모드에서도 줄어들지 않는 버그가 있었다 — 그
+        버그가 있는 채로 측정된 값이라 실제 필요한 것보다 19px 더 컸다. ReaderComboFontSize/
+        ReaderComboPadding 리소스로 분리해 버그를 고친 뒤 다시 SizeToContent로 측정해 730으로
+        갱신했다.
+
+        2026-08-14 재실측 #2(사용자 피드백: "Pretendard가 1024×768에서 살짝 깨져 보인다" → PRD
+        1.5 원문대로 컴팩트 모드 폰트를 Malgun Gothic으로 전환, Typography.Compact.xaml 참고):
+        Malgun Gothic이 Pretendard보다 줄 높이(line height)가 커서 전체 다이얼로그의 실제 필요
+        높이가 늘어났다 — 하단 확인/취소 버튼 텍스트가 730 높이 안에서 잘려 보이는 문제가 발생해
+        (버튼 자체의 폰트/패딩 문제가 아니라 창 전체 높이 부족으로 맨 아래 요소가 잘린 것으로
+        확인) 다시 SizeToContent로 측정해 742로 갱신했다.
+
+        2026-08-18 재실측 #3(사용자 피드백, 실제 1024×768 PC 실측: "아래가 살짝 안보여"): 1024×768
+        화면은 작업표시줄을 뺀 workarea가 742px보다 작아(전형적으로 약 720~730px) 창 하단이
+        화면을 벗어나 잘려 보였다. 세로 방향 패딩/여백(ReaderMainCardPadding 상하 18→12,
+        ReaderSubCardPadding 상하 11→8, ReaderCardPadding 상하 9→7, ReaderCardGapMargin 5→4,
+        ReaderListHeightGridLength 118→100)을 축소한 뒤 다시 SizeToContent로 측정해 691로
+        갱신했다(확인/취소 버튼 텍스트 잘림 없음, 카드/리스트 간격도 부자연스럽지 않음을 스크린샷
+        대조로 확인).
+    -->
+    <sys:Double x:Key="ReaderWindowWidth">722</sys:Double>
+    <sys:Double x:Key="ReaderWindowHeight">691</sys:Double>
+
+    <!-- 메인 카드 -->
+    <CornerRadius x:Key="ReaderMainCardCornerRadius">14</CornerRadius>
+    <Thickness x:Key="ReaderMainCardPadding">24,12,24,12</Thickness>
+
+    <!-- 헤더 아이콘 — 폭 비율(0.854)로 근사 -->
+    <sys:Double x:Key="ReaderHeaderIconBoxSize">39</sys:Double>
+    <CornerRadius x:Key="ReaderHeaderIconCornerRadius">10</CornerRadius>
+
+    <!-- 섹션 제목 좌측 블루 바 -->
+    <sys:Double x:Key="ReaderSectionBarWidth">4</sys:Double>
+    <sys:Double x:Key="ReaderSectionBarHeight">12</sys:Double>
+
+    <!-- 서브 카드(포트 설정 / 무결성 체크 정보) -->
+    <CornerRadius x:Key="ReaderSubCardCornerRadius">14</CornerRadius>
+    <Thickness x:Key="ReaderSubCardPadding">15,8,15,8</Thickness>
+
+    <!-- 리더기 카드(1/2 공통) — 카드높이 비율(0.797)/간격 비율(0.667) 적용(간격은 Margin만 실사용) -->
+    <sys:Double x:Key="ReaderCardMinHeight">89</sys:Double>
+    <Thickness x:Key="ReaderCardGapMargin">0,4,0,0</Thickness>
+    <Thickness x:Key="ReaderCardPadding">12,7,12,7</Thickness>
+
+    <!-- 좌측 번호 뱃지 — PRD 4.4가 컴팩트 값을 별도로 주지 않아 유지 -->
+    <sys:Double x:Key="ReaderBadgeSize">30</sys:Double>
+    <CornerRadius x:Key="ReaderBadgeCornerRadius">5</CornerRadius>
+
+    <!-- COM 포트 콤보 — PRD 4.4 178/152 -->
+    <sys:Double x:Key="ReaderComboWidth">152</sys:Double>
+
+    <!-- 콤보박스 내부 패딩 — 폭 축소에 맞춰 패딩도 축소(일반 10,6 대비 근사 비율) -->
+    <Thickness x:Key="ReaderComboPadding">8,4</Thickness>
+
+    <!-- 액션 버튼 — 폭은 PRD "100폭" 컴팩트 값 없음(유지), 높이만 비율(0.889) 적용, 간격은 Margin만 실사용 -->
+    <sys:Double x:Key="ReaderActionButtonWidth">100</sys:Double>
+    <sys:Double x:Key="ReaderActionButtonHeight">28</sys:Double>
+
+    <!-- info 버튼 — PRD 2.3 "18~22px" 양쪽 모드 공통 해석, 유지 -->
+    <sys:Double x:Key="ReaderInfoButtonSize">18</sys:Double>
+
+    <!-- "포트 열기" 토글 자리(Hidden 플레이스홀더) — 폭 비율(0.854) 적용 -->
+    <sys:Double x:Key="ReaderPortOpenPlaceholderWidth">126</sys:Double>
+
+    <Thickness x:Key="ReaderToggleInfoGapMargin">5,0,0,0</Thickness>
+    <Thickness x:Key="ReaderToggleGroupGapMargin">20,0,0,0</Thickness>
+    <Thickness x:Key="ReaderActionButtonGapMargin">7,0,0,0</Thickness>
+    <Thickness x:Key="ReaderBottomBtnGapMargin">14,0,0,0</Thickness>
+
+    <!-- 무결성 체크 정보: 조회기간 콤보 / 조회 버튼 — 폭 비율(0.854)/높이 비율(0.889) 적용 -->
+    <sys:Double x:Key="ReaderQueryComboWidth">94</sys:Double>
+    <!--
+        2026-08-18 수정(사용자 피드백: "컴팩트 모드에서 조회 버튼 누르면 '조회중...'으로 바뀌는데
+        글자가 잘림"): Layout.xaml의 ReaderQueryButtonWidth(72→88) 수정과 동일한 원인 — 로딩 중
+        Content가 "조회중..."(6자)+스피너로 바뀌는데 평상시 라벨(2자) 기준 폭(61)이 부족했다.
+        Layout.xaml의 88에 동일 비율(0.854)을 적용해 75로 확대.
+    -->
+    <sys:Double x:Key="ReaderQueryButtonWidth">75</sys:Double>
+    <sys:Double x:Key="ReaderQueryButtonHeight">28</sys:Double>
+
+    <!-- 무결성 체크 리스트 — PRD 4.3/4.6 리스트높이 비율(0.831), 헤더는 높이 비율(0.889) 적용(GridLength만 실사용) -->
+    <GridLength x:Key="ReaderListHeightGridLength">100</GridLength>
+    <GridLength x:Key="ReaderListHeaderHeightGridLength">28</GridLength>
+
+    <!-- 하단 확인/취소 버튼 — PRD 4.3 폭 110 공통, 높이 비율(0.889) 적용, 간격은 Margin만 실사용 -->
+    <sys:Double x:Key="ReaderBottomBtnW">110</sys:Double>
+    <sys:Double x:Key="ReaderBottomBtnH">28</sys:Double>
+
+    <!-- 확인/취소 버튼 패딩 — 상하 패딩을 8→2로 줄여 Malgun Gothic 줄 높이가 28px 안에 들어오게 함 -->
+    <Thickness x:Key="ReaderBottomBtnPadding">16,2</Thickness>
+
+</ResourceDictionary>

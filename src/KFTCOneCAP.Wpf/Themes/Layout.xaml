@@ -19,29 +19,43 @@
     <sys:Double x:Key="HomeWindowWidth">1104</sys:Double>
     <sys:Double x:Key="HomeWindowHeight">567</sys:Double>
 
-    <!-- 좌우 여백 / 헤더 상단 여백 -->
-    <sys:Double x:Key="HomeMarginX">50</sys:Double>
-    <sys:Double x:Key="HomeHeaderTop">38</sys:Double>
+    <!--
+        좌우 여백(50) / 헤더 상단 여백(38) — PRD 3.3 marginX/헤더 상단 수치. 개별 Width/Height
+        속성에 바인딩하는 곳이 없어(전부 아래 HomeHeaderMargin 등 Thickness 완제품으로만 쓰임)
+        2026-08-14 Phase 6 코드 정리에서 미사용 sys:Double 키(HomeMarginX/HomeHeaderTop) 자체는
+        제거하고, 값은 아래 Thickness 리소스에만 남겨둔다.
+    -->
 
     <!-- 헤더 로고 -->
     <sys:Double x:Key="HomeLogoBoxSize">54</sys:Double>
 
-    <!-- 카드 영역 -->
-    <sys:Double x:Key="HomeCardGap">18</sys:Double>
-    <sys:Double x:Key="HomeCardVisualH">260</sys:Double>
+    <!-- 카드 영역 — 카드 간격(18)/카드 높이(260)는 GridLength 버전만 사용(바로 아래) -->
     <CornerRadius x:Key="HomeCardCornerRadius">20</CornerRadius>
 
     <!--
         GridLength 버전 — RowDefinition.Height / ColumnDefinition.Width 는 double 이 아니라
-        GridLength 타입이라 위 sys:Double 리소스를 그대로 바인딩하면 XamlParseException 발생.
-        값은 항상 위 HomeCardGap/HomeCardVisualH 와 동일하게 유지할 것.
+        GridLength 타입이라 sys:Double 리소스를 그대로 바인딩하면 XamlParseException 발생.
+        이 두 값이 카드 간격(18)/카드 높이(260)의 유일한 실사용처(2026-08-14 Phase 6 코드 정리에서
+        미사용 sys:Double 버전 HomeCardGap/HomeCardVisualH 제거).
     -->
     <GridLength x:Key="HomeCardGapGridLength">18</GridLength>
     <GridLength x:Key="HomeCardVisualHGridLength">260</GridLength>
 
-    <!-- 카드 아이콘 -->
+    <!--
+        2026-08-18 추가(사용자 피드백, 컴팩트 모드 1024×768 실측: "구분선이 너무 위에 붙어있다"):
+        헤더-카드 사이(Row1)/카드-구분선 사이(Row3) 간격을 리터럴 "*" 대신 리소스로 분리해 모드별
+        비율을 다르게 줄 수 있게 했다. 일반 모드는 기존과 동일하게 1:1 비율을 유지해야 하므로
+        두 값 모두 그대로 "*"를 쓴다(회귀 없음).
+    -->
+    <GridLength x:Key="HomeHeaderCardGapGridLength">*</GridLength>
+    <GridLength x:Key="HomeCardDividerGapGridLength">*</GridLength>
+
+    <!--
+        카드 아이콘 — 인셋(28)은 PRD 3.4 설명값이며 실제로는 아래 HomeCardContentMargin(좌상단
+        28,28)에 이미 반영되어 있어 별도 sys:Double 리소스(HomeCardIconInset)는 미사용으로
+        확인되어 2026-08-14 Phase 6 코드 정리에서 제거함.
+    -->
     <sys:Double x:Key="HomeCardIconBoxSize">56</sys:Double>
-    <sys:Double x:Key="HomeCardIconInset">28</sys:Double>
     <CornerRadius x:Key="HomeCardIconCornerRadius">12</CornerRadius>
 
     <!--
@@ -59,22 +73,33 @@
     <sys:Double x:Key="HomeHeaderUpdateBtnW">205</sys:Double>
     <sys:Double x:Key="HomeHeaderUpdateBtnH">36</sys:Double>
 
-    <!-- 하단 버튼 (최소화 / 종료) -->
+    <!--
+        하단 버튼(최소화/종료) — 간격(16)은 HomeFooterBtnMargin(아래) Thickness로만 쓰여
+        sys:Double 버전(HomeFooterBtnGap)은 2026-08-14 Phase 6 코드 정리에서 제거.
+    -->
     <sys:Double x:Key="HomeFooterBtnW">184</sys:Double>
     <sys:Double x:Key="HomeFooterBtnH">40</sys:Double>
-    <sys:Double x:Key="HomeFooterBtnGap">16</sys:Double>
 
     <!--
         복합 Margin(Thickness) 리소스 — XAML 속성 하나에 여러 {StaticResource}를 섞어 쓸 수 없어
-        (마크업 확장은 속성 값 전체를 단일 확장으로 파싱) 위 개별 치수를 조합한 Thickness를
-        별도 키로 둔다. 값의 출처는 항상 위 개별 리소스와 동일(HomeMarginX/HomeHeaderTop).
+        (마크업 확장은 속성 값 전체를 단일 확장으로 파싱) 개별 치수를 조합한 Thickness를 완제품
+        키로 둔다. 값의 출처는 PRD 3.3 marginX(50)/헤더 상단(38)/하단버튼 간격(16).
     -->
     <Thickness x:Key="HomeHeaderMargin">50,38,50,0</Thickness>
     <Thickness x:Key="HomeCardsAreaMargin">50,0,50,0</Thickness>
     <Thickness x:Key="HomeDividerMargin">50,0,50,0</Thickness>
     <Thickness x:Key="HomeFooterBtnMargin">16,0,0,0</Thickness>
 
-    <!-- 카드 내부 콘텐츠 패딩: 좌상단은 HomeCardIconInset(28)과 동일한 값을 사용 -->
+    <!--
+        하단 최소화/종료 버튼 행 상하 여백 — 2026-08-14 발견(사용자 피드백: 1024×768 컴팩트 모드
+        실측에서 "구분선과 버튼이 너무 붙어 보임"). Views/HomeWindow.xaml이 이 값을
+        "0,20,0,20" 리터럴로 하드코딩하고 있어 컴팩트 모드에서도 줄어들지 않았다 — 구분선/카드
+        영역은 컴팩트 리소스로 줄어드는데 이 여백만 그대로라 상대적으로 좁아 보였다(실제 추가된
+        선이 아니라 기존 구분선과 버튼 사이 간격이 압축되어 보인 것).
+    -->
+    <Thickness x:Key="HomeFooterAreaMargin">0,20,0,20</Thickness>
+
+    <!-- 카드 내부 콘텐츠 패딩: 좌상단은 PRD 3.4 아이콘 인셋(28)과 동일한 값을 사용 -->
     <Thickness x:Key="HomeCardContentMargin">28,28,20,24</Thickness>
 
     <!--
@@ -124,10 +149,12 @@
     <CornerRadius x:Key="ReaderSubCardCornerRadius">16</CornerRadius>
     <Thickness x:Key="ReaderSubCardPadding">18,12,18,12</Thickness>
 
-    <!-- 리더기 카드(1/2 공통) — PRD 4.3 기준값(128/12)에서 세로 축소 보정 적용 -->
+    <!--
+        리더기 카드(1/2 공통) — PRD 4.3 기준값(128/12)에서 세로 축소 보정 적용. 카드 간격(8)은
+        Margin 속성에 바로 쓰는 아래 ReaderCardGapMargin(Thickness)만 실사용되어 2026-08-14
+        Phase 6 코드 정리에서 sys:Double 버전(ReaderCardGap)은 제거.
+    -->
     <sys:Double x:Key="ReaderCardMinHeight">112</sys:Double>
-    <sys:Double x:Key="ReaderCardGap">8</sys:Double>
-    <!-- Margin 속성에 직접 넣기 위한 Thickness 버전(ReaderCardGap과 동일 값 유지) -->
     <Thickness x:Key="ReaderCardGapMargin">0,8,0,0</Thickness>
     <Thickness x:Key="ReaderCardPadding">14,10,14,10</Thickness>
 
@@ -138,10 +165,20 @@
     <!-- COM 포트 콤보 — PRD 4.3/4.4: 178/152(일반/컴팩트), 폭은 원본과 이미 일치해 유지 -->
     <sys:Double x:Key="ReaderComboWidth">178</sys:Double>
 
-    <!-- 액션 버튼(초기화/상태체크/키다운로드/무결성체크/업데이트) — 폭은 PRD 100 유지, 높이만 축소 -->
+    <!--
+        콤보박스 내부 패딩 — 2026-08-14 발견(사용자 피드백, 1024×768 컴팩트 모드 실측): 폭만
+        152로 줄어들고 패딩/폰트가 그대로라 콤보가 다른 요소 대비 비정상적으로 커 보였다.
+        Themes/ComboBox.xaml SkinnedComboBoxStyle이 리터럴 대신 이 키를 참조하도록 변경.
+    -->
+    <Thickness x:Key="ReaderComboPadding">10,6</Thickness>
+
+    <!--
+        액션 버튼(초기화/상태체크/키다운로드/무결성체크/업데이트) — 폭은 PRD 100 유지, 높이만 축소.
+        버튼 사이 간격(8)은 아래 ReaderActionButtonGapMargin(Thickness)만 실사용되어 2026-08-14
+        Phase 6 코드 정리에서 sys:Double 버전(ReaderActionButtonGap)은 제거.
+    -->
     <sys:Double x:Key="ReaderActionButtonWidth">100</sys:Double>
     <sys:Double x:Key="ReaderActionButtonHeight">32</sys:Double>
-    <sys:Double x:Key="ReaderActionButtonGap">8</sys:Double>
 
     <!-- info 버튼(CInfoIconButton 대응) — PRD 2.3: 18~22px 원형, 축소 보정 -->
     <sys:Double x:Key="ReaderInfoButtonSize">18</sys:Double>
@@ -168,19 +205,41 @@
 
     <!-- 무결성 체크 정보: 조회기간 콤보 / 조회 버튼 -->
     <sys:Double x:Key="ReaderQueryComboWidth">110</sys:Double>
-    <sys:Double x:Key="ReaderQueryButtonWidth">72</sys:Double>
+    <!--
+        2026-08-18 수정(사용자 피드백: "조회 버튼 누르면 '조회중...'으로 바뀌는데 글자가 잘림"):
+        평상시 라벨 "조회"(2자)만 고려해 72로 잡았으나, 로딩 중에는 QueryButton_Click(코드비하인드)이
+        Content를 "조회중..."(6자)으로 바꾸고 스피너(ReaderButtonStyle)까지 함께 표시되어 폭이
+        부족했다. 같은 스타일을 쓰는 액션 버튼(ReaderActionButtonWidth=100)은 이보다 긴 로딩 문구
+        "다운로드중..."(7자)도 잘림 없이 들어가므로, 그 폭 대비 짧은 문구 기준으로 88로 확대.
+    -->
+    <sys:Double x:Key="ReaderQueryButtonWidth">88</sys:Double>
     <sys:Double x:Key="ReaderQueryButtonHeight">32</sys:Double>
 
-    <!-- 무결성 체크 리스트 — PRD 4.3/4.6 기준값(166/36)에서 세로 축소 보정, 가시 3행 고정 유지 -->
-    <sys:Double x:Key="ReaderListHeight">142</sys:Double>
-    <sys:Double x:Key="ReaderListHeaderHeight">32</sys:Double>
-    <!-- GridLength 버전(RowDefinition.Height 바인딩용, HomeCardVisualHGridLength와 동일 사유) -->
+    <!--
+        무결성 체크 리스트 — PRD 4.3/4.6 기준값(166/36)에서 세로 축소 보정, 가시 3행 고정 유지.
+        RowDefinition.Height는 GridLength 타입이라(HomeCardVisualHGridLength와 동일 사유) 아래
+        GridLength 버전만 실사용 — 2026-08-14 Phase 6 코드 정리에서 미사용 sys:Double 버전
+        (ReaderListHeight/ReaderListHeaderHeight)은 제거.
+    -->
     <GridLength x:Key="ReaderListHeightGridLength">142</GridLength>
     <GridLength x:Key="ReaderListHeaderHeightGridLength">32</GridLength>
 
-    <!-- 하단 확인/취소 버튼 — PRD 4.3 기준값(110x36)에서 높이 축소 보정, 간격은 기존 패턴(16) 유지 -->
+    <!--
+        하단 확인/취소 버튼 — PRD 4.3 기준값(110x36)에서 높이 축소 보정, 간격은 기존 패턴(16)
+        유지(위 ReaderBottomBtnGapMargin Thickness만 실사용 — 2026-08-14 Phase 6 코드 정리에서
+        미사용 sys:Double 버전 ReaderBottomBtnGap은 제거).
+    -->
     <sys:Double x:Key="ReaderBottomBtnW">110</sys:Double>
     <sys:Double x:Key="ReaderBottomBtnH">32</sys:Double>
-    <sys:Double x:Key="ReaderBottomBtnGap">16</sys:Double>
+
+    <!--
+        확인/취소 버튼 내부 패딩 — 2026-08-14 발견(사용자 피드백, Malgun Gothic 전환 후 1024×768
+        실측: "확인"/"취소" 텍스트 하단이 잘려 보임). PrimaryButtonStyle/ReaderSecondaryButtonStyle이
+        상속하는 ModernButtonBase의 기본 Padding("16,8", 상하 8+8=16)이 고정 높이 버튼(이 두
+        버튼만 Width/Height를 명시적으로 고정)과 결합되면 컴팩트 높이(28)에서 여유가 거의 없는데,
+        Malgun Gothic이 Pretendard보다 줄 높이가 커 실제로 잘렸다 — 이 두 버튼에 한해 Padding을
+        오버라이드(ModernButtonBase 기본값을 다른 버튼에까지 건드리지 않기 위해).
+    -->
+    <Thickness x:Key="ReaderBottomBtnPadding">16,8</Thickness>
 
 </ResourceDictionary>

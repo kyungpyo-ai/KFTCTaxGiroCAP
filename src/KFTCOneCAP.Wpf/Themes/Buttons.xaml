@@ -401,22 +401,33 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <!--
-                            호버: 미세 확대(1.005) + 글로우만(리프트 없음).
+                            호버: 글로우만(리프트도 확대도 없음).
                             2026-08-14 변경(사용자 지시): 기존엔 5px 위로 뜨는 리프트(TranslateTransform
                             Y)도 있었으나, 모달(리더기 설정 등)을 한 번이라도 연 카드에서만 그 카드의
                             리프트가 다시 발동하지 않는 렌더링/컴포지션 버그(docs/ROADMAP.md "알려진
                             이슈" 참고, 여러 방식으로 시도했으나 원인 미해결)가 있어 리프트 자체를
                             없앴다. 리프트를 뺀 뒤로는 이 버그의 발동 조건(리프트 트랜스폼 재생)이
                             사라지므로 증상도 함께 사라진다.
+
+                            2026-08-18 추가 변경(사용자 피드백: "저해상도에서 호버 시 글자가
+                            꿀렁거리고, 일반 해상도에서도 호버 반응이 느려 렉 걸린 것처럼 보임"):
+                            남아있던 미세 확대(1.005) 애니메이션이 매 프레임 Border 하위 트리(텍스트
+                            포함)를 벡터로 다시 래스터라이즈해 ClearType 서브픽셀 위치가 흔들리고,
+                            그 재계산 비용 때문에 반응도 둔해 보이는 원인이었다. CacheMode=
+                            "BitmapCache"로 비트맵을 캐싱해 GPU로만 확대하는 방식도 시도했으나,
+                            캐시된 비트맵을 실제로 확대하는 순간(RenderAtScale을 아무리 올려도) 항상
+                            약간의 리샘플링 흐림이 남았고, 캐싱 자체가 평상시(호버 전) 렌더링에도
+                            영향을 줘 대기 상태에서도 살짝 흐려 보이는 새 문제가 생겼다(원인: 캐시된
+                            비트맵이 픽셀 그리드에 완벽히 정렬되지 않아 합성 시 미세한 리샘플링이
+                            항상 발생). 1.005배는 육안으로 거의 인지되지 않는 수준의 효과라, 리프트를
+                            없앴을 때와 같은 판단으로 확대 자체를 제거하고 글로우(그림자)만 남긴다 —
+                            이러면 텍스트가 전혀 다시 그려지지 않아(스케일 트랜스폼이 걸리지 않음)
+                            흔들림/흐림/반응 지연이 근본적으로 발생할 수 없다.
                         -->
                         <Trigger Property="IsMouseOver" Value="True">
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX"
-                                                          To="1.005" Duration="0:0:0.22"/>
-                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY"
-                                                          To="1.005" Duration="0:0:0.22"/>
                                         <DoubleAnimation Storyboard.TargetName="CardShadow" Storyboard.TargetProperty="Opacity"
                                                           To="0.35" Duration="0:0:0.22"/>
                                     </Storyboard>
@@ -425,10 +436,6 @@
                             <Trigger.ExitActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX"
-                                                          To="1" Duration="0:0:0.18"/>
-                                        <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY"
-                                                          To="1" Duration="0:0:0.18"/>
                                         <DoubleAnimation Storyboard.TargetName="CardShadow" Storyboard.TargetProperty="Opacity"
                                                           To="0" Duration="0:0:0.18"/>
                                     </Storyboard>
@@ -459,9 +466,9 @@
                                         <DoubleAnimation Storyboard.TargetName="CardTranslate" Storyboard.TargetProperty="Y"
                                                           To="0" Duration="0:0:0.15"/>
                                         <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX"
-                                                          To="1.005" Duration="0:0:0.15"/>
+                                                          To="1" Duration="0:0:0.15"/>
                                         <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY"
-                                                          To="1.005" Duration="0:0:0.15"/>
+                                                          To="1" Duration="0:0:0.15"/>
                                         <ColorAnimation Storyboard.TargetName="BdBg" Storyboard.TargetProperty="Color"
                                                          To="{StaticResource CardBgColor}" Duration="0:0:0.15"/>
                                         <DoubleAnimation Storyboard.TargetName="BdBorder" Storyboard.TargetProperty="Opacity"

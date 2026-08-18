@@ -21,7 +21,7 @@
 | 3 | 홈 화면 — 인터랙션 & 트레이 | ✅ 완료 |
 | 4 | 리더기 설정 — 정적 레이아웃 | ✅ 완료 |
 | 5 | 리더기 설정 — 비즈니스 로직(스텁) + 레지스트리 저장/dirty-check (AOP 제약·TRANSINFO_AOP 검증·포트열기 토글은 보류) | ✅ 완료 |
-| 6 | 통합 검증 & 마무리 | ⬜ 대기 |
+| 6 | 통합 검증 & 마무리 | ✅ 완료 |
 
 (상태 값: ⬜ 대기 / 🔄 진행중 / ✅ 완료 / ⏸ 보류)
 
@@ -317,15 +317,110 @@
 > 문서·별도 단계)으로 명확히 분리한다. 그래서 원래 Phase 7이었던 "통합 검증 & 마무리"가 이
 > 저장소 기준 마지막 단계(Phase 6)가 된다.
 
-- [ ] 홈 화면 + 리더기 설정 화면 전체를 원본과 나란히 스크린샷 비교
-- [ ] PRD 6장 "미확정 사항" 전체 재확인 — 남은 항목 있으면 명시적으로 보류 처리
-- [ ] 컴팩트 모드(≤800px 높이) 대응 구현 — 방침은 확정됨(PRD 미확정 사항 #6, Phase 2 안내 참고): 일반/컴팩트 두 번째 `Themes/Layout.xaml` 세트 작성 + 런타임 작업영역 높이 감지로 시작 시(및 필요시 화면 전환 시) `ResourceDictionary` 스왑 배선
-- [ ] 코드 정리 (사용하지 않는 리소스/스타일 정리)
+- [x] 홈 화면 + 리더기 설정 화면 전체를 원본과 나란히 스크린샷 비교
+- [x] PRD 6장 "미확정 사항" 전체 재확인 — 남은 항목 있으면 명시적으로 보류 처리
+- [x] 컴팩트 모드(≤800px 높이) 대응 구현 — 방침은 확정됨(PRD 미확정 사항 #6, Phase 2 안내 참고): 일반/컴팩트 두 번째 `Themes/Layout.xaml` 세트 작성 + 런타임 작업영역 높이 감지로 시작 시(및 필요시 화면 전환 시) `ResourceDictionary` 스왑 배선
+- [x] 코드 정리 (사용하지 않는 리소스/스타일 정리)
 
-- [ ] 홈 화면 + 리더기 설정 화면 전체를 원본과 나란히 스크린샷 비교
-- [ ] PRD 6장 "미확정 사항" 전체 재확인 — 남은 항목 있으면 명시적으로 보류 처리
-- [ ] 컴팩트 모드(≤800px 높이) 대응 구현 — 방침은 확정됨(PRD 미확정 사항 #6, Phase 2 안내 참고): 일반/컴팩트 두 번째 `Themes/Layout.xaml` 세트 작성 + 런타임 작업영역 높이 감지로 시작 시(및 필요시 화면 전환 시) `ResourceDictionary` 스왑 배선
-- [ ] 코드 정리 (사용하지 않는 리소스/스타일 정리)
+**완료 기준**: 홈/리더기 설정 화면이 원본 스크린샷과 대조해 의도치 않은 레이아웃 깨짐 없이 렌더링되고, PRD 6장 미확정 사항이 전부 보류/확정 처리되고, 컴팩트 모드가 실제로 리소스 스왑을 통해 동작하며, 죽은 리소스가 정리된 상태 — **통과 (2026-08-14)**.
+
+**1) 스크린샷 대조 결과**: `docs/screenshots/home_screen.png`/`reader_setup.png`를 실행 화면과 크롭 대조한 결과 Phase 2~5에서 이미 여러 차례 검증/보정을 거쳐온 상태 그대로 레이아웃·색상·문구가 육안상 일치했고, 이번 Phase에서 새로 발견된 의도치 않은 깨짐/잘림/색상 오류는 없었다(Phase 4~5의 트렌디 개선으로 인한 원본과의 의도된 차이는 그대로 유지). 홈 화면 카드 4개, 헤더/하단 버튼, 리더기 설정 화면의 헤더/포트 설정/무결성 체크 정보 섹션, 확인/취소 버튼까지 재확인.
+
+**2) PRD 6장 미확정 사항 정리**: `docs/PRD_WPF.md` 6장의 #2/#3/#4를 "외부 DLL 연동 + 별도 PRD" 범위로 이동됐음을 반영해 명시적으로 보류 처리(취소선 추가), #5(트레이 메뉴 가맹점 설정 진입)는 Phase 3의 임의 판단("비활성화하지 않고 안내 메시지만 표시")을 "잠정 채택(PM 재확인 시 변경 가능)"으로 PRD에 반영, #7(소스-빌드 불일치)은 CLAUDE.md의 "스크린샷 우선 원칙"이 프로젝트 전 구간에서 실제로 적용되어 왔음을 근거로 "정책적으로 해소됨"으로 명시. #1/#6은 기존 확정 상태 유지.
+
+**3) 컴팩트 모드(≤800px 높이) 구현**:
+- `Themes/Layout.Compact.xaml`/`Themes/Typography.Compact.xaml`(신규) — `Themes/Layout.xaml`/`Themes/Typography.xaml`(일반 모드)과 정확히 동일한 `x:Key` 셋을 가진 컴팩트 전용 리소스 딕셔너리. 값 산출은 PRD가 직접 컴팩트 리터럴을 제공하는 항목(홈 화면 3.3장: 창 840×420, marginX 36, cardGap 12, cardVisualH 210, 헤더/하단 버튼 치수 등)은 그 값을 그대로 채택하고, PRD가 컴팩트 값을 안 주거나(리더기 설정 화면 다수 항목) 현재 "일반" 모드 값 자체가 Phase 4~5 트렌디 보정으로 PRD 리터럴과 달라져 있는 항목은 "PRD가 제시하는 그 항목의 컴팩트/일반 비율을 구해 현재 실제 적용값에 곱하는" 방식으로 근사했다(각 파일 상단 주석에 산출 근거 기록). 리더기 설정 창 크기(`ReaderWindowWidth/Height`)는 일반 모드와 동일한 방법론(컴포넌트 치수를 `SizeToContent="WidthAndHeight"`로 1회 렌더링 후 `GetWindowRect`로 실측해 고정)으로 722×749를 확정 — 액션 버튼 폭(100)이 PRD상 컴팩트 값이 없어 양쪽 모드 동일하게 유지되는 바람에 카드 폭의 하한선 역할을 해 창 폭 자체는 일반 모드(744) 대비 소폭만 줄어듦.
+- `App.xaml`/`App.xaml.cs` — 리소스 딕셔너리 병합 전체를 XAML 선언(`Application.Resources`)에서 `App.OnStartup` 코드비하인드로 옮겼다. 이유: `Buttons.xaml`이 `Layout.xaml`의 키(`HomeCardCornerRadius`, `ReaderInfoButtonSize`)를 자기 파싱 시점에 `StaticResource`로 즉시 참조하므로, 일반/컴팩트 중 하나를 런타임에 골라 병합하려면 `Buttons.xaml`이 파싱되기 *전에* 그 선택이 끝나 있어야 한다 — 정적 XAML 선언(`InitializeComponent`가 `OnStartup`보다 먼저 실행됨)으로는 이 순서를 제어할 수 없어 전부 코드로 옮겼다. `OnStartup`이 `SystemParameters.PrimaryScreenHeight` 기준으로 판정한 뒤 `Colors → Typography(일반/컴팩트) → Layout(일반/컴팩트) → Buttons → ComboBox → ToggleSwitch → TextBox` 순서로 `Resources.MergedDictionaries`를 채우고 `base.OnStartup(e)`를 호출 — 그 시점에 `StartupUri`(`HomeWindow.xaml`)가 리소스가 모두 갖춰진 상태로 생성된다.
+- **임의 판단(컴팩트 모드 판정 기준)**: `SystemParameters.WorkArea.Height`(작업표시줄 등을 제외한 가용 영역) 대신 `SystemParameters.PrimaryScreenHeight`(모니터 해상도 자체의 높이)를 채택했다. PRD 원문이 "화면 높이(screen height) ≤800px"라고 명시하고 있어 "이 모니터 자체가 저해상도인가"를 묻는 것에 더 가깝다고 판단했고, `WorkArea`는 작업표시줄 위치/두께에 따라 매번 달라져 같은 모니터에서도 판정이 오락가락할 수 있다는 점도 근거로 삼았다(판단 근거는 `App.xaml.cs` 주석에도 기록).
+- **검증 방식**: 개발 환경 모니터가 800px 이하가 아니라 실제 자동 감지를 재현할 수 없어, `App.xaml.cs`의 `isCompact` 판정 직후에 `isCompact = true;`를 임시로 추가해 강제한 뒤 빌드/실행 → 홈 화면(840×420, 축소된 카드/폰트)과 리더기 설정 화면(컴팩트 `Layout.Compact.xaml`/`Typography.Compact.xaml` 반영, 722×749, 헤더·포트 설정·무결성 체크 정보·확인/취소 버튼까지 클리핑 없이 전부 표시)을 `mcp__windows__windows_screenshot`으로 캡처해 확인 — 이 과정에서 `ReaderSetupWindow.xaml`의 `Width`/`Height`도 일시적으로 `SizeToContent="WidthAndHeight"`로 바꿔 `GetWindowRect`(PowerShell `EnumWindows`/`GetWindowRect` P/Invoke)로 실측한 뒤 722×749를 `Layout.Compact.xaml`에 고정값으로 반영했다. 검증 후 강제 플래그와 `SizeToContent` 임시 변경을 모두 되돌리고 재빌드 → 일반 모드(1104×567 홈, 744×820 리더기 설정)가 이전과 동일하게 렌더링되는 것을 재확인해 회귀가 없음을 검증했다.
+
+**4) 코드 정리**:
+- 시작 창: `App.xaml`의 `StartupUri`가 이미 `Views/HomeWindow.xaml`로 되어 있음을 확인(Phase 1 노트의 "임시로 갤러리 창으로 변경되어 있음" 상태는 이미 이전 Phase에서 정리 완료된 상태였음 — 이번 Phase에서 추가로 변경할 것 없음).
+- 죽은 리소스: `Themes/*.xaml`에 정의된 모든 `x:Key`가 프로젝트 내 다른 곳에서 `{StaticResource ...}`/`{DynamicResource ...}`로 실제 참조되는지 전수 조사(`grep`) — `HomeCardGap`/`HomeCardIconInset`/`HomeCardVisualH`/`HomeFooterBtnGap`/`HomeHeaderTop`/`HomeMarginX`/`ReaderActionButtonGap`/`ReaderBottomBtnGap`/`ReaderCardGap`/`ReaderListHeaderHeight`/`ReaderListHeight` 11개가 어디서도 참조되지 않는 것을 확인했다. 이들은 전부 "값의 출처를 문서화하려고 남겨둔 `sys:Double` 버전"으로, `Margin`/`RowDefinition.Height` 등에는 그 값을 반영한 `Thickness`/`GridLength` 완제품 리소스(`HomeHeaderMargin`, `ReaderCardGapMargin`, `ReaderListHeightGridLength` 등)만 실제로 쓰이고 있었다 — `Themes/Layout.xaml`과 신규 `Themes/Layout.Compact.xaml` 양쪽에서 제거하고, 값 자체는 남아있는 주석/완제품 리소스에 그대로 반영해 정보 손실 없이 정리했다. `Views/StyleGalleryWindow.xaml`(개발용 스타일 갤러리)은 `Buttons.xaml`/`ComboBox.xaml`/`ToggleSwitch.xaml`/`TextBox.xaml`/`Colors.xaml`의 스타일들을 참조하는 채로 남겨뒀으나 프로덕션 시작 창이 아니므로 참조처로만 취급하고 삭제하지 않았다.
+- 정리 후 재검증: `grep`으로 `Themes/*.xaml` 전체 `x:Key`를 다시 스캔해 미참조 항목이 0개임을 확인했고, `Layout.xaml`/`Layout.Compact.xaml`과 `Typography.xaml`/`Typography.Compact.xaml` 각각의 키 집합이 `diff`로 완전히 동일함을 확인했다(컴팩트 스왑이 항상 안전하게 동작하기 위한 전제 조건).
+
+**검증 결과**:
+- `dotnet build` 성공(경고 0/오류 0) — 리소스 병합 방식을 코드비하인드로 전면 교체하고 죽은 리소스를 제거한 뒤에도 유지.
+- 일반 모드(이 개발 환경 모니터 기준, `PrimaryScreenHeight` > 800): 홈 화면(1104×567)과 리더기 설정 화면(744×820) 모두 이번 Phase 작업 전과 픽셀 단위로 동일하게 렌더링됨을 스크린샷으로 재확인(회귀 없음).
+- 컴팩트 모드(임시 강제): 홈 화면 840×420, 리더기 설정 화면 722×749로 축소되어 렌더링되고, 리더기 설정 화면의 모든 섹션(헤더/포트 설정 카드 2개/무결성 체크 정보/확인·취소 버튼)이 클리핑 없이 전부 표시되는 것을 확인.
+- 카드 클릭 → 리더기 설정 모달 오픈, 콤보 활성/비활성 연동, 취소 버튼 클릭 시 정상 종료까지 일반 모드에서 재확인해 리소스 병합 방식 변경(App.xaml→App.xaml.cs)이 기존 인터랙션에 영향을 주지 않았음을 확인.
+
+---
+
+### Phase 6 컴팩트 모드 버그 수정 (2026-08-14, 사용자 실측 피드백: 1024×768 해상도)
+
+사용자가 실제 1024×768(컴팩트 모드 대상) 환경에서 직접 실행해본 결과 3가지 문제를 보고했다:
+1. 홈 화면 하단에 "선이 하나 추가된 것처럼 보임"
+2. 홈 화면 헤더의 로그 전송/최신 버전 업데이트 버튼이 너무 크고 서로 붙어 있음
+3. 리더기 설정 창이 화면을 꽉 채울 정도로 크고, 특히 COM 포트 콤보박스만 비정상적으로 큼
+
+원인 조사 결과, 위 Phase 6 최초 구현 당시 놓친 **리터럴 하드코딩 3곳**이 원인이었다(전부 "치수/폰트는 항상 리소스 키를 경유한다"는 프로젝트 규칙을 어긴 지점 — 컴팩트 스왑 대상에서 빠져 있었음):
+- `Themes/ComboBox.xaml`의 `SkinnedComboBoxStyle`이 `FontSize="15.33"`/`Padding="10,6"`을 리터럴로 고정하고 있어, 다른 모든 요소가 컴팩트 값으로 줄어드는데 콤보박스만 일반 모드 크기 그대로 렌더링됨(문제 3의 직접 원인).
+- `Views/HomeWindow.xaml`의 헤더/하단 버튼 텍스트 6곳이 `FontSize="16"` 리터럴이라 컴팩트 모드에서도 축소되지 않아, 줄어든 버튼 박스(125×32/180×32)에 일반 크기 텍스트가 들어가면서 버튼이 커 보이고 두 버튼이 붙어 보임(문제 2의 원인). `Themes/Typography.Compact.xaml`에 이미 `HomeFooterButtonTextStyle`(13.33px)을 만들어뒀지만 정작 View에서 참조하지 않고 있었다.
+- `Views/HomeWindow.xaml`의 하단 최소화/종료 버튼 행 여백이 `Margin="0,20,0,20"` 리터럴이라 컴팩트 모드에서도 그대로라, 위 구분선(Border, 실제로 있음 — 사용자가 본 "추가된 선"은 새로 생긴 요소가 아니라 이 기존 구분선이 좁아진 간격 탓에 버튼과 붙어 보인 것)과 버튼 사이 간격이 압축되어 눈에 띄게 좁아 보임(문제 1의 원인).
+
+**수정**:
+- `Themes/ComboBox.xaml`: `FontSize`/`Padding`을 새 리소스 키(`ReaderComboFontSize` — `Typography.xaml`/`.Compact.xaml`, `ReaderComboPadding` — `Layout.xaml`/`.Compact.xaml`)로 분리해 참조하도록 변경(일반 15.33/10,6, 컴팩트 13.14/8,4 — 콤보 폭 축소 비율과 동일한 "일반 텍스트" 0.857 비율 적용).
+- `Views/HomeWindow.xaml`: 6곳의 `FontSize="16"` 리터럴을 전부 `FontSize="{StaticResource HomeFooterButtonFontSize}"`로 교체. **주의**: 처음엔 기존 `HomeFooterButtonTextStyle`(Foreground까지 포함한 `Style`)을 통째로 적용하려 했으나, 이 버튼들(`AutoButtonStyle`/`DefaultButtonStyle`/`UpdateButtonStyle`)은 `IsMouseOver` 트리거가 `Button.Foreground`를 바꾸고 내부 `TextBlock`이 그 값을 상속받는 구조라, `TextBlock`에 `Foreground`가 포함된 `Style`을 걸면 그 상속이 끊겨 호버 시 색이 안 바뀌는 회귀가 생긴다는 것을 뒤늦게 인지 — `HomeFooterButtonTextStyle`(Style)은 삭제하고 `FontSize` 전용 `sys:Double` 키(`HomeFooterButtonFontSize`, 일반 16/컴팩트 13.33)만 남겨 `Foreground`는 손대지 않도록 수정.
+- `Themes/Layout.xaml`/`Layout.Compact.xaml`: `HomeFooterAreaMargin`(일반 `0,20,0,20`/컴팩트 `0,10,0,10`) 신규 추가, `Views/HomeWindow.xaml`의 하단 버튼 `StackPanel` `Margin`을 이 리소스로 교체.
+- `Layout.Compact.xaml`의 `ReaderWindowHeight`: 콤보박스 버그가 있는 채로 측정됐던 최초값(749)이 실제보다 19px 컸음이 드러나, 버그 수정 후 같은 방법론(`SizeToContent="WidthAndHeight"`로 1회 렌더 → `GetWindowRect` 실측)으로 재측정해 **730**으로 갱신(`ReaderWindowWidth`(722)는 변화 없음 — 액션 버튼 폭이 하한선이라 콤보 폭 변화의 영향을 받지 않음).
+
+**검증**: `dotnet build` 성공(경고 0/오류 0). `App.xaml.cs`의 `isCompact` 판정과 `ReaderSetupWindow.xaml`의 `Width`/`Height`를 다시 임시로 강제/`SizeToContent`로 바꿔 재현 → 수정 후 스크린샷에서 (1) 하단 구분선과 최소화/종료 버튼 사이에 명확한 간격이 확보되고 창 하단 가장자리에 이상 요소가 없음, (2) 로그 전송/최신 버전 업데이트 버튼이 분리되어 표시됨, (3) COM 포트 콤보박스가 라벨/버튼과 비례하는 크기로 축소됨, (4) 리더기 설정 창이 722×730으로(19px 추가 축소) 렌더링됨을 확인. 검증 후 임시 변경 모두 원복, 일반 모드(1104×567 홈, 744×820 리더기 설정)에서 콤보/버튼 크기·hover 색상 전환에 회귀가 없음을 재확인.
+
+**알려진 한계(범위 밖)**: PRD 4.2가 요구하는 "작업영역 클램프"(창이 화면보다 크면 자동으로 줄이거나 위치 조정)는 여전히 미구현 상태다. 722×730은 1024×768 화면의 작업표시줄 제외 가용 영역(대략 720~730px 높이)에 거의 맞닿아 있어, 작업표시줄 두께/위치에 따라 여전히 빠듯하게 느껴질 수 있다 — 클램프 로직 자체는 이번 수정 범위가 아니며 별도로 다룰 사안(위 Phase 6 완료 기준에는 포함되지 않았던 항목).
+
+---
+
+### Phase 6 컴팩트 모드 폰트 교체: Pretendard → Malgun Gothic (2026-08-14, 사용자 실측 피드백)
+
+바로 위 버그 수정을 반영한 뒤에도 사용자가 1024×768 실기에서 "원본 MFC도 이 해상도에서 Pretendard 글씨가 살짝 깨져 보이는 현상이 있었는데 지금도 있다"고 재확인했다. WPF `TextOptions.TextFormattingMode="Display"`(정수 픽셀 스냅) 적용을 먼저 시도했으나 실제 화면에서 체감 차이가 없어 되돌렸다(`Views/HomeWindow.xaml`/`Views/ReaderSetupWindow.xaml`에 잠깐 추가했다가 제거).
+
+근본 원인은 폰트 자체다 — Pretendard는 작은 픽셀 크기(10~13px대)에서 최적화된 TrueType 힌팅 명령어가 없어 획이 많은 한글에서 안티앨리어싱이 거칠어 보이기 쉽고, 이건 원본(GDI 렌더링)과 WPF 둘 다 같은 폰트 파일을 쓰는 한 공통으로 겪는 한계다. 그런데 **`docs/PRD_WPF.md` 1.5가 애초에 "컴팩트 화면에서도 Malgun Gothic"이라고 명시**하고 있었음에도, `Themes/Typography.Compact.xaml` 구현 시 이 부분을 놓치고 일반 모드와 동일하게 Pretendard를 먼저 쓰도록 해뒀던 것이 확인되어, PRD 원문대로 바로잡았다.
+
+**수정**:
+- `Themes/Typography.Compact.xaml`: `PretendardFontFamily`/`PretendardMediumFontFamily` 리소스 값을 임베디드 Pretendard(`pack://.../Assets/Fonts/#Pretendard...`)에서 시스템 폰트 `Malgun Gothic`으로 교체(일반 모드 `Themes/Typography.xaml`은 변경 없음 — Pretendard 유지). Windows 내장 폰트라 ClearType 힌팅이 잘 되어 있어 작은 크기에서도 획이 깨끗하다.
+- **연쇄 버그 발견 및 수정**: 폰트를 바꾸자 확인/취소 버튼("확인"→"화이", "취소"→"최소"로 보일 만큼 아래쪽이 잘림)이 깨져 보였다. 처음엔 버튼 자체의 `Padding`/`FontSize` 문제로 의심해 `Themes/Buttons.xaml` `PrimaryButtonStyle`/`ReaderSecondaryButtonStyle`의 리터럴 `FontSize="14"`를 리소스화(`ReaderBottomBtnFontSize`, 일반 14/컴팩트 12.44)하고 `Padding`도 리소스화(`ReaderBottomBtnPadding`)해 `Views/ReaderSetupWindow.xaml`의 두 버튼에 명시적으로 적용했으나 — 재현 결과 증상이 전혀 변하지 않아, `ModernButtonBase`의 `ControlTemplate`을 다시 보니 애초에 `ContentPresenter`가 `Padding`을 `TemplateBinding`하지 않아 `Padding`은 이 두 버튼에서 처음부터 아무 효과가 없었다는 것도 함께 확인됨(그대로 남겨둠 — 무해하고 리터럴 제거 자체는 여전히 유효한 정리). 진짜 원인은 창 전체 높이(`ReaderWindowHeight`, 컴팩트 730)가 Malgun Gothic의 더 큰 줄 높이를 반영하지 못해 다이얼로그의 맨 아래 요소(확인/취소 버튼 행)가 창 경계에서 그대로 잘린 것이었다 — `SizeToContent="WidthAndHeight"`로 재실측한 결과 **742**로 갱신해 해결했다(`Layout.Compact.xaml`).
+
+**검증**: `dotnet build` 성공(경고 0/오류 0). `isCompact`를 임시로 강제하고 홈/리더기 설정 화면을 캡처 — 폰트가 Malgun Gothic으로 렌더링되는 것을 확인했고, "확인"/"취소" 버튼 텍스트가 잘림 없이 완전하게 표시되는 것을 확대 대조로 확인했다. 검증 후 임시 강제 코드를 원복하고 일반 모드(1104×567 홈, 744×820 리더기 설정, Pretendard 유지)에서 회귀가 없음을 재확인했다. **참고**: 실제로 이 폰트가 Pretendard보다 1024×768 환경에서 더 선명하게 보이는지는 (a) 자동화 스크린샷으로는 서브픽셀/ClearType 수준의 차이가 잘 안 잡히고 (b) 사용자가 언급한 원본 MFC의 동일 현상이 폰트 자체의 한계(작은 크기 힌팅 부재)에서 기인한다는 분석에 근거해 PRD가 원래 지시한 대로 되돌린 것 — 실기에서 사용자가 직접 재확인 필요.
+
+---
+
+### Phase 6 컴팩트 모드 실측 2차 보정: 리더기 설정 창 높이 + 홈 화면 구분선 위치 (2026-08-18, 실제 1024×768 PC 실측 피드백)
+
+사용자가 실제 1024×768 해상도 PC에서 컴팩트 모드를 실측하고 2가지 문제를 보고했다:
+1. 리더기 설정 창의 아래쪽이 "살짝 안 보임" — 창 자체(722×742)가 1024×768 화면의 작업표시줄 제외 가용 영역(전형적으로 720~730px)보다 커서 하단이 화면 밖으로 잘려 보임.
+2. 홈 화면 하단의 구분선(카드와 최소화/종료 버튼 사이 가로선)이 "너무 위에 붙어있다" — `Views/HomeWindow.xaml`의 헤더-카드 간격(Row1)/카드-구분선 간격(Row3)이 둘 다 리터럴 `"*"`로 고정돼 항상 1:1로 나뉘어, 컴팩트 모드에서 남는 공간이 좁아지자 구분선이 시각적으로 카드에 가깝게(위로 치우쳐) 보였다.
+
+**수정 1(리더기 설정 창 높이 축소)**: `Themes/Layout.Compact.xaml`의 세로 방향 여백류를 축소하고 재실측:
+- `ReaderMainCardPadding` 상하 18→12
+- `ReaderSubCardPadding` 상하 11→8
+- `ReaderCardPadding` 상하 9→7
+- `ReaderCardGapMargin` 5→4
+- `ReaderListHeightGridLength` 118→100
+
+기존 방법론(`Views/ReaderSetupWindow.xaml`을 임시로 `SizeToContent="WidthAndHeight"`, `App.xaml.cs`의 `isCompact`를 임시로 `true`로 강제 → 빌드/실행 → PowerShell P/Invoke `GetWindowRect`/`GetDpiForWindow`로 실측)로 재측정한 결과 `ReaderWindowHeight`가 **742 → 691**로 축소됨을 확인(`ReaderWindowWidth`(722)는 변화 없음). 확인/취소 버튼 텍스트 잘림 없음, 카드/리스트 간격도 부자연스럽지 않음을 스크린샷 대조로 확인 후 값을 고정 반영, 임시 변경(SizeToContent/isCompact 강제) 모두 원복.
+
+**수정 2(홈 화면 구분선 위치 보정)**: `Views/HomeWindow.xaml`의 Row1(헤더-카드 간격)/Row3(카드-구분선 간격) `RowDefinition.Height="*"` 리터럴 2곳을 각각 신규 리소스 키 `HomeHeaderCardGapGridLength`/`HomeCardDividerGapGridLength`로 교체. `Themes/Layout.xaml`(일반 모드)에는 기존 동작과 완전히 동일하도록 둘 다 `*`(1:1 비율)로 추가해 회귀가 없도록 했고, `Themes/Layout.Compact.xaml`에는 `1*`/`2*`(Row3 비중을 2배로)로 추가해 구분선이 카드-푸터버튼 사이 공간의 중앙 쪽으로 내려오도록 했다.
+
+**검증**: `dotnet build` 성공(경고 0/오류 0, 실행 중이던 프로세스는 `taskkill`로 종료 후 빌드). `isCompact`를 임시로 강제해 컴팩트 모드로 실행 → 홈 화면 스크린샷에서 구분선이 카드-푸터 공간 중앙에 가깝게 이동한 것을 확인, 리더기 설정 창(722×691, 최종 고정값)을 열어 헤더/포트 설정 카드 2개/무결성 체크 정보/확인·취소 버튼 모두 클리핑 없이 표시됨을 확인. 이후 `isCompact` 강제를 원복하고 일반 모드(1104×567 홈, 744×820 리더기 설정)로 재실행해 두 화면 모두 이번 수정 전과 픽셀 단위로 동일하게 렌더링됨(회귀 없음)을 재확인.
+
+---
+
+### Phase 6 마무리 보정: 홈 카드 호버 애니메이션 + 조회 버튼 폭 + 구분선 비율 재확정 (2026-08-18)
+
+이 프로젝트의 마지막 보정 라운드. 세 가지를 다뤘다.
+
+**1) 홈 카드 호버 시 글자 흔들림/흐림 + 반응 지연**: `Themes/Buttons.xaml`의 `HomeCardButtonStyle`이 호버 시 카드 전체를 1.005배로 미세 확대하는 `ScaleTransform` 애니메이션을 갖고 있었는데, 이 확대가 매 프레임 카드 하위 트리(텍스트 포함)를 벡터로 다시 래스터라이즈해 ClearType 서브픽셀 위치가 흔들리는 현상("글자가 꿀렁거림", 컴팩트 모드는 폰트가 작아 더 두드러짐)과 그 재계산 비용으로 인한 호버 반응 지연을 함께 유발했다.
+- 1차 시도: `CacheMode="BitmapCache"`(`RenderAtScale="2"`까지 조정)로 스케일 애니메이션을 GPU 비트맵 확대로 대체 — 흔들림은 해결됐으나, 캐싱된 비트맵을 확대하는 과정에서 항상 약간의 리샘플링이 남아 호버 시 글자가 흐려 보이는 새 문제가 생겼고, 캐싱 자체가 평상시(호버 전) 렌더링에도 영향을 줘 대기 상태에서까지 살짝 흐려 보이는 부작용이 발견됐다.
+- 최종 해결: 1.005배 확대는 육안으로 거의 인지되지 않는 수준의 효과였으므로(과거 hover-lift 효과를 제거했을 때와 같은 판단), `BitmapCache`를 완전히 제거하고 호버 시 확대 애니메이션 자체를 삭제 — 글로우(그림자 `Opacity` 애니메이션)만 남겼다. 텍스트가 전혀 다시 그려지지 않으므로 흔들림/흐림/반응 지연이 구조적으로 발생할 수 없다. 눌림(press) 시 축소(0.96) 애니메이션은 그대로 유지하되, 마우스를 뗄 때 복귀 목표를 기존 `1.005`에서 `1`로 수정(호버 확대가 없어졌으므로).
+
+**2) 리더기 설정 화면 "조회" 버튼 로딩 텍스트 잘림**: `QueryButton_Click`(코드비하인드)이 로딩 중 버튼 `Content`를 `"조회중..."`(6자)으로 바꾸고 스피너(`ReaderButtonStyle`)까지 표시하는데, 평상시 라벨 `"조회"`(2자) 기준으로 잡아둔 `ReaderQueryButtonWidth`(일반 72/컴팩트 61)가 로딩 상태 폭엔 부족해 글자가 잘렸다. 같은 스타일을 쓰는 액션 버튼(`ReaderActionButtonWidth=100`)은 이보다 긴 로딩 문구("다운로드중..." 7자)도 잘림 없이 들어가는 것을 근거로, `ReaderQueryButtonWidth`를 일반 72→88, 컴팩트 61→75로 확대(`Themes/Layout.xaml`/`Layout.Compact.xaml`).
+
+**3) 홈 화면 구분선 위치 비율 재확정**: 바로 위(2026-08-18 2차 보정)에서 `HomeCardDividerGapGridLength`를 `1*:2*`로 도입했으나, 실기 스크린샷을 나란히 대조한 결과 변화폭이 육안으로 거의 구분되지 않을 만큼 미미했다(전체 여유 공간 자체가 작아 비율을 소폭 바꾸는 정도로는 체감 차이가 거의 없음). `1*:2.8*`로도 시도했으나 마찬가지였고, `1*:6*`으로 크게 올려서야 카드-구분선 간격이 뚜렷하게 벌어지는 것을 스크린샷으로 확인해 이 값으로 최종 확정(`Themes/Layout.Compact.xaml`, `Themes/Layout.xaml`의 일반 모드 `1:1`은 변경 없음).
+
+**검증**: `dotnet build` 성공(경고 0/오류 0). `isCompact`를 임시로 강제해 컴팩트 모드로 재현 → 홈 화면 호버 애니메이션이 확대/흔들림 없이 글로우만 표시됨을 확인, 조회 버튼 로딩 상태("조회중..."+스피너)가 잘림 없이 표시됨을 확인(리더기 설정 창 722×691 유지, 추가 높이 변경 없음), 구분선이 `1:6` 비율에서 카드-구분선 간격이 뚜렷하게 벌어짐을 확인. 이후 강제 코드 원복, 일반 모드(1104×567 홈, 744×820 리더기 설정)에서 호버 애니메이션(글로우만)과 조회 버튼 폭 변경 모두 의도대로 반영되고 다른 회귀가 없음을 재확인.
+
+**프로젝트 상태**: 이 커밋을 끝으로 1차 범위(홈 화면 + 리더기 설정 화면의 UX/UI 재구현, Phase 0~6)를 완료한다. 다음 기능 추가(실제 리더기 하드웨어/COM 포트 연동 등)는 별도 PRD 문서를 새로 작성해 진행하되, **이 ROADMAP.md는 계속 이어서 사용한다** — 새 PRD가 나오면 그 요구사항에 맞춰 Phase 7부터 이어서 이 문서에 추가하고, 위 "작업 방식" 규칙(Phase 순서대로 진행, 각 Phase 종료 시 빌드+실행+캡처 대조, PRD-코드 불일치 시 PRD 우선 갱신)도 동일하게 적용한다.
 
 ---
 

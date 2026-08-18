@@ -3,17 +3,17 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:KFTCOneCAP.Wpf"
              StartupUri="Views/HomeWindow.xaml">
-    <Application.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="Themes/Colors.xaml"/>
-                <ResourceDictionary Source="Themes/Typography.xaml"/>
-                <ResourceDictionary Source="Themes/Layout.xaml"/>
-                <ResourceDictionary Source="Themes/Buttons.xaml"/>
-                <ResourceDictionary Source="Themes/ComboBox.xaml"/>
-                <ResourceDictionary Source="Themes/ToggleSwitch.xaml"/>
-                <ResourceDictionary Source="Themes/TextBox.xaml"/>
-            </ResourceDictionary.MergedDictionaries>
-        </ResourceDictionary>
-    </Application.Resources>
+    <!--
+        2026-08-14 변경(Phase 6, 컴팩트 모드 대응, docs/ROADMAP.md 참고): 리소스 딕셔너리 병합을
+        전부 App.xaml.cs OnStartup(코드 비하인드)으로 옮겼다. 일반/컴팩트 모드에 따라
+        Themes/Typography.xaml 또는 Themes/Typography.Compact.xaml(Layout도 동일)을 런타임에
+        골라서 병합해야 하는데, Buttons.xaml이 Layout.xaml의 키(HomeCardCornerRadius,
+        ReaderInfoButtonSize 등)를 자기 자신의 XAML 파싱 시점에 StaticResource로 즉시 참조하기
+        때문에, App.xaml 마크업에 Buttons.xaml을 정적으로 선언해두면(Layout이 아직 병합되기 전
+        InitializeComponent 단계에서 파싱됨) 리소스를 찾지 못해 XamlParseException이 발생한다.
+        그래서 이 파일에는 더 이상 Application.Resources를 선언하지 않고, App.xaml.cs가
+        OnStartup에서 Colors → Typography(일반/컴팩트) → Layout(일반/컴팩트) → Buttons → ComboBox
+        → ToggleSwitch → TextBox 순서로 코드에서 직접 병합한 뒤 base.OnStartup(e)를 호출해
+        StartupUri(HomeWindow)가 그 이후에 리소스가 다 갖춰진 상태로 생성되도록 한다.
+    -->
 </Application>
