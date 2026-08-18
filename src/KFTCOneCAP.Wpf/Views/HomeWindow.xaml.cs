@@ -140,7 +140,7 @@ public partial class HomeWindow : Window
     {
         MessageBox.Show(
             this,
-            $"{name} 화면은 이 프로젝트의 구현 범위 밖입니다.\n(docs/PRD_WPF.md 1.3 비범위 참고)",
+            $"{name} 화면은 이 프로젝트의 구현 범위 밖입니다.\n(docs/home_reader_setup/PRD_WPF.md 1.3 비범위 참고)",
             name,
             MessageBoxButton.OK,
             MessageBoxImage.Information);

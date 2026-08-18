@@ -32,7 +32,7 @@
     <Color x:Key="Blue500Color">#0064DD</Color>
     <SolidColorBrush x:Key="Blue500Brush" Color="{StaticResource Blue500Color}"/>
 
-    <!-- 카드 아이콘 배경(연한 블루) — docs/screenshots/home_screen.png 실측 픽셀 색상(#EBF4FF) -->
+    <!-- 카드 아이콘 배경(연한 블루) — docs/home_reader_setup/screenshots/home_screen.png 실측 픽셀 색상(#EBF4FF) -->
     <Color x:Key="CardIconBgColor">#EBF4FF</Color>
     <SolidColorBrush x:Key="CardIconBgBrush" Color="{StaticResource CardIconBgColor}"/>
 

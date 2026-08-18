@@ -4,7 +4,7 @@
              xmlns:local="clr-namespace:KFTCOneCAP.Wpf"
              StartupUri="Views/HomeWindow.xaml">
     <!--
-        2026-08-14 변경(Phase 6, 컴팩트 모드 대응, docs/ROADMAP.md 참고): 리소스 딕셔너리 병합을
+        2026-08-14 변경(Phase 6, 컴팩트 모드 대응, docs/home_reader_setup/ROADMAP.md 참고): 리소스 딕셔너리 병합을
         전부 App.xaml.cs OnStartup(코드 비하인드)으로 옮겼다. 일반/컴팩트 모드에 따라
         Themes/Typography.xaml 또는 Themes/Typography.Compact.xaml(Layout도 동일)을 런타임에
         골라서 병합해야 하는데, Buttons.xaml이 Layout.xaml의 키(HomeCardCornerRadius,

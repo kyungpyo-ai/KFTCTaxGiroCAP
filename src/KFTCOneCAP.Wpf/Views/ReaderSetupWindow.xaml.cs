@@ -16,7 +16,7 @@ namespace KFTCOneCAP.Wpf.Views;
 /// Phase 5(ROADMAP.md "리더기 설정: 비즈니스 로직(스텁) + 레지스트리 저장/dirty-check"):
 /// 액션 버튼 5종/조회 버튼의 로딩→완료 스텁, 멀티패드 정보 팝오버, 레지스트리 저장, 스냅샷
 /// 기반 dirty-check를 배선한다. AOP 제약(PRD 4.11)·TRANSINFO_AOP 저장 차단·포트 열기 토글
-/// (PRD 4.8)은 명시적으로 이번 Phase 범위에서 제외 — docs/ROADMAP.md Phase 5 상단 안내 참고.
+/// (PRD 4.8)은 명시적으로 이번 Phase 범위에서 제외 — docs/home_reader_setup/ROADMAP.md Phase 5 상단 안내 참고.
 /// </summary>
 public partial class ReaderSetupWindow : Window
 {
@@ -30,7 +30,7 @@ public partial class ReaderSetupWindow : Window
 
     // PRD 4.13/4.12: 콤보1/2 선택값 + 멀티패드1/2 토글 상태 스냅샷(취소 시 dirty-check용).
     // 포트열기 토글은 아직 없고(외부 DLL 연동과 함께 별도 PRD/단계에서 다룰 예정 —
-    // 2026-08-14, docs/ROADMAP.md Phase 6 상단 안내 참고), 있더라도 PRD 4.12는
+    // 2026-08-14, docs/home_reader_setup/ROADMAP.md Phase 6 상단 안내 참고), 있더라도 PRD 4.12는
     // dirty-check 대상에서 제외한다.
     private string _snapshotReader1Port = string.Empty;
     private string _snapshotReader2Port = string.Empty;

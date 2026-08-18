@@ -9,7 +9,7 @@
         "Pretendard Medium" 으로 별도이므로 전용 FontFamily 리소스를 둔다.
 
         ExtraBold(800) 웨이트 폰트 파일이 원본 fonts 폴더에 없어(Regular/Medium/Bold만 존재),
-        PRD가 요구하는 홈 타이틀 ExtraBold는 Bold(700)로 폴백한다. (docs/ROADMAP.md Phase 1 참고)
+        PRD가 요구하는 홈 타이틀 ExtraBold는 Bold(700)로 폴백한다. (docs/home_reader_setup/ROADMAP.md Phase 1 참고)
 
         PRD 2.2 표의 폰트 크기는 pt 단위(원본 MFC LOGFONT 포인트 크기)이다. WPF FontSize는 1/96인치 단위(px)이므로
         96dpi 기준 pt→px 변환(× 96/72 ≈ 1.333)을 적용해 시각적 크기를 맞춘다.
@@ -65,7 +65,7 @@
 
     <!-- ===================== 리더기 설정 화면 ===================== -->
     <!--
-        2026-08-14 수정(사용자 피드백: "글자가 커 보인다"): docs/screenshots/reader_setup.png
+        2026-08-14 수정(사용자 피드백: "글자가 커 보인다"): docs/home_reader_setup/screenshots/reader_setup.png
         실측 대조 결과 PRD 표의 pt→px 기계적 환산값(× 96/72)이 실제 화면보다 눈에 띄게 크게
         렌더링되어, 아래 크기들을 스크린샷 재대조로 축소 보정함(창 세로 길이 보정과 함께
         Layout.xaml 패딩/마진 축소와 동시에 적용 — 자세한 배경은 Layout.xaml 상단 주석 참고).
@@ -81,7 +81,7 @@
 
     <!--
         헤더 서브타이틀
-        2026-08-14 수정(가독성 개선): docs/screenshots/reader_setup.png 실측 결과 서브타이틀은
+        2026-08-14 수정(가독성 개선): docs/home_reader_setup/screenshots/reader_setup.png 실측 결과 서브타이틀은
         타이틀(Bold)과 뚜렷이 대비되는 가는 굵기(Regular)로 렌더링되어 있음을 확인 — 기존 Bold는
         타이틀과 위계 구분이 안 되는 원인이었다. 최신 UI 트렌드(제목=굵게, 설명=가늘게+연한 색)에도
         부합하므로 Normal로 변경.

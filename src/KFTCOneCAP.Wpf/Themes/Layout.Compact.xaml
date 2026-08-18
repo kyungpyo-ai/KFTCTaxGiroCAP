@@ -6,7 +6,7 @@
         컴팩트 모드(화면 높이 ≤800px, PRD 미확정 사항 #6/3.2/3.3) 전용 레이아웃 치수 세트.
         Themes/Layout.xaml(일반 모드)과 정확히 동일한 x:Key 셋을 갖는다 — App.xaml.cs가 시작 시
         SystemParameters 기준으로 두 파일 중 하나만 MergedDictionaries에 등록해서 스왑한다
-        (docs/ROADMAP.md Phase 2/6 안내 참고).
+        (docs/home_reader_setup/ROADMAP.md Phase 2/6 안내 참고).
 
         값 산출 방법(임의 판단, 2026-08-14 Phase 6):
         - 홈 화면(3.3장)은 PRD가 일반/컴팩트 리터럴을 직접 제공하는 항목(창 크기 840×420,

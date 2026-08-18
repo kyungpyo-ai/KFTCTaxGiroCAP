@@ -13,13 +13,13 @@
         Loaded="HomeWindow_Loaded"
         Closing="HomeWindow_Closing">
     <!--
-        홈 화면 — 정적 레이아웃 (Phase 2, docs/ROADMAP.md).
+        홈 화면 — 정적 레이아웃 (Phase 2, docs/home_reader_setup/ROADMAP.md).
         치수는 전부 Themes/Layout.xaml 리소스 키를 참조한다(리터럴 금지 — Phase 6 컴팩트 모드
-        리소스 스왑 대비, docs/ROADMAP.md Phase 2 안내 참고).
+        리소스 스왑 대비, docs/home_reader_setup/ROADMAP.md Phase 2 안내 참고).
         카드 호버/눌림 애니메이션, 카드 클릭 동작, 트레이 아이콘은 Phase 3에서 배선한다.
 
         타이틀바 텍스트 "KFTCOneCAP Plus Ver 3.0.9 | 모듈 Ver 524" 는
-        docs/screenshots/home_screen.png 실측 캡처를 그대로 사용한 것으로, 버전 조합 규칙(빌드마다
+        docs/home_reader_setup/screenshots/home_screen.png 실측 캡처를 그대로 사용한 것으로, 버전 조합 규칙(빌드마다
         동적으로 어떻게 조합되는지)은 PRD_WPF.md 3.2 / 6장 #7 기준 여전히 미확정이다.
         TODO(PRD 미확정 #7): 실제 앱 버전/모듈 버전을 어디서 읽어와 조합하는지 확인되면
         하드코딩된 문자열을 동적 바인딩으로 교체할 것.
@@ -53,7 +53,7 @@
                     로고: 원본은 실행 파일 옆 img_ci_mark.png 를 로드해 그린다(KFTCOneCAPDlg.cpp
                     GetLogoPath/LoadLogoImage). 2026-08-13: 사용자가 실제 자산(img_ci_mark.png)을
                     Assets/Images/ 에 제공해 Image 컨트롤로 교체(이전 Path 벡터 근사 제거).
-                    크기는 docs/screenshots/home_screen.png 실측(로고 원 영역 약 54x54px)과
+                    크기는 docs/home_reader_setup/screenshots/home_screen.png 실측(로고 원 영역 약 54x54px)과
                     일치하는 기존 HomeLogoBoxSize 리소스를 그대로 사용.
                 -->
                 <Image Source="/Assets/Images/img_ci_mark.png"

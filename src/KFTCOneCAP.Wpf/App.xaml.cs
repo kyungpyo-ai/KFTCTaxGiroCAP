@@ -10,7 +10,7 @@ public partial class App : Application
 {
     /// <summary>
     /// 컴팩트 모드 판정 기준(96dpi 환산 px) — PRD 2.2/3.2 "화면 높이 ≤800px".
-    /// docs/ROADMAP.md Phase 6 참고.
+    /// docs/home_reader_setup/ROADMAP.md Phase 6 참고.
     /// </summary>
     private const double CompactHeightThreshold = 800.0;
 

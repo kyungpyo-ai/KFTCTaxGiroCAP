@@ -32,7 +32,7 @@ tools: Read, Edit, Write, Glob, Grep, Bash, PowerShell, mcp__windows__windows_li
 1. **빌드 검증**: `dotnet build`로 컴파일 성공을 항상 먼저 확인한다.
 2. **실행/화면 검증**: `mcp__windows__windows_launch`로 앱을 실행하고, `mcp__windows__windows_snapshot`으로 접근성 트리를 확인해 예상한 요소(컨트롤, 텍스트)가 실제로 존재하는지 확인한다.
 3. **시각적 검증**: `mcp__windows__windows_screenshot`으로 화면을 캡처해 다음과 확인한다.
-   - 원본 MFC 캡처(`docs/screenshots/*.png` 등 프로젝트에 참조 스크린샷이 있는 경우)와 레이아웃·색상·텍스트를 대조한다.
+   - 원본 MFC 캡처(`docs/home_reader_setup/screenshots/*.png` 등 프로젝트에 참조 스크린샷이 있는 경우)와 레이아웃·색상·텍스트를 대조한다.
    - 참조 스크린샷이 없으면 PRD/ROADMAP에 기술된 수치·문구와 대조한다.
 4. **인터랙션 검증**: 버튼 클릭/토글/콤보 선택 등 실제 사용자 동작을 `mcp__windows__windows_click`, `mcp__windows__windows_fill`, `mcp__windows__windows_send_keys` 등으로 재현해, 상태 전이(활성/비활성, 로딩, 다이얼로그 오픈 등)가 요구사항대로 동작하는지 확인한다.
 5. **회귀 확인**: 한 화면을 고치다 다른 화면/공용 스타일이 깨지지 않았는지, 관련된 다른 화면도 간단히 열어 확인한다.

@@ -6,10 +6,10 @@
         홈 화면(및 향후 리더기 설정 화면) 레이아웃 치수 — "일반" 모드(96dpi 기준, PRD 3.3).
         Phase 6에서 컴팩트 모드(세로 해상도 ≤800px) 대응 시 이 파일과 동일한 키 셋을 가진
         Themes/Layout.Compact.xaml을 추가하고 런타임에 ResourceDictionary를 스왑하는 방식으로
-        전환한다(docs/ROADMAP.md Phase 2/6 참고). 그러므로 홈/리더기설정 XAML에서는 치수를
+        전환한다(docs/home_reader_setup/ROADMAP.md Phase 2/6 참고). 그러므로 홈/리더기설정 XAML에서는 치수를
         리터럴로 적지 말고 항상 이 파일의 키를 참조할 것.
 
-        수치 출처: docs/PRD_WPF.md 3.3장 + docs/screenshots/home_screen.png 실측 대조.
+        수치 출처: docs/home_reader_setup/PRD_WPF.md 3.3장 + docs/home_reader_setup/screenshots/home_screen.png 실측 대조.
         (참고: 원본 스크린샷은 카드 높이 등 일부 값이 PRD 리터럴과 픽셀 단위로 정확히 일치함이
         확인되어, 스크린샷과 PRD 수치가 실질적으로 같은 소스를 가리키는 것으로 판단하고 PRD
         수치를 그대로 채택함.)
@@ -62,7 +62,7 @@
         2026-08-13 추가 수정(사용자 피드백): 카드 내부 아이콘-제목 사이 간격.
         기존에는 아이콘과 제목 사이 행에 "*"(가변) GridLength를 사용해 카드 높이가 고정(260)인
         상황에서 제목/설명 텍스트가 카드 하단으로 밀려 내려가는 문제가 있었다(실측 결과 아이콘
-        하단과 제목 상단 간격이 88px까지 벌어짐). docs/screenshots/home_screen.png 실측(아이콘
+        하단과 제목 상단 간격이 88px까지 벌어짐). docs/home_reader_setup/screenshots/home_screen.png 실측(아이콘
         하단 y=259, 제목 상단 y=283 → 간격 24px) 기준으로 고정 간격으로 교체.
     -->
     <GridLength x:Key="HomeCardIconTitleGapGridLength">24</GridLength>
@@ -103,7 +103,7 @@
     <Thickness x:Key="HomeCardContentMargin">28,28,20,24</Thickness>
 
     <!--
-        ===================== 리더기 설정 화면 (Phase 4, docs/ROADMAP.md / PRD 4장) =====================
+        ===================== 리더기 설정 화면 (Phase 4, docs/home_reader_setup/ROADMAP.md / PRD 4장) =====================
         원본은 "최초 1회 레이아웃 계산 후 창 크기 확정"(PRD 4.2) 방식. Phase 4~5에서는 이를
         Window.SizeToContent="WidthAndHeight" + 아래 컴포넌트별 고정 치수(PRD 4.3~4.6 수치)로
         자연스럽게 크기가 결정되도록 구성했었다.
@@ -127,7 +127,7 @@
 
     <!--
         2026-08-14 수정(사용자 피드백: "창이 세로로 너무 길고 글자가 큼"): 아래 리더기 설정
-        전용 치수들을 docs/screenshots/reader_setup.png 픽셀 실측(전체 캡처 776x883 중 다이얼로그
+        전용 치수들을 docs/home_reader_setup/screenshots/reader_setup.png 픽셀 실측(전체 캡처 776x883 중 다이얼로그
         자체가 약 762x875, 세로/가로 비율 ≈1.15) 대비 직전 구현(772x1005, 비율 ≈1.30)이 약 13%
         더 세로로 길었던 것을 보정하기 위해 각 섹션의 상하 패딩/마진 위주로 축소함(가로 폭은
         원본과 이미 거의 일치했으므로 유지). 아래 각 항목의 새 값은 실행 캡처 재대조로 확정.
@@ -185,7 +185,7 @@
 
     <!--
         "포트 열기" 토글 자리 — 실제 배선(확인창→백그라운드 처리→레지스트리 저장, PRD 4.8)은
-        외부 DLL 연동과 함께 별도 PRD/단계에서 다루기로 확정(2026-08-14, docs/ROADMAP.md Phase 6
+        외부 DLL 연동과 함께 별도 PRD/단계에서 다루기로 확정(2026-08-14, docs/home_reader_setup/ROADMAP.md Phase 6
         상단 안내 참고)되어 있어, 지금은 토글 자체를 만들지 않고 리더기2 카드와 좌우 위치를
         맞추기 위한 빈 공간(Visibility=Hidden)만 확보한다. 폭은 스크린샷 실측(라벨 "포트 열기" +
         토글 44 + info 20 + 내부 간격)에 근사한 값.
