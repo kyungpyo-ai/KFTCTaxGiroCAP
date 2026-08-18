@@ -424,6 +424,39 @@
 
 ---
 
+# 2차 개발: 결제 중계 기능 (Phase 7~)
+
+> 이 구간의 요구사항 원문은 `docs/payment_relay/PRD.md`. 대상은 여전히 `KFTCOneCAP.Wpf` 하나(별도 실행
+> 파일로 분리하지 않음, 2026-08-18 확정). Reader DLL 연동 참조 자료(`docs/reader_dll/`,
+> `vendor/ReaderSerial/`)와 전담 서브에이전트(`reader-pinpad-spec-expert`,
+> `reader-dll-integration-developer`)는 이미 준비돼 있다 — Phase 7부터 활용한다.
+>
+> **핵심 개발 원칙 (KFTCReaderDLL 프로젝트에서 검증된 전략을 그대로 재사용, PRD §10 근거)**: 실제 통신
+> 전문(POS↔KFTCTaxGiroCAP, KFTCTaxGiroCAP↔VAN)이 아직 미확정이므로, 매 Phase마다 **임시 테스트 전문으로
+> 로직(Queue/동시성/상태 전이)을 먼저 검증**하고, 전문 생성/파싱은 별도 계층으로 분리해 나중에 실제 SPEC이
+> 확정되면 그 계층만 교체하면 되도록 구현한다. 전문 파싱 로직을 Reader 제어/결제 Flow 로직과 뒤섞지 않는다.
+
+| Phase | 내용 | 상태 |
+|---|---|---|
+| 7 | 아키텍처 준비 — 백그라운드 서비스 골격, Reader DLL P/Invoke 연동, `PlatformTarget=x86` 전환 | ⬜ 대기 |
+| 8 | 소켓 서버 & 단일 워커 Queue (PRD §3) | ⬜ 대기 |
+| 9 | 무결성 체크 로직 + 로컬 DB(SQLite) 저장/조회 (PRD §4.2, §7) | ⬜ 대기 |
+| 10 | 카드 리딩 결제 Flow — IC 정상/FALLBACK/응답코드 12/기타 실패 (PRD §4.3~§4.7) | ⬜ 대기 |
+| 11 | 결제 알림창 UI — IC/FALLBACK/PROCESSING 화면, Topmost, ESC Hook (PRD §5) | ⬜ 대기 |
+| 12 | 사용자 취소 & Timeout(120초) 동시성 처리 (PRD §4.8~§4.9, §8) | ⬜ 대기 |
+| 13 | VAN 연동 — `KFTC_GIRO.dll`/`FNAISCRDVAN` P/Invoke, 임시 테스트 전문 (PRD §2.3, §4.10) | ⬜ 대기 |
+| 14 | 리더기 설정 화면 기능 배선 — 초기화/상태체크/무결성체크 실동작 (PRD §6) | ⬜ 대기 |
+| 15 | 통합 검증 & 안정성 — 예외 처리, 리소스 정리, 장시간 실행 메모리 확인 (PRD §9) | ⬜ 대기 |
+
+(상태 값: ⬜ 대기 / 🔄 진행중 / ✅ 완료 / ⏸ 보류)
+
+Phase별 세부 Task/완료 기준은 착수 시점에 이 문서에 이어서 추가한다(Phase 0~6과 동일한 방식 — 목표 →
+체크리스트 → 완료 기준 → 구현 요약/검증 결과 순).
+
+---
+
 ## 참고 문서
-- `PRD_WPF.md` — 요구사항 정의
+- `PRD_WPF.md` — 1차 범위(홈 화면·리더기 설정 화면 UX/UI) 요구사항 정의
+- `docs/payment_relay/PRD.md` — 2차 범위(결제 중계 기능) 요구사항 정의
+- `docs/reader_dll/00_OVERVIEW.md`, `vendor/ReaderSerial/` — Reader DLL 연동 참조 자료
 - `screenshots/home_screen.png`, `screenshots/reader_setup.png` — 원본 실측 캡처

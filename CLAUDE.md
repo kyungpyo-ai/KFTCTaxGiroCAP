@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 기존 MFC(Win32)로 개발된 `KFTCOneCAP` 가맹점 결제 단말 관리 프로그램의 **홈 화면**과 **리더기 설정 화면**을 C# WPF로 동일한 UI/UX와 비즈니스 로직으로 재구현하는 프로젝트. 1차 범위는 이 두 화면이며, 나머지 화면(가맹점 설정, 결제, 전표 설정 등)은 범위 밖이다.
 
-**현재 상태: 1차 범위(홈 화면 + 리더기 설정 화면 UX/UI 재구현, Phase 0~6) 완료**. 문서는 `docs/home_reader_setup/`(PRD_WPF.md, ROADMAP.md, screenshots/)에 모아 관리한다. 다음 기능 추가는 새 PRD 문서로 시작하되, `docs/home_reader_setup/ROADMAP.md`는 계속 이어서 사용한다(Phase 7부터 추가).
+**현재 상태: 1차 범위(홈 화면 + 리더기 설정 화면 UX/UI 재구현, Phase 0~6) 완료.** 1차 범위 문서는 `docs/home_reader_setup/`(PRD_WPF.md, ROADMAP.md, screenshots/)에 모아 관리한다.
+
+**2차 범위(결제 중계 기능, Phase 7~, 준비 단계): `docs/payment_relay/PRD.md`가 요구사항 정본.** 소켓 서버(`localhost:8002`)로 POS 결제 요청을 받아 `ReaderSerial.dll`로 카드를 리딩하고 `KFTC_GIRO.dll`(`FNAISCRDVAN`)로 VAN 서버에 결제를 요청하는 기능을 **같은 `KFTCOneCAP.Wpf` 앱에 통합**한다(별도 실행 파일 아님). Phase 진행은 새 PRD를 계속 만들더라도 `docs/home_reader_setup/ROADMAP.md` 하나에 이어서 기록한다(Phase 7부터).
 
 ## 빌드 / 실행
 
@@ -22,6 +24,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`docs/home_reader_setup/PRD_WPF.md`** — 요구사항 정의서. 색상/폰트/레이아웃 수치, 화면별 상세 동작(버튼 로직, 토글, AOP 제약, 레지스트리 매핑)의 단일 진실 공급원(source of truth). 구현 중 애매한 부분이 있으면 추측하지 말고 이 문서를 먼저 확인한다.
 - **`docs/home_reader_setup/ROADMAP.md`** — Phase 0~8 순서대로 진행되는 개발 계획. 반드시 이 순서를 따르고, 각 Phase의 "완료 기준"(빌드+실행+스크린샷 대조)을 통과한 뒤에만 다음 Phase로 넘어간다. PRD와 실제 구현이 어긋나면 코드보다 먼저 PRD를 갱신한다.
 - **`docs/home_reader_setup/screenshots/home_screen.png`, `docs/home_reader_setup/screenshots/reader_setup.png`** — 원본 MFC 앱을 실행해 캡처한 실측 화면. 텍스트/색상/레이아웃을 소스 코드 리터럴보다 우선하는 근거로 삼는다(빌드된 실행 파일과 소스가 일부 어긋나는 것이 이미 확인됨 — PRD 6장 미확정 사항 #7 참고).
+- **`docs/payment_relay/PRD.md`** — 2차 범위(결제 중계 기능) 요구사항 정본. `KFTC_GIRO.dll`(VAN 연동)은 별도 SPEC 문서가 없어 이 PRD의 §2.3이 유일한 계약 정보다 — 임의로 필드를 추측하지 않는다.
 
 ## 원본 MFC 소스 (참고용, 이 저장소 밖)
 
