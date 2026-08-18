@@ -26,6 +26,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`docs/home_reader_setup/screenshots/home_screen.png`, `docs/home_reader_setup/screenshots/reader_setup.png`** — 원본 MFC 앱을 실행해 캡처한 실측 화면. 텍스트/색상/레이아웃을 소스 코드 리터럴보다 우선하는 근거로 삼는다(빌드된 실행 파일과 소스가 일부 어긋나는 것이 이미 확인됨 — PRD 6장 미확정 사항 #7 참고).
 - **`docs/payment_relay/PRD.md`** — 2차 범위(결제 중계 기능) 요구사항 정본. `KFTC_GIRO.dll`(VAN 연동)은 별도 SPEC 문서가 없어 이 PRD의 §2.3이 유일한 계약 정보다 — 임의로 필드를 추측하지 않는다.
 
+**2차 범위는 3단 문서 구성(PRD → ROADMAP → 실행계획서)을 따른다**: `docs/payment_relay/PRD.md`(무엇을) → `docs/home_reader_setup/ROADMAP.md`의 "2차 개발" 절(어떤 순서로, Phase 7~17 + 계층 구조 설계 원칙) → `docs/payment_relay/development_plan.md`(Task 단위 작업 지시/완료 조건, 각 Phase 착수 직전 작성). 코드 작성은 해당 Phase의 실행계획서가 준비된 뒤에 시작한다.
+
 ## 원본 MFC 소스 (참고용, 이 저장소 밖)
 
 `C:\Project\MerchantSetup_OnPaintIcons_Clean_CP949\` — 재구현 대상 원본. 화면 동작/레이아웃/문구를 확인할 때 이 소스를 직접 열어 대조할 수 있다.
