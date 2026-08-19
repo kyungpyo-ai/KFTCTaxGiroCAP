@@ -314,19 +314,19 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
     {
         switch (outcome.Kind)
         {
-            case InitOutcomeKind.Success:
+            case ReaderCommandOutcomeKind.Success:
                 FileLogger.Info($"[Reader1 초기화] 0x60->0x70 왕복 성공, 응답코드={outcome.ResponseCode}");
                 break;
-            case InitOutcomeKind.BusinessFailure:
+            case ReaderCommandOutcomeKind.BusinessFailure:
                 FileLogger.Warn($"[Reader1 초기화] 0x70 응답 수신, 업무 응답코드 실패={outcome.ResponseCode}");
                 break;
-            case InitOutcomeKind.DllCallFailure:
+            case ReaderCommandOutcomeKind.DllCallFailure:
                 FileLogger.Warn($"[Reader1 초기화] DLL 연동 실패: {outcome.DllResultName}({outcome.DllResult}) — {outcome.Detail}");
                 break;
-            case InitOutcomeKind.Timeout:
+            case ReaderCommandOutcomeKind.Timeout:
                 FileLogger.Warn("[Reader1 초기화] 응답 타임아웃");
                 break;
-            case InitOutcomeKind.CommunicationError:
+            case ReaderCommandOutcomeKind.CommunicationError:
                 FileLogger.Warn($"[Reader1 초기화] 통신 오류: {outcome.Detail}");
                 break;
         }

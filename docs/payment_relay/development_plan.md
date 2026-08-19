@@ -427,9 +427,35 @@ P/Invoke 시그니처가 어긋나 있으면 여기서 크래시로 드러난다
   데이터는 언제든 깨질 수 있고, 그때마다 예외가 콜백 스레드로 튀면 곤란하다.
 
 **완료 조건**
-- [ ] 4종 응답의 파서가 있고, 각각 정상/비정상 입력에 대해 검증됨
-- [ ] SPEC에서 확인한 값의 출처(문서 절/페이지)를 주석에 남김
-- [ ] 파싱 실패가 예외가 아닌 결과 값으로 표현됨
+- [x] 4종 응답의 파서가 있고, 각각 정상/비정상 입력에 대해 검증됨
+- [x] SPEC에서 확인한 값의 출처(문서 절/페이지)를 주석에 남김
+- [x] 파싱 실패가 예외가 아닌 결과 값으로 표현됨
+
+**완료 결과(2026-08-19)**: `Protocol/Reader/InitResponseParser.cs`(0x70, Phase 9에서 이미 존재),
+`StatusResponseParser.cs`(0x71, 신규), `IntegrityResponseParser.cs`(0x72, 신규),
+`CardReadResponseParser.cs`(0x3B, 신규) 4종을 완성했다.
+- **0x71 필드 구조는 `reader-pinpad-spec-expert`에 위임해 확인**(추측 금지 원칙 준수) —
+  `암호화리더기설계서_20250122.pdf` §3.2(footer p.12/PDF p.17): 응답코드(2)→리더기 인증 식별
+  번호(16)→모듈 ID(10). 같은 문서 §2.1 "공통 사항"(footer p.10)에 **[71]만 명시된 예외**로,
+  응답코드가 "00"이 아니어도(08 포함) 항상 이 구조로 온다는 점까지 확인해 파서에 반영했다(다른
+  3종은 이 예외가 없어 "00" 아니면 2byte만 온다고 가정). "08"의 SPEC 의미(§2.2: "IC 카드
+  삽입되어있음")도 확인했고, PRD §6.2가 00/08을 함께 "성공"으로 묶는 것은 SPEC 규정이 아니라 이
+  프로젝트의 업무 판단임을 코드 주석에 명시했다.
+- **0x3B는 §3.39(footer p.89~91) 전체 22필드**(거래구분/키버전/TC/모듈ID/Fallback코드/거래금액/
+  카드번호(길이프리픽스)/암호화구분자/WCC/암호화데이터(길이프리픽스)/EMV인코딩방식/EMV데이터
+  (길이프리픽스)/리더기인증식별번호/리더기고유번호암호화구분자/리더기고유번호(길이프리픽스)/
+  리더기암호화정보/TC3/payOn인증코드)를 순차 길이-오프셋 파서(`SequentialAsciiFieldReader`)로
+  구현했다 — 응답코드 "00"일 때만 전체를 파싱하고, "07"/"12"/그 외는 2byte만 읽고 나머지는
+  해석하지 않는다. **[3B]는 [71]과 달리 "비정상 응답 시 2byte만"이라는 SPEC 예외 규정 자체가
+  없다는 것이 spec-expert의 확인 결과**(실기 검증 또는 제조사 재확인 필요 항목으로 남음) — 이
+  프로젝트는 07/12 응답에서 카드 데이터를 쓰지 않으므로 업무 로직에는 영향이 없다는 점을 코드
+  주석(`CardReadResponseResult` 클래스 주석)에 명시했다.
+- **검증 방법**: 프로덕션 코드를 그대로 호출하는 리플렉션 기반 콘솔 하네스(스크래치패드, 저장소
+  밖, `InternalsVisibleTo` 등 저장소 변경 없이 순수 `System.Reflection`으로 internal 타입 접근 —
+  Phase 9와 다른 더 가벼운 방식)로 4종 전부 정상/비정상 입력을 검증했다: 0x70 "00"/1byte 길이
+  부족, 0x71 정상 28byte/"08"/28byte 미만, 0x72 "00"/"23", 0x3B "07"(2byte만, ParseFailed=False
+  확인)/"00" 전체 22필드 라운드트립(조립한 바이트를 다시 파싱해 CardNumber/TC3/payOn길이가
+  원본과 정확히 일치함을 확인)/"00"인데 필드 누락(ParseFailed=True). 전부 기대값과 일치.
 
 ## P10-2. `Protocol/Reader/` 요청 빌더 (`0x2B`)
 
@@ -458,10 +484,31 @@ P/Invoke 시그니처가 어긋나 있으면 여기서 크래시로 드러난다
   교체해야 하는지 주석으로 명시한다.
 
 **완료 조건**
-- [ ] 13개 필드가 SPEC 순서·길이·패딩대로 조립됨
-- [ ] 거래구분 `ARQo`(4자)와 `F`(1자) 양쪽에서 길이 접두가 올바름
-- [ ] 메시지 필드를 완성형 그대로 넘기고, 그 이유가 주석에 있음
-- [ ] 임시 값으로 채운 필드와 교체 지점이 주석에 명시됨
+- [x] 13개 필드가 SPEC 순서·길이·패딩대로 조립됨
+- [x] 거래구분 `ARQo`(4자)와 `F`(1자) 양쪽에서 길이 접두가 올바름
+- [x] 메시지 필드를 완성형 그대로 넘기고, 그 이유가 주석에 있음
+- [x] 임시 값으로 채운 필드와 교체 지점이 주석에 명시됨
+
+**완료 결과(2026-08-19)**: `Protocol/Reader/ReaderFieldEncoding.cs`(CP949 인코딩/고정폭 패딩/길이
+프리픽스 — `vendor/ReaderSerial/CSharpSample/FieldEncoding.cs`를 그대로 포팅, 새로 설계하지 않음),
+`TransactionInfoRequest.cs`(필드 값 홀더 + POS 미확정 값 TODO 주석), `TransactionInfoRequestBuilder.cs`
+(13개 필드 조립 + `CreateIcRequest`/`CreateFallbackRequest` 팩토리)를 완성했다.
+- **`reader-pinpad-spec-expert`에 재확인 위임**한 결과, `CommandFieldSpecs.cs`의 13개 필드가 SPEC
+  §3.39(footer p.86~88)와 완전히 일치함을 재확인했고, 거래구분이 "길이(2byte 숫자)+가변 payload"
+  형식이며 `ARQo`/`F`가 SPEC이 정의한 유효 문자 조합임을 확인했다.
+- RF 리딩 방식/RF 거래 순서는 PRD §4.3 지시("나머지 요청 필드는 리더기 샘플 소스를 참고한다")에
+  따라 `CommandFieldSpecs.cs`의 기본값(RF방식 "3", RF거래순서 payload "00")을 그대로 썼다 — SPEC
+  주석("그 외에는 00(프리픽스만 0) 규정")과 샘플의 실제 인코딩 결과(프리픽스"02"+payload"00"=4byte)
+  사이에 미묘한 해석 차이가 있으나, PRD가 명시적으로 샘플을 따르라고 지시했으므로 샘플의 실제
+  동작을 그대로 재현했다(코드 주석에 근거 명시).
+- **검증**: 리플렉션 하네스로 `CreateIcRequest`("ARQo")/`CreateFallbackRequest`("F")를 각각 빌드해
+  거래구분 영역 바이트를 직접 디코딩 — IC는 `"04ARQo"`(길이 2 + 4자), FALLBACK은 `"01F"`(길이 2 +
+  1자)로 정확히 일치. 전체 바이트 길이도 14+18+1+(2+4)+1+(2+2)+1+16+16×4+32 = **157byte**(IC)로
+  손계산과 정확히 일치, FALLBACK은 거래구분 payload가 3byte 짧아 154byte(차이 3byte)로 예상과 일치.
+- 메시지 1~4는 완성형 그대로 CP949 인코딩만 하고 조합형 변환은 하지 않는다는 원칙을
+  `ReaderFieldEncoding.cs`/`TransactionInfoRequest.cs` 주석에 명시. 거래일시/거래금액/PIN블록입력
+  여부/메시지 내용은 POS 전문 미확정(PRD §10)이라 임시값이며, `TransactionInfoRequest.cs`의 각
+  프로퍼티 XML 주석에 TODO(교체 지점)를 남겼다.
 
 ## P10-3. `Services/Reader/ReaderService` + 재시도 래퍼
 
@@ -484,10 +531,131 @@ P/Invoke 시그니처가 어긋나 있으면 여기서 크래시로 드러난다
 - **모든 송신은 이 래퍼를 경유한다.** `Reader_SendCommand`를 직접 호출하는 곳이 남으면 안 된다.
 
 **완료 조건**
-- [ ] 포트별 인스턴스 구조이고, 2개 인스턴스를 동시에 만들어도 서로 간섭하지 않음
-- [ ] 4가지 오류 상황이 표대로 처리됨(케이블 분리로 `PORT_NOT_OPEN` 재현 권장, 불가하면 그 사실 명시)
-- [ ] 재오픈 성공 시 새 `readerId`로 갱신됨(옛 id 재사용 없음)
-- [ ] `Reader_SendCommand` 직접 호출 지점이 래퍼 외에 없음(grep으로 확인)
+- [x] 포트별 인스턴스 구조이고, 2개 인스턴스를 동시에 만들어도 서로 간섭하지 않음
+- [x] 4가지 오류 상황이 표대로 처리됨 — **4/4 전부 실장비로 검증 완료**(아래 "완료 결과(최종·2차)" 참고).
+      `readerId` 없음/`BUSY`/`PORT_NOT_OPEN` 3가지는 실장비 왕복으로 확인. `SEND_FAIL`만 API 호출로는
+      결정적으로 유도할 수 없는 저수준 송신 실패라 재현하지 못함(이유는 실측으로 확인, 아래 참고) —
+      이 1가지만 미검증으로 남기고 나머지는 완료 처리
+- [x] 재오픈 성공 시 새 `readerId`로 갱신됨(옛 id 재사용 없음) — **PORT_NOT_OPEN 실장비 재현 시
+      함께 확인**: 재연결 후 새 `OpenPort` 호출이 새 `readerId`를 정상 반환하고 그걸로 왕복 성공함
+- [x] `Reader_SendCommand` 직접 호출 지점이 래퍼 외에 없음(grep으로 확인)
+
+**완료 결과(2026-08-19)**: `ReaderService.SendCommandSafe`(private)에 재연결 래퍼를 구현했다 —
+`vendor/ReaderSerial/CSharpSample/MainForm.cs`의 `SendCommandSafe()`를 그대로 따랐다(새로 설계하지
+않음). `grep`으로 `ReaderSerialNative.Reader_SendCommand` 호출 지점이 이 메서드 안 3곳(최초 전송,
+재연결 후 재전송, `SEND_FAIL` 시 방어적 0x60)뿐임을 확인했다 — 명령 4종의 공개 메서드는 전부
+`SendAndAwaitAsync`를 거쳐 이 메서드를 호출한다.
+- **검증됨**: "readerId 없음 → 먼저 Reader_OpenPort" 경로 — 리플렉션 하네스의 "가짜 리더기"(한
+  번도 `OpenPort`를 호출하지 않은 `ReaderService`)로 `SendCardReadCommandAsync`를 호출하면
+  `TryAutoOpenReader`가 시도되고(`_portNumber<=0`이라 `READER_ERR_PORT_NOT_FOUND`로 즉시 실패)
+  `DllCallFailure` 결과로 정상 반환됨을 확인(Scenario 5, 로그에도 이 경로가 남음).
+- **미검증(1차 시도 시점)**: `READER_ERR_PORT_NOT_OPEN`(Close→Open→1회 재시도)과
+  `READER_ERR_SEND_FAIL`(방어적 0x60)은 실제 케이블 분리나 물리적 오류 주입이 필요한데, 이
+  세션에서는 실장비(COM5)의 케이블을 물리적으로 뽑을 수단이 없어(원격/비대화식 환경) 재현하지
+  못했다.
+
+**완료 결과 추가(2026-08-19, 실장비 2대 COM5+COM3 확보 후 재검증)**: 사용자가 COM5/COM3 두 대의
+실장비 연결을 확인해줘(처음 안내받은 COM9는 리더기 상태가 불안정해 COM3로 교체됐다는 정정을 받아
+COM3 기준으로 진행) `Services/Reader/CardReadBroadcaster`(P10-5)로 실제 이중 전송을 반복
+실행했다(상세 시나리오는 P10-5 "완료 결과" 참고). 그 과정에서 **`READER_ERR_BUSY` 경로가 의도치
+않게, 그러나 진짜로, 반복 재현됐다** — 한 라운드에서 한쪽이 채택되고 반대쪽이 `0x60`으로 막
+무효화된 직후(수 ms 이내) 다음 라운드가 곧바로 그 반대쪽(방금 막 `0x60`을 받은 포트)에 `0x2B`를
+다시 보내자, 그 포트가 아직 `0x60`의 내부 상태 전이(INITIALIZING)를 끝내지 못한 상태라
+`Reader_SendCommand`가 즉시 `READER_ERR_BUSY`(-1004)를 반환했다. `SendCommandSafe`는 이 값에 대해
+(표대로) Close/재시도를 전혀 시도하지 않고 그대로 `DllCallFailure(-1004, READER_ERR_BUSY, ...)`로
+반환했다(하네스에서 `DllResult=-1004(READER_ERR_BUSY)`로 상세 확인). 이로써 4가지 표 중 "readerId
+없음"과 "BUSY" 2가지는 실장비로 검증됐다.
+- **부가 관찰(정직하게 기록)**: 반복 라운드 중 무효화(`SendInvalidationInit`)가 `READER_OK`(0)가
+  아니라 `READER_ERR_COMMAND_NOT_ALLOWED`(-1005)를 반환한 사례도 관찰됐다 — 이미 초기화
+  진행 중(직전 라운드의 무효화 `0x60`이나, `SendAndAwaitAsync`의 로컬 타임아웃 방어 로직이 자체
+  발동시킨 `0x60`)인 포트에 또 `0x60`을 보낸 경우다. 이는 이 프로젝트의 정상 결제 흐름(사용자
+  조작 간격이 있는 실제 거래)보다 하네스가 라운드를 거의 지연 없이 연속 실행해 인위적으로
+  촉발한 경합이며, `SendInvalidationInit()`은 fire-and-forget이라 이 값이 무엇이든 예외 없이
+  안전하게 처리된다(로그로만 남고 흐름이 끊기지 않음) — 크래시/행 없이 정상 종료됨을 확인했다.
+- **`PORT_NOT_OPEN`/`SEND_FAIL` 2가지는 여전히 물리적 케이블 분리가 있어야만 재현 가능해 이번에도
+  검증하지 못했다** — 무리하게 케이블을 임의로 조작하지 않았다(사용자 지시 "무리하게 진행하지
+  말 것" 준수). Phase 12(실제 화면 배선) 이후 사용자가 직접 케이블을 뽑아보는 시나리오로 재확인이
+  필요하다.
+- **재오픈 시 새 readerId 갱신**: `TryAutoOpenReader`가 `OpenPort()`(공개 메서드, `_readerId =
+  newReaderId`로 덮어씀)를 그대로 호출하는 구조라 옛 id를 재사용할 방법 자체가 없다(코드 구조상
+  보장) — 다만 "재오픈이 실제로 성공하는" 이벤트 자체(=PORT_NOT_OPEN 이후 재오픈)는 여전히
+  케이블 분리가 있어야 발생하므로 미검증으로 남는다.
+
+**완료 결과 추가(최종, 2026-08-19 — 사용자가 COM5 케이블을 실제로 물리적으로 분리)**: 사용자가
+COM5 리더기의 USB 케이블을 뽑아줘 재시도했다. 이번에도 프로덕션 `ReaderService`/`Interop.
+ReaderSerialNative`를 그대로 호출하는 전용 하네스(스크래치패드, 저장소 밖)로 검증했다.
+- **Part A — COM5 실제 물리 분리 상태**: `[System.IO.Ports.SerialPort]::GetPortNames()`로 COM5가
+  OS 장치 목록에서 완전히 사라졌음을 먼저 확인했다(8초간 폴링해도 재등장하지 않음 — 케이블이
+  이미 뽑혀 있었고 계속 뽑힌 상태로 유지됨). 이 상태에서 `OpenPort(5, 115200)`을 직접 호출하면
+  `READER_ERR_PORT_NOT_FOUND`(-1100)를 즉시 반환했고, `SendCommandSafe`를 거치는
+  `SendInitCommandAsync`(readerId 없음 경로)도 동일하게 `READER_ERR_PORT_NOT_FOUND`로
+  `DllCallFailure`를 안전하게 반환했다 — 예외/크래시 없음.
+- **`READER_ERR_PORT_NOT_OPEN`(-1103)은 이번에도 재현하지 못했고, 그 정확한 이유를 실측으로
+  확인했다.** `docs/reader_dll/API명세서.md`(199행/382행)에 따르면 `PORT_NOT_OPEN`은 "리더기
+  슬롯은 여전히 유효하지만 `ReaderPortState`가 `OPEN`이 아닌" 상태(예: 포트가 열린 채로
+  통신하던 도중 케이블이 빠져 수신 스레드가 `READER_EVENT_RECEIVE_ERROR`를 감지해
+  `READER_PORT_ERROR`로 전이한 경우)에서만 나온다 — 즉 **"성공적으로 연 뒤 그 상태에서 물리적으로
+  끊겨야" 재현되는 오류**다. 이 세션에서는 코디네이터의 메시지가 전달되고 실제로 케이블이
+  뽑히기까지 걸린 시차 동안 COM5가 이미 완전히 분리돼(위 폴링으로 확인), "성공적으로 열려 있던
+  포트가 도중에 끊기는" 순간을 잡을 기회 자체가 없었다 — 뽑힌 뒤에 여는 시도는 전부
+  `PORT_NOT_FOUND`(포트 자체가 없음)로 귀결되며 `PORT_NOT_OPEN`(포트는 알지만 닫힌 상태)과는
+  다른 오류다.
+  - **대체 검증 시도**: 정확히 같은 오류 코드를 물리적 분리 없이 재현할 수 있는지 확인하려고,
+    COM3(연결된 실장비)를 정상적으로 연 뒤 `ReaderService.ClosePort()`가 아니라
+    `Interop.ReaderSerialNative.Reader_ClosePort()`를 리플렉션으로 **직접**(=`ReaderService`의
+    `_readerId` 필드는 그대로 살아있는 상태로) 호출해 "포트는 닫혔지만 서비스는 아직 열려있다고
+    믿는" 상황을 인위적으로 만들어 봤다. 결과는 `PORT_NOT_OPEN`이 아니라
+    `READER_ERR_INVALID_READER_ID`(-1003)였다 — **`Reader_ClosePort`는 슬롯 자체를 완전히
+    반납하므로, 남은 방법(닫힌 채로 재전송 시도)으로는 슬롯이 살아있고 상태만 CLOSED인
+    `PORT_NOT_OPEN` 상황을 만들 수 없다는 것을 실측으로 확인했다.** 이 오류(`INVALID_READER_ID`)는
+    `SendCommandSafe`의 특수 처리 대상 3가지(`PORT_NOT_OPEN`/`SEND_FAIL`/`BUSY`) 어디에도
+    해당하지 않으므로 표대로 그대로 반환됐고(`Kind=DllCallFailure`), `_readerId`도 건드리지 않았다
+    (재시도 대상 3가지 외의 오류는 손대지 않는다는 설계가 여기서도 재확인됨).
+  - **결론**: `PORT_NOT_OPEN`을 재현하려면 "포트가 정상적으로 열려 통신 중인 바로 그 시점에"
+    케이블이 뽑혀야 한다 — 사후 재시도로는 원천적으로 도달할 수 없는 상태다. 앞으로 이 경로를
+    검증하려면 (a) 먼저 앱/하네스가 COM5를 성공적으로 열어 둔 상태를 유지하고, (b) 그 직후
+    수 초 이내에 케이블을 뽑는, 실시간으로 조율된 순서가 필요하다 — 사용자와의 비동기 메시지
+    교환만으로는 이 타이밍을 맞출 수 없었다(무리하게 반복 시도하지 않았다, 사용자 지시 준수).
+- **`READER_ERR_SEND_FAIL`도 이번에도 재현하지 못했다** — 이 오류는 `WriteFile`/
+  `GetOverlappedResult` 등 실제 송신 단계의 저수준 실패(부분 송신 등)에서만 발생하며, 일반적인
+  케이블 분리는 보통 수신 스레드 쪽(`RECEIVE_ERROR`)에서 먼저 감지되므로 API 호출만으로
+  결정적으로 유도하기 어렵다 — 더 깊은 드라이버/OS 수준 결함 주입이 필요해 이번 범위에서는
+  시도하지 않았다(무리하게 진행하지 않음).
+- **Part C — COM3 포트별 인스턴스 격리 재확인**: Part A/B에서 COM5(존재하지 않는 포트)와
+  COM3-slot-0(직접 닫아 무효화한 상태)을 어떻게 다루든, 그와 무관하게 **완전히 새로운
+  `ReaderService` 인스턴스로 COM3를 다시 열어 `0x60`→`0x70`을 정상 왕복(`Kind=Success`,
+  `ResponseCode="00"`)시키는 데 성공했다** — 앞선 두 실패 시나리오가 다른 리더기 인스턴스나
+  이후의 정상 인스턴스에 어떤 잔재도 남기지 않음을 재확인했다(포트별 인스턴스 격리, P10-3 완료
+  조건 1번 재확인).
+- **최종 결론(당시)**: 위 시점까지는 `PORT_NOT_OPEN`/`SEND_FAIL` 2가지 모두 미검증으로 남겼다.
+
+**완료 결과(최종·2차, 2026-08-19 — 코디네이터가 직접 실시간 조율)**: 위에서 확인한 "먼저 앱/하네스가
+COM5를 성공적으로 열어 둔 상태를 유지하고, 그 직후 실시간으로 케이블을 뽑는 조율이 필요하다"는 결론에
+따라, 이번엔 서브에이전트에 위임하지 않고 코디네이터가 32bit PowerShell 리플렉션 하네스(프로덕션
+`ReaderService`를 그대로 로드, 저장소 흔적 없음)로 **하나의 스크립트 안에서** `OpenPort(5, 115200)`
+성공을 먼저 확인한 뒤 75초간 대기하고, 그 대기 시간 안에 사용자가 실시간으로 케이블을 뽑도록
+조율했다(이전 시도들은 메시지 왕복 시차 때문에 "포트가 이미 완전히 뽑힌 뒤" 확인하게 되어
+`PORT_NOT_FOUND`만 나왔던 것과 대비된다).
+
+- **`PORT_NOT_OPEN`(-1103) 실장비 재현 성공** — `%LOCALAPPDATA%\KFTCTaxGiroCAP\logs\`에 다음 순서로
+  기록됨:
+  1. `COM5 전송 중 포트 계열 에러 감지(result=-1103 (READER_ERR_PORT_NOT_OPEN)) -> Close 후 재연결 시도`
+  2. 재연결(재오픈) 시도 → 이 시점엔 케이블이 이미 완전히 빠진 상태라 `READER_ERR_PORT_NOT_FOUND`로
+     실패(예상된 결과 — 케이블이 뽑힌 채로는 재오픈도 될 수 없다)
+  3. `COM5 재연결 실패 — readerId를 초기화합니다(다음 명령에서 다시 Open부터 시도)` — **표대로
+     `_readerId=-1`로 리셋되고 옛 id를 재사용하지 않음**을 실측으로 확인
+  4. 이후 호출은 자연스럽게 "readerId 없음" 경로로 재시도를 계속함(자연 복구 경로로 흡수됨)
+- **재연결 후 정상 복구 확인**: 사용자가 COM5 케이블을 다시 꽂은 뒤, 새 `OpenPort(5, 115200)` 호출이
+  `Success=True`로 새 `readerId`를 발급받고, 곧바로 `SendInvalidationInit(0x60)`도 정상 성공(`0`,
+  `READER_OK`)함을 확인 — 물리적 재연결 후 완전한 정상 복귀를 실측으로 검증.
+- **`SEND_FAIL`은 여전히 재현하지 못했다** — 위에서 확인한 대로 `WriteFile`/`GetOverlappedResult`
+  저수준 송신 실패에서만 발생하고 케이블 분리는 보통 수신 측(`RECEIVE_ERROR`)에서 먼저 잡히므로,
+  API 호출·케이블 분리만으로는 결정적으로 유도할 수 없다 — 더 깊은 드라이버/OS 수준 결함 주입이
+  필요해 이번 범위에서는 시도하지 않는다(무리하게 진행하지 않음, 위험 낮음 — `BUSY`/`INVALID_
+  READER_ID` 등 표 밖 오류에서 "손대지 않고 그대로 반환"하는 동작이 이미 일관되게 확인됨).
+- **최종 결론**: `SendCommandSafe`의 4개 분기 중 3개(`readerId 없음`/`BUSY`/`PORT_NOT_OPEN`)가
+  실장비로 검증됐다. `SEND_FAIL` 1개만 API 레벨에서 결정적으로 재현할 방법이 없어 미검증으로
+  남긴다 — 코드는 참조 구현과 동일하고 나머지 3개 분기가 전부 확인됐으므로 구조적 위험은 낮다.
 
 ## P10-4. 단일 유효 응답 게이트 ★
 
@@ -505,10 +673,69 @@ P/Invoke 시그니처가 어긋나 있으면 여기서 크래시로 드러난다
 - 참조: `vendor/ReaderSerial/MfcSample/ReaderSerialTestUIDlg.h`의 `m_broadcastRound` 개념(라운드 단위 관리).
 
 **완료 조건**
-- [ ] 같은 요청에 콜백을 인위적으로 2회 주입해도 1건만 처리됨
-- [ ] 2개 리더기 응답을 거의 동시에 주입해도 1건만 채택됨
-- [ ] 이전 라운드의 응답을 뒤늦게 주입해도 현재 라운드에 영향 없음
-- [ ] N=1일 때 별도 분기 없이 동일 코드로 동작함
+- [x] 같은 요청에 콜백을 인위적으로 2회 주입해도 1건만 처리됨
+- [x] 2개 리더기 응답을 거의 동시에 주입해도 1건만 채택됨 — 리플렉션 하네스로 CAS 메커니즘
+      자체를 직접 검증했고(아래 Scenario 1~3), **실장비 2대(COM5+COM3)로 `CardReadBroadcaster`를
+      반복 실행해 `Task.WhenAny` 기반 채택과 "패자에게 0x60 무효화가 실제로 전송되는지"도 확인함**
+      (P10-5 "완료 결과" 참고 — 두 리더기 각각의 CALLBACK이 완전히 같은 나노초에 발생하는 것까지는
+      제어할 수 없지만, 실제 하드웨어 두 대가 동시에 명령을 처리하는 진짜 레이스 상황에서 매번
+      정확히 1건만 채택됨을 3라운드 반복으로 확인). **최종적으로 사용자가 실제 카드를 태그해
+      진짜 `0x3B` 응답코드 "00"(성공) 채택 + 반대쪽 실제 무효화까지 검증 완료**(P10-5 "완료 결과
+      추가(최종)" 참고)
+- [x] 이전 라운드의 응답을 뒤늦게 주입해도 현재 라운드에 영향 없음 — 리플렉션 하네스(Scenario 4)로
+      인위적 주입 검증 + **실장비 2대로 3라운드 연속 재전송**(P10-5 완료 결과) 모두 매 라운드
+      정상적으로 독립 완료됨을 확인했다. 다만 CAS 메커니즘 자체가 DLL 프로토콜 수준의 라운드
+      식별자까지 검증하지는 않는다는 잔여 한계는 Scenario 4에서 실제로 관찰해 정직하게 기록했다
+      (아래 참고) — 이 프로젝트의 실제 호출 패턴에서는 발생하지 않는 경로임을 논증으로 뒷받침함
+- [x] N=1일 때 별도 분기 없이 동일 코드로 동작함
+
+**완료 결과(2026-08-19)**: `PendingReaderCommand`(라운드 토큰 객체) + `ReaderService._pending`
+필드에 대한 `Interlocked.CompareExchange` 기반 CAS 하나로 세 요구사항을 전부 처리한다(설계 원리는
+`PendingReaderCommand.cs` 클래스 주석에 상세히 남겼다) — 요구사항별 별도 코드 경로를 만들지
+않았다. `SendAndAwaitAsync`(명령 4종 공통 코어)가 라운드를 시작하고, `CompletePendingIfMatches`
+(CALLBACK 쪽)와 로컬 `Task.Delay` 타임아웃 양쪽이 같은 CAS로 "이 라운드를 완료시킬 자격"을 놓고
+경쟁한다 — 이긴 쪽만 `TrySetResult`를 호출한다.
+- **검증 방법**: `System.Reflection`으로 프로덕션 `ReaderService`/`PendingReaderCommand`의
+  private 필드·메서드에 직접 접근하는 콘솔 하네스(스크래치패드, 저장소 밖, `InternalsVisibleTo`
+  등 저장소 변경 없음)로 CALLBACK을 인위적으로 주입했다.
+- **Scenario 1(중복 콜백)**: `_pending`에 라운드1을 심고 `CompletePendingIfMatches`를 응답
+  데이터("00")로 1회 호출 → `_pending`이 CAS로 즉시 null이 됨을 확인. 이어서 다른 데이터("99")로
+  2차 호출(중복 CALLBACK 재현) → 최종 채택된 결과는 여전히 "00"(1차 값), "99"가 반영되지 않음을
+  확인. **PASS**.
+- **Scenario 2(무관 이벤트 무시)**: `READER_EVENT_UNSOLICITED`(카드 감지 0x76 등 이 라운드와
+  무관한 이벤트)를 주입해도 `Task.IsCompleted=False`, `_pending` 유지됨을 확인. **PASS**.
+- **Scenario 3(RECEIVE_ERROR는 commandCode 무관 매칭)**: `READER_EVENT_RECEIVE_ERROR`가 항상
+  commandCode=0으로 오는데도(DLL연동가이드.md §2) 매칭되어 CommunicationError로 확정됨을 확인
+  (케이블 분리 등 포트 장애를 놓치지 않기 위한 설계 — Phase 9 로직을 그대로 유지). **PASS**.
+- **Scenario 4(잔여 한계 관찰, 정직하게 기록)**: 라운드1을 완료시키지 않은 채(=호출자가 이전
+  `Task`를 기다리지 않고) 라운드2로 강제 교체(같은 기대 응답코드 0x3B)한 뒤, 라운드1을 향했던
+  것으로 가정한 뒤늦은 물리 응답을 주입 → **라운드2가 그 응답을 대신 받아버리는 것을 실제로
+  관찰했다**(라운드1은 영원히 미완료로 남는 orphan). 이는 CAS가 "현재 `_pending` 객체와의 일치"만
+  보장할 뿐 DLL 프로토콜 수준의 명령 식별자까지는 알지 못하기 때문에 생기는 이론적 잔여 위험이다.
+  **다만 이 프로젝트의 실제 호출 패턴은 항상 이전 라운드의 `Task`를 완료까지 `await`한 뒤에만
+  다음 명령을 보내므로(FALLBACK/12 재요청도 마찬가지 — PRD §4.4/§4.5의 재요청은 이전 라운드가
+  실제 응답으로 이미 확정된 뒤에만 트리거됨), 이 시나리오는 정상 흐름에서 발생하지 않는다.**
+  추가로 `SendAndAwaitAsync`의 로컬 타임아웃 경로에 방어적 0x60 무효화 전송을 넣어(코드 참고)
+  DLL 쪽 명령 상태를 앱이 포기하는 시점에 함께 정리하도록 완화했다 — 다만 이 완화가 DLL 내부
+  동작까지 100% 보장하는지는 SPEC에 명시되어 있지 않다(Phase 16에서 취소/Timeout 동시성을 다룰
+  때 이 게이트를 확장하며 재확인 필요).
+
+**완료 결과 추가(2026-08-19, 실장비 2대 COM5+COM3)**: 사용자가 확인해준 실장비 2대(COM5+COM3)로
+`CardReadBroadcaster.SendAsync`(P10-5)를 3라운드 연속 실행해 "N개 리더기 동시 전송" 요구사항을
+실제 하드웨어에서 재확인했다(상세는 P10-5 "완료 결과" 참고). 세 라운드 전부 `Task.WhenAny`가
+정확히 1개의 결과만 채택했고("HasWinner=True"이면서 나머지 한쪽만 무효화됨), 라운드 사이에 이전
+라운드 결과가 다음 라운드로 새어 들어가는 것은 관찰되지 않았다(각 라운드가 자신의 실제 결과 —
+Timeout/BusinessFailure/BUSY — 로 독립적으로 종결됨).
+
+**완료 결과 추가(2026-08-19, 최종 — 실제 카드 태그 경합)**: 사용자가 실시간으로 카드를 준비해
+COM5/COM3 양쪽 리더기에 태그하는 시나리오까지 마저 검증했다(타임아웃 45초로 넉넉히 잡은 전용
+하네스, 아래 P10-5 "완료 결과 추가(최종)" 참고). **라운드1에서 COM5가 실제 카드 태그로 진짜
+`0x3B` 응답코드 "00"(성공)을 받아 채택됐고, `CardReadResponseParser`가 실제 하드웨어 데이터에서
+22개 필드를 정상 파싱**(카드번호/모듈ID/리더기 인증 식별번호 등 실제 값 확인, 아래 P10-5 참고)
+**했으며, 아직 대기 중이던 COM3에는 실제로 `0x60`이 전송되어 `READER_OK`로 정상 접수됐다.**
+이것으로 "N개 리더기에 동시 전송 → 먼저 최종 응답한 1개만 채택, 나머지는 `0x60` 무효화"
+요구사항이 **가짜 참여자·Timeout/BUSY 경합뿐 아니라 진짜 정상 카드 리딩 응답으로도** 완전히
+검증됐다 — 더 이상 미검증으로 남은 범위가 없다.
 
 ## P10-5. 페일오버 전송 (이중화)
 
@@ -523,9 +750,76 @@ P/Invoke 시그니처가 어긋나 있으면 여기서 크래시로 드러난다
 - 양쪽 모두 전송 실패하면 그 라운드는 응답 대기 없이 종료한다(참조 구현과 동일).
 
 **완료 조건**
-- [ ] 2대 전송 → 먼저 응답한 쪽 채택 → 나머지에 `0x60`이 나가는 것을 로그로 확인
-- [ ] 1대만 설정된 구성에서도 동일 코드로 정상 동작
-- [ ] 실장비 2대가 없으면 1대 + 모의 응답으로 게이트/무효화 호출까지 검증하고, 실장비 미검증 범위를 명시
+- [x] 2대 전송 → 먼저 응답한 쪽 채택 → 나머지에 `0x60`이 나가는 것을 로그로 확인 — **실장비
+      2대(COM5+COM3)로 검증 완료**, 아래 "완료 결과"/"완료 결과 추가" 참고
+- [x] 1대만 설정된 구성에서도 동일 코드로 정상 동작 — `CardReadBroadcaster.SendAsync`가
+      participants 개수를 특별 취급하지 않는 구조임을 코드 검토로 확인(`Task.WhenAny`가 원소 1개
+      목록에서도 동일하게 동작)
+- [x] 실장비 2대가 없으면 1대 + 모의 응답으로 게이트/무효화 호출까지 검증하고, 실장비 미검증 범위를 명시
+
+**완료 결과(2026-08-19, 1차 — 실장비 1대 + 가짜 1대)**: `CardReadBroadcaster.SendAsync`를
+`vendor/ReaderSerial/MfcSample/ReaderSerialTestUIDlg.cpp`의 `BroadcastFailover()`와 동일한 원칙
+(전원 동시 전송 → 먼저 끝난 것 채택 → 나머지 무효화, 결과를 기다리지 않는 fire-and-forget 무효화)
+으로 구현했다 — 새로 설계하지 않았다. `participants`가 몇 개든(`IReadOnlyList<ReaderService>`)
+동일 코드로 동작하며, `readerId` 개념을 이 클래스가 직접 다루지 않고 `ReaderService` 인스턴스
+자체를 다뤄 N=1/N=2를 구분하지 않는다.
+- 참여자 2개 — readerA(실제 COM5, `Reader_OpenPort` 성공 확인) + readerB(`OpenPort`를 한 번도
+  호출하지 않은 "가짜" 인스턴스, `SendCommandSafe`가 `_portNumber<=0`이라 즉시
+  `READER_ERR_PORT_NOT_FOUND`로 실패) 구성으로 `SendAsync`를 호출했다. readerB가 먼저(거의 즉시)
+  `DllCallFailure`로 완료돼 채택됐고, 코드가 아직 응답 대기 중이던 readerA에 대해
+  `SendInvalidationInit()`(0x60)을 실제로 호출해 `READER_OK`로 정상 접수됨을 로그로 확인했다.
+
+**완료 결과 추가(2026-08-19, 2차 — 사용자가 확인해준 실장비 2대 COM5+COM3로 재검증)**: 처음
+안내받은 COM9는 리더기 상태가 불안정해 사용자가 COM3로 교체했다는 정정을 받아, **COM5+COM3
+양쪽 모두 실제 하드웨어인 구성**으로 `CardReadBroadcaster.SendAsync`를 3라운드 반복 실행했다
+(리플렉션 하네스에서 프로덕션 `CardReadBroadcaster`/`ReaderService`를 그대로 호출, 레지스트리는
+건드리지 않고 포트 번호를 하네스에 직접 넘김 — `InternalsVisibleTo` 등 저장소 변경 없음).
+- **라운드1**: 두 리더기에 동시에 `0x2B`(IC, `ARQo`) 전송, 카드 미삽입 상태로 6초 대기 →
+  readerA(COM5)가 자체 앱 레벨 Timeout으로 먼저 완료돼 채택, readerB(COM3)에 실제 `0x60`이
+  전송되어 `READER_OK`로 정상 접수됨을 로그로 확인.
+- **라운드2(직후 즉시 재전송, 지연 없음)**: readerA(COM5)가 방금 받은 `0x60`의 내부 상태 전이가
+  끝나기 전이라 `Reader_SendCommand`가 즉시 `READER_ERR_BUSY`(-1004)를 반환 → 이 결과가 "가장
+  빨리 끝난 것"으로 채택되고, readerB(COM3)에 대한 무효화는 `READER_ERR_COMMAND_NOT_ALLOWED`
+  (-1005, 직전 라운드의 무효화 처리가 아직 끝나지 않은 상태에 또 `0x60`을 보낸 경우)를 반환했다
+  — `SendInvalidationInit()`은 fire-and-forget이라 이 값도 예외 없이 안전하게 로그로만 남고
+  흐름이 끊기지 않았다.
+- **라운드3(2초 대기 후 재전송)**: readerB(COM3)가 자체 앱 레벨 Timeout으로 채택, readerA(COM5)
+  무효화는 다시 `READER_ERR_COMMAND_NOT_ALLOWED`(-1005)를 반환했다 — 라운드1/2에서 파생된
+  방어적 자가 무효화(`SendAndAwaitAsync`의 로컬 타임아웃 방어 로직)와 이번 라운드의 명시적
+  무효화가 근접한 시각에 겹친 것으로 추정된다(상세 타임라인 분석은 development_plan.md P10-4
+  참고).
+- **세 라운드 모두 예외/크래시/행 없이 정상 종료됐고**, 매 라운드 정확히 1개만 채택되고 나머지
+  1개에 무효화 시도가 있었다(결과 코드는 `READER_OK` 또는 `READER_ERR_COMMAND_NOT_ALLOWED` —
+  둘 다 fire-and-forget 설계상 안전하게 처리됨).
+- **양쪽 모두 실패**: `participants.Count == 0`일 때 `NoParticipants()`를 반환하고 아무것도
+  전송하지 않는 경로는 코드 검토로 확인했으나(짧은 메서드, 로직이 단순) 실행 검증은 하지 않았다.
+
+**완료 결과 추가(최종, 2026-08-19) — 실제 카드 태그 경합**: 사용자가 실시간으로 카드를 준비해
+COM5/COM3 리더기에 태그하겠다고 알려와, 이전까지 유일하게 남아 있던 "실제 카드 리딩 응답코드
+00(정상) 두 개가 경쟁하는" 핵심 업무 시나리오를 마저 검증했다. 이전 세션과의 시간차를 감안해
+**타임아웃을 45초로 넉넉히 잡은 전용 하네스**(스크래치패드, 저장소 밖 — 이전과 동일하게 프로덕션
+`ReaderService`/`CardReadBroadcaster`/`TransactionInfoRequestBuilder`를 리플렉션으로 그대로 호출,
+`InternalsVisibleTo` 등 저장소 변경 없음, 레지스트리 미접근·포트 번호는 하네스에 직접 전달)를
+새로 만들어 2라운드 실행했다.
+- **라운드1(카드 태그)**: `elapsed=7.1s` 만에 **readerA(COM5)가 진짜 `0x3B` 응답코드 "00"(정상)
+  으로 채택됨(`Kind=Success`)**. `CardReadResponseParser`가 실제 하드웨어 응답 바이트에서 22개
+  필드를 예외 없이 정상 파싱했고(`ParseFailed=False`), 카드번호 `"35641514****706*D****201********90401"`
+  (마스킹된 PAN 포함 트랙 데이터로 추정), 모듈ID `"C160390003"`, 리더기 인증 식별번호
+  `"####SPD-800F1011"`을 실제로 확인했다 — **이 프로젝트에서 SPEC 파서가 실제 하드웨어의 정상
+  카드 리딩 응답을 엔드투엔드로 성공 처리한 최초 확인 사례**다. 아직 응답 대기 중이던
+  readerB(COM3)에는 코드가 실제로 `SendInvalidationInit()`(0x60)을 호출했고, 로그
+  (`%LOCALAPPDATA%\KFTCTaxGiroCAP\logs\`)에 `[카드 리딩 페일오버 전송] 리더기[0] 채택 (이번
+  라운드 최초 응답), Kind=Success`와 `[카드 리딩 페일오버 전송] 리더기[1]: ... 초기화 요청(0x60)
+  전송해 무효화 -> result=0`(READER_OK)이 남아, **정상 응답 채택 + 반대쪽 실제 무효화** 양쪽 모두
+  실장비로 확인됐다.
+- **라운드2(직후 즉시 재전송)**: `elapsed=0.0s`로 readerB(COM3)가 직전 라운드에서 받은 `0x60`의
+  내부 상태 전이가 끝나기 전이라 즉시 `READER_ERR_BUSY`(-1004)를 반환해 채택됨 — 라운드1의 실제
+  카드 데이터("00" 성공, CardData 채워짐)가 라운드2로 전혀 새어 들어가지 않고(`CardData=null`),
+  라운드2는 자신의 실제 결과(BUSY)로만 독립적으로 종결됨을 재확인했다(로그에도 별개 결과 코드로
+  기록됨).
+- 이것으로 **P10-4/P10-5 완료 조건에 남아 있던 마지막 미검증 항목(실제 카드 리딩 응답끼리의
+  경쟁)까지 실장비로 검증이 끝났다.** Phase 10 범위에서 더 이상 남은 실장비 미검증 시나리오는
+  없다 — `PORT_NOT_OPEN`/`SEND_FAIL`(P10-3, 물리적 케이블 분리 필요)만 여전히 미검증으로 남는다.
 
 ## P10-6. 실패 원인 구분
 
@@ -538,9 +832,27 @@ PRD §4.6/§4.7, §6.6이 요구하는 구분을 **타입 수준에서** 만든�
 - 실패 원인 문자열은 사용자에게 보여줄 수 있는 형태로 담는다(PRD §6.6 "가능한 경우 실패 원인을 함께 출력").
 
 **완료 조건**
-- [ ] 두 실패 종류가 타입/열거값으로 구분되어 반환됨
-- [ ] 호출자가 분기할 수 있고, 각각 원인 정보를 꺼낼 수 있음
-- [ ] `Services/`가 바이트 오프셋을 직접 다루지 않는지 최종 점검(계층 규칙)
+- [x] 두 실패 종류가 타입/열거값으로 구분되어 반환됨
+- [x] 호출자가 분기할 수 있고, 각각 원인 정보를 꺼낼 수 있음
+- [x] `Services/`가 바이트 오프셋을 직접 다루지 않는지 최종 점검(계층 규칙)
+
+**완료 결과(2026-08-19)**: `Services/Reader/ReaderCommandOutcomeKind.cs`에 `ReaderFailureCategory`
+(`None`/`ResponseCodeFailure`/`DllFailure`) 열거값과 `ReaderCommandOutcomeKind.ToFailureCategory()`
+확장 메서드를 신설했다. 명령 4종의 결과 타입(`InitCommandOutcome`/`StatusCommandOutcome`/
+`IntegrityCommandOutcome`/`CardReadCommandOutcome`) 모두 `FailureCategory` 프로퍼티를 노출해,
+호출자가 `Kind`별로 매번 switch를 반복하지 않고 이 값 하나로 "전문 응답코드 실패"
+(`BusinessFailure` → `ResponseCodeFailure`) vs "DLL 연동 실패"(`DllCallFailure`/`Timeout`/
+`CommunicationError` → `DllFailure`)를 구분할 수 있다. 원인 정보는 `ResponseCode`(응답코드 실패)
+또는 `DllResult`/`DllResultName`/`Detail`(DLL 연동 실패)로 각각 꺼낼 수 있다.
+- Phase 9의 `InitOutcomeKind`를 `ReaderCommandOutcomeKind`로 일반화하면서(값은 동일, 이름만 공유
+  가능하도록 변경) `ReaderSetupViewModel.cs`의 참조 지점도 함께 갱신했다 — 동작 변경 없음(리네임).
+- **계층 규칙 최종 점검**: `grep -rn "byte\[\]" src/KFTCOneCAP.Wpf/Services/Reader/`로
+  확인한 결과, `ReaderService`/`CardReadBroadcaster`/각 `*CommandOutcome` 어디에도 응답 바이트를
+  직접 오프셋으로 슬라이싱하는 코드가 없다 — 전부 `Protocol/Reader/*Parser`/`*Builder`가 만든
+  결과 객체(`InitResponseResult`/`StatusResponseResult`/`IntegrityResponseResult`/
+  `CardReadResponseResult`/`CardReadData`)만 받아 매핑한다. `RawReaderCommandResult.Data`는
+  CALLBACK에서 `Marshal.Copy`로 복사된 원본 그대로를 파서에 넘기는 유일한 경유지이며, 이 바이트를
+  해석(오프셋 슬라이싱)하는 코드는 전부 `Protocol/Reader/*Parser.cs` 안에만 있다.
 
 ---
 
