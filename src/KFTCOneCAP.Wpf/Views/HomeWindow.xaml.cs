@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
+using KFTCOneCAP.Wpf.ViewModels;
 
 namespace KFTCOneCAP.Wpf.Views;
 
@@ -11,6 +12,11 @@ namespace KFTCOneCAP.Wpf.Views;
 /// Phase 2: 정적 레이아웃. Phase 3(ROADMAP.md "홈 화면: 인터랙션 &amp; 트레이"): 카드 호버/눌림
 /// 애니메이션(Themes/Buttons.xaml HomeCardButtonStyle에 배선), 카드 클릭 시 서브 화면 오픈,
 /// 최소화 버튼 → 시스템 트레이 이동, 트레이 우클릭 메뉴/더블클릭 복원을 이번 Phase에서 배선한다.
+/// Phase 7(MVVM 전환, docs/payment_relay/development_plan.md P7-5): 카드 클릭이 "무엇을 할지"만
+/// HomeViewModel의 Command/이벤트로 옮겨졌다. 트레이 아이콘/DWM 타이틀바/창 워밍업/눌림 애니메이션
+/// 프레임 확보(Dispatcher.BeginInvoke)는 전부 View/OS 책임이라 그대로 이 코드비하인드에 남아 있다
+/// (HomeViewModel 상단 주석 참고 — ViewModel로 옮기면 Window/WinForms 타입을 알아야 해서 계층
+/// 규칙이 깨진다).
 /// </summary>
 public partial class HomeWindow : Window
 {
@@ -20,9 +26,14 @@ public partial class HomeWindow : Window
     /// </summary>
     private System.Windows.Forms.NotifyIcon? _trayIcon;
 
+    public HomeViewModel ViewModel { get; } = new();
+
     public HomeWindow()
     {
         InitializeComponent();
+        DataContext = ViewModel;
+        ViewModel.ReaderSetupRequested += OnReaderSetupRequested;
+        ViewModel.NotImplementedCardRequested += OnNotImplementedCardRequested;
         SourceInitialized += HomeWindow_SourceInitialized;
     }
 
@@ -62,6 +73,9 @@ public partial class HomeWindow : Window
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int pvAttribute, int cbAttribute);
 
     // ===================== 카드 클릭 (PRD 3.7) =====================
+    // Phase 7(P7-5): 카드 Click 핸들러는 XAML의 Command 바인딩(HomeViewModel의 [RelayCommand])으로
+    // 대체됐다. 아래 두 핸들러는 ViewModel이 "무엇을 할지" 알려온 이벤트를 받아 실제 Window/타이밍
+    // 처리를 담당한다(ViewModel이 Window 타입을 몰라야 하므로 이 부분은 View 책임으로 남는다).
 
     /// <summary>
     /// 리더기 설정 카드. Phase 4(ROADMAP.md)부터 실제 ReaderSetupWindow를 모달로 연다
@@ -75,7 +89,7 @@ public partial class HomeWindow : Window
     /// ShowDialog() 호출 전 짧은 딜레이 또는 Dispatcher.BeginInvoke로 근사 재현"). 창 생성/오픈을
     /// 한 프레임 뒤(Input 우선순위)로 미뤄 눌림 애니메이션이 먼저 렌더링을 마치도록 한다.
     /// </summary>
-    private void ReaderSetupCardButton_Click(object sender, RoutedEventArgs e) =>
+    private void OnReaderSetupRequested(object? sender, EventArgs e) =>
         Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(OpenReaderSetup));
 
     /// <summary>
@@ -84,11 +98,7 @@ public partial class HomeWindow : Window
     /// 않은 이유: 원본 화면에서 카드가 눌리지 않는 것처럼 보이는 것도 임의 판단이라 UX상 더 이상하다고
     /// 판단 — PM 확인 시 이 처리 방식은 재검토 필요).
     /// </summary>
-    private void ShopSetupCardButton_Click(object sender, RoutedEventArgs e) => ShowNotImplementedCard("가맹점 설정");
-
-    private void TransCardButton_Click(object sender, RoutedEventArgs e) => ShowNotImplementedCard("결제");
-
-    private void ReceiptSetupCardButton_Click(object sender, RoutedEventArgs e) => ShowNotImplementedCard("전표 설정");
+    private void OnNotImplementedCardRequested(object? sender, string cardName) => ShowNotImplementedCard(cardName);
 
     private void OpenReaderSetup()
     {

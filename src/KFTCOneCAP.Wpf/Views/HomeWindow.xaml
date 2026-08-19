@@ -119,7 +119,7 @@
 
             <!-- 카드 1: 리더기 설정 -->
             <Button Grid.Column="0" Style="{StaticResource HomeCardButtonStyle}" x:Name="ReaderSetupCardButton"
-                    Click="ReaderSetupCardButton_Click">
+                    Command="{Binding OpenReaderSetupCommand}">
                 <Grid Margin="{StaticResource HomeCardContentMargin}">
                     <!--
                         2026-08-13 수정(사용자 피드백): 아이콘-제목 사이 행을 "*"(가변)에서 고정
@@ -178,7 +178,7 @@
 
             <!-- 카드 2: 가맹점 설정 -->
             <Button Grid.Column="2" Style="{StaticResource HomeCardButtonStyle}" x:Name="ShopSetupCardButton"
-                    Click="ShopSetupCardButton_Click">
+                    Command="{Binding OpenShopSetupCommand}">
                 <Grid Margin="{StaticResource HomeCardContentMargin}">
                     <!--
                         2026-08-13 수정(사용자 피드백): 아이콘-제목 사이 행을 "*"(가변)에서 고정
@@ -222,7 +222,7 @@
 
             <!-- 카드 3: 결제 -->
             <Button Grid.Column="4" Style="{StaticResource HomeCardButtonStyle}" x:Name="TransCardButton"
-                    Click="TransCardButton_Click">
+                    Command="{Binding OpenTransCommand}">
                 <Grid Margin="{StaticResource HomeCardContentMargin}">
                     <!--
                         2026-08-13 수정(사용자 피드백): 아이콘-제목 사이 행을 "*"(가변)에서 고정
@@ -278,7 +278,7 @@
 
             <!-- 카드 4: 전표 설정 -->
             <Button Grid.Column="6" Style="{StaticResource HomeCardButtonStyle}" x:Name="ReceiptSetupCardButton"
-                    Click="ReceiptSetupCardButton_Click">
+                    Command="{Binding OpenReceiptSetupCommand}">
                 <Grid Margin="{StaticResource HomeCardContentMargin}">
                     <!--
                         2026-08-13 수정(사용자 피드백): 아이콘-제목 사이 행을 "*"(가변)에서 고정

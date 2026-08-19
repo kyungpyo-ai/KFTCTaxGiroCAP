@@ -20,7 +20,7 @@
 
 대상은 1차 범위와 동일하게 `KFTCOneCAP.Wpf` 하나다(별도 실행 파일로 분리하지 않음, 2026-08-18 확정).
 Reader DLL 연동 참조 자료(`docs/reader_dll/`, `vendor/ReaderSerial/`)와 전담 서브에이전트
-(`reader-pinpad-spec-expert`, `reader-dll-integration-developer`)는 이미 준비돼 있다 — Phase 7부터 활용한다.
+(`reader-pinpad-spec-expert`, `reader-dll-integration-developer`)는 이미 준비돼 있다 — Phase 9부터 활용한다(Phase 7/8은 구조·환경 정비 단계라 DLL을 호출하지 않는다).
 
 > **핵심 개발 원칙 (KFTCReaderDLL 프로젝트에서 검증된 전략을 그대로 재사용, PRD §10 근거)**: 실제 통신
 > 전문(POS↔KFTCTaxGiroCAP, KFTCTaxGiroCAP↔VAN)이 아직 미확정이므로, 매 Phase마다 **임시 테스트 전문으로
@@ -31,17 +31,18 @@ Reader DLL 연동 참조 자료(`docs/reader_dll/`, `vendor/ReaderSerial/`)와 �
 
 | Phase | 내용 | 상태 |
 |---|---|---|
-| 7 | 기반 정비 — `PlatformTarget=x86` 전환, 두 DLL 배치 및 로드 스모크 | ⬜ 대기 |
-| 8 | Reader DLL P/Invoke 바인딩 + 파일럿 명령(`0x60` 초기화) 왕복 | ⬜ 대기 |
-| 9 | Reader 서비스 계층 — 명령 4종 확장, Protocol 계층 분리, 단일 유효 응답 게이트 | ⬜ 대기 |
-| 10 | 로컬 DB(SQLite) — 무결성 체크 이력 저장/조회 (PRD §7) | ⬜ 대기 |
-| 11 | 리더기 설정 화면 실동작 배선 (PRD §6 + 1차 범위 보류 4항목) | ⬜ 대기 |
-| 12 | 결제 알림창 UI — IC/FALLBACK/PROCESSING, Topmost, ESC Hook (PRD §5) | ⬜ 대기 |
-| 13 | 소켓 서버 + 단일 워커 Queue (PRD §3) | ⬜ 대기 |
-| 14 | 결제 Flow 조립 — 무결성 선행 → 카드 리딩 → FALLBACK/`12`/실패 분기 (PRD §4.1~§4.7) | ⬜ 대기 |
-| 15 | 사용자 취소 & Timeout(120초) 동시성 확정 (PRD §4.8~§4.9, §8) | ⬜ 대기 |
-| 16 | VAN 연동 — `KFTC_GIRO.dll`/`FNAISCRDVAN`, 임시 전문 (PRD §2.3, §4.10) | ⬜ 대기 |
-| 17 | 통합 검증 & 안정성 (PRD §9) | ⬜ 대기 |
+| 7 | **MVVM 전환** — 1차 화면(홈/리더기 설정) ViewModel 분리, 이후 전 Phase의 UI 작성 방식 통일 | ✅ 완료 |
+| 8 | 기반 정비 — `PlatformTarget=x86` 전환, 두 DLL 배치 및 로드 스모크 | ⬜ 대기 |
+| 9 | Reader DLL P/Invoke 바인딩 + 파일럿 명령(`0x60` 초기화) 왕복 | ⬜ 대기 |
+| 10 | Reader 서비스 계층 — 명령 4종 확장, Protocol 계층 분리, 단일 유효 응답 게이트 | ⬜ 대기 |
+| 11 | 로컬 DB(SQLite) — 무결성 체크 이력 저장/조회 (PRD §7) | ⬜ 대기 |
+| 12 | 리더기 설정 화면 실동작 배선 (PRD §6 + 1차 범위 보류 4항목) | ⬜ 대기 |
+| 13 | 결제 알림창 UI — IC/FALLBACK/PROCESSING, Topmost, ESC Hook (PRD §5) | ⬜ 대기 |
+| 14 | 소켓 서버 + 단일 워커 Queue (PRD §3) | ⬜ 대기 |
+| 15 | 결제 Flow 조립 — 무결성 선행 → 카드 리딩 → FALLBACK/`12`/실패 분기 (PRD §4.1~§4.7) | ⬜ 대기 |
+| 16 | 사용자 취소 & Timeout(120초) 동시성 확정 (PRD §4.8~§4.9, §8) | ⬜ 대기 |
+| 17 | VAN 연동 — `KFTC_GIRO.dll`/`FNAISCRDVAN`, 임시 전문 (PRD §2.3, §4.10) | ⬜ 대기 |
+| 18 | 통합 검증 & 안정성 (PRD §9) | ⬜ 대기 |
 
 (상태 값: ⬜ 대기 / 🔄 진행중 / ✅ 완료 / ⏸ 보류)
 
@@ -53,7 +54,7 @@ Phase 착수 직전에 작성)에서 다룬다 — 이 ROADMAP은 "무엇을 어
 
 ---
 
-## 계층 구조 (Phase 7~17 공통 설계 원칙)
+## 계층 구조 (Phase 8~18 공통 설계 원칙)
 
 PRD §10이 "실제 통신 전문이 확정되면 전문 생성/파싱 부분만 교체하고 Reader 제어·결제 Flow는 손대지 않는다"를
 요구하므로, **전문(電文)을 아는 코드와 흐름을 아는 코드를 물리적으로 분리**한다. 새로 만들 폴더는 다음과 같다.
@@ -67,21 +68,59 @@ src/KFTCOneCAP.Wpf/
 │   ├─ Reader/         0x2B 요청 빌더, 0x3B/0x71/0x72 응답 파서
 │   ├─ Pos/            POS 소켓 요청/응답 전문 (현재 임시 테스트 전문)
 │   └─ Van/            VAN 요청/응답 전문 (현재 임시 테스트 전문)
-└─ Services/         흐름/상태 — 전문 바이트 배열을 직접 해석하지 않는다
-    ├─ Reader/          ReaderService (포트 생명주기, 명령 송신, 콜백 정규화)
-    ├─ Van/             VanService
-    ├─ Pos/             PosSocketServer
-    ├─ Storage/         IntegrityCheckStore (SQLite)
-    └─ Payment/         TransactionQueue, PaymentOrchestrator
+├─ Services/         흐름/상태 — 전문 바이트 배열을 직접 해석하지 않는다
+│   ├─ Reader/          ReaderService (포트 생명주기, 명령 송신, 콜백 정규화)
+│   ├─ Van/             VanService
+│   ├─ Pos/             PosSocketServer
+│   ├─ Storage/         IntegrityCheckStore (SQLite)
+│   └─ Payment/         TransactionQueue, PaymentOrchestrator
+└─ ViewModels/       화면 상태/명령 — Phase 7에서 신설. View(XAML)와 Services 사이의 유일한 접점
 ```
 
-**의존 방향 규칙**: `Services → Protocol → Interop` 단방향. `Protocol`은 `Services`를 알지 못하고,
+**의존 방향 규칙**: `ViewModels → Services → Protocol → Interop` 단방향. `Protocol`은 `Services`를 알지 못하고,
 `Services`는 바이트 오프셋·필드 길이를 직접 다루지 않는다(반드시 `Protocol`이 만든 결과 객체를 받는다).
-이 규칙이 지켜지면 실제 SPEC 확정 시 변경이 `Protocol/` 안에서 멈춘다 — 매 Phase 완료 기준에 이 점검을 포함한다.
+`Services`는 `ViewModels`·WPF 타입(`Visibility`, `Dispatcher` 등)을 알지 못한다 — 스레드 마샬링은 ViewModel
+쪽 책임이다. 이 규칙이 지켜지면 실제 SPEC 확정 시 변경이 `Protocol/` 안에서 멈춘다 — 매 Phase 완료 기준에
+이 점검을 포함한다.
 
 ---
 
-## Phase 7 — 기반 정비 (x86 전환 + DLL 배치/로드 스모크)
+## Phase 7 — MVVM 전환 (1차 화면 리팩터링)
+
+**목표**: 1차 범위에서 코드비하인드로 구현된 두 화면을 ViewModel 기반으로 옮겨, **Phase 8 이후의 모든 UI
+작업이 하나의 방식만 따르도록** 만든다. 화면의 겉모습과 동작은 **하나도 바뀌지 않는다**(순수 내부 구조 변경).
+
+> **왜 지금인가**: 1차 범위(Phase 0~6)는 `CommunityToolkit.Mvvm` 패키지를 넣어두고도 실제로는 전부
+> 코드비하인드로 구현됐다(`HomeWindow.xaml.cs` 245줄, `ReaderSetupWindow.xaml.cs` 416줄). 2차 범위는 여기에
+> 리더기 2대 이중화·소켓 서버·비동기 결제 Flow·타임아웃 경합이 얹히므로, 지금 구조를 잡지 않으면 코드비하인드가
+> 감당할 수 없는 크기로 자란다. 또한 나중에 전환하면 **이미 검증된 2차 코드까지 다시 건드려야** 하므로
+> 전환 비용이 계속 커진다 — 가장 싼 시점이 지금이다(2026-08-19 사용자 확정).
+>
+> **두 화면의 성격이 다르다**는 점을 전제로 한다. `ReaderSetupWindow`는 레지스트리 로드/저장, dirty-check,
+> 조회 결과, busy 상태 등 **ViewModel로 옮길 로직이 대부분**이다. 반면 `HomeWindow`는 트레이 아이콘(WinForms
+> interop), DWM 타이틀바, 창 워밍업 등 **본질적으로 View/OS 책임**이라 옮길 것이 적다 — 무리하게 전부
+> ViewModel로 밀어 넣지 않는다(형식만 MVVM이고 실속이 없는 구조가 된다).
+
+- [ ] `ViewModels/` 폴더 신설 및 ViewModel ↔ View 연결 방식 확정(`DataContext` 설정 위치를 한 가지로 통일)
+- [ ] `ReaderSetupViewModel` — 레지스트리 로드/저장, dirty-check, COM 콤보 선택 상태, "미사용" 연동에 따른
+      활성/비활성, busy 상태(동시 1작업 제한), 조회 결과 컬렉션을 ViewModel로 이관
+- [ ] 코드비하인드의 **`x:Name` 직접 조작을 바인딩으로 교체** — `IsEnabled`/`Visibility`/`Content`를 코드에서
+      대입하지 않는다. 남는 것은 View 고유 관심사(Popup 배치, ScrollViewer 정렬 보정 등)뿐이어야 한다
+- [ ] `HomeWindow` — 카드 클릭 등 "무엇을 할지"만 ViewModel(Command)로 옮기고, 트레이/DWM/워밍업은
+      **코드비하인드에 그대로 남긴다**(그 판단 근거를 주석으로 남긴다)
+- [ ] 레지스트리 접근을 `Services/Settings/`(가칭)로 분리 — Phase 9 이후 결제 Flow도 같은 값(COM 포트)을
+      읽어야 하므로(PRD §2.2.1), ViewModel 안에 레지스트리 코드를 두면 재사용이 불가능하다
+- [ ] 액션 버튼 5종/조회의 3초·2초 **스텁 동작은 그대로 유지**한다 — 실통신 교체는 Phase 12 몫이며, 이번
+      Phase에서 같이 건드리면 회귀 원인을 구분할 수 없다
+
+**완료 기준**: 두 화면의 **모든 기존 동작이 1차 범위와 동일**함을 실행으로 확인한다(콤보 "미사용" 연동,
+버튼 로딩 스텁, 조회 더미 행 수, 레지스트리 저장/로드, 취소 dirty-check 확인창, 트레이 최소화/복원).
+`ReaderSetupWindow.xaml.cs`에 업무 로직이 남아 있지 않고, 코드비하인드에서 `x:Name` 요소의 상태를 직접
+대입하는 코드가 없다.
+
+---
+
+## Phase 8 — 기반 정비 (x86 전환 + DLL 배치/로드 스모크)
 
 **목표**: 두 네이티브 DLL을 로드할 수 있는 빌드 환경을 갖추고, 기존 화면에 회귀가 없음을 확인한다.
 
@@ -89,7 +128,7 @@ src/KFTCOneCAP.Wpf/
 (=AnyCPU, 64비트 OS에서 64비트 프로세스로 기동)인 상태로는 **실행 시점에 `BadImageFormatException`이 난다.**
 이 전환은 뒤로 미룰수록 비싸지므로 가장 먼저 한다. 또한 `KFTC_GIRO.dll`은 `MFC42.DLL`/`MSVCRT.dll`/
 `WSOCK32.dll`에 의존(PRD §2.3)하는데 이 의존성 충족 여부는 **로드를 시도해봐야만** 알 수 있으므로, 이번
-Phase에서 로드 스모크까지 끝내 리스크를 일찍 드러낸다(실제 함수 호출은 Phase 16).
+Phase에서 로드 스모크까지 끝내 리스크를 일찍 드러낸다(실제 함수 호출은 Phase 17).
 
 - [ ] `KFTCOneCAP.Wpf.csproj`에 `<PlatformTarget>x86</PlatformTarget>` 명시, `dotnet build`/실행 확인
 - [ ] 빌드 산출물 옆에 두 DLL이 복사되도록 csproj 배선 — 빌드에 쓰이는 사본의 위치 결정 필요:
@@ -107,12 +146,12 @@ Phase에서 로드 스모크까지 끝내 리스크를 일찍 드러낸다(실�
 
 ---
 
-## Phase 8 — Reader DLL P/Invoke 바인딩 + 파일럿(`0x60` 초기화)
+## Phase 9 — Reader DLL P/Invoke 바인딩 + 파일럿(`0x60` 초기화)
 
 **목표**: 명령 1종만으로 P/Invoke 계약·콜백·스레딩이 옳다는 것을 먼저 증명한다.
 
 > **파일럿 우선 전략** (KFTCReaderDLL 프로젝트에서 검증된 방식): 전문 4종을 한 번에 붙이지 않는다. 초기화
-> (`0x60`→`0x70`, Data 없음)만으로 왕복이 성립하는 것을 확인한 뒤 Phase 9에서 나머지로 확장한다. P/Invoke는
+> (`0x60`→`0x70`, Data 없음)만으로 왕복이 성립하는 것을 확인한 뒤 Phase 10에서 나머지로 확장한다. P/Invoke는
 > 시그니처가 한 글자만 어긋나도 스택이 깨져 진단이 어려우므로, 변인을 최소화한 상태에서 먼저 맞춘다.
 
 - [ ] `Interop/ReaderSerialNative.cs` — `vendor/ReaderSerial/CSharpSample/ReaderSerialNative.cs`를 포팅한다.
@@ -132,7 +171,7 @@ Phase에서 로드 스모크까지 끝내 리스크를 일찍 드러낸다(실�
 
 ---
 
-## Phase 9 — Reader 서비스 계층 (명령 4종 + Protocol 분리 + 안전장치)
+## Phase 10 — Reader 서비스 계층 (명령 4종 + Protocol 분리 + 안전장치)
 
 **목표**: 결제/설정 화면 양쪽이 공용으로 쓸 리더기 제어 계층을 완성한다.
 
@@ -152,7 +191,7 @@ Phase에서 로드 스모크까지 끝내 리스크를 일찍 드러낸다(실�
       메커니즘**으로 처리하도록 설계한다(따로 만들면 나중에 서로 어긋난다):
       - 같은 요청에 콜백이 중복 도착 → 최초 1건만
       - **N개 리더기에 동시 전송 → 먼저 최종 응답한 1개만 채택, 나머지는 `0x60` 무효화** (PRD §2.2.3)
-      - 취소/Timeout과의 경합 (Phase 15에서 이 게이트를 그대로 확장)
+      - 취소/Timeout과의 경합 (Phase 16에서 이 게이트를 그대로 확장)
 
       N=1이 자연스러운 축약 사례가 되도록 만든다 — 단일 리더기용 코드와 이중화용 코드를 따로 두지 않는다
 - [ ] 페일오버 전송 — **참조 구현을 따른다**: `vendor/ReaderSerial/MfcSample/ReaderSerialTestUIDlg.cpp`의
@@ -167,12 +206,12 @@ Phase에서 로드 스모크까지 끝내 리스크를 일찍 드러낸다(실�
 
 ---
 
-## Phase 10 — 로컬 DB (SQLite) 무결성 체크 이력
+## Phase 11 — 로컬 DB (SQLite) 무결성 체크 이력
 
-**목표**: PRD §7의 저장/조회를 Phase 11·14가 쓸 수 있는 형태로 완성한다.
+**목표**: PRD §7의 저장/조회를 Phase 12·15가 쓸 수 있는 형태로 완성한다.
 
 - [ ] SQLite 도입 — `net48`/x86에서 동작하는 패키지 선정(네이티브 인터롭이 있으므로 **x86에서 실제 로드되는지**
-      확인 필요. Phase 7의 x86 전환과 충돌하지 않을 것)
+      확인 필요. Phase 8의 x86 전환과 충돌하지 않을 것)
 - [ ] 스키마: 체크 일시 / COM Port / 결과 / 응답코드 / 모듈 ID / 리더기 인증 식별번호 / POS 식별번호
       (기본값 `KFTCTAXGIROCAP01`, PRD §2.1)
 - [ ] 저장 API + 조회 API 2종:
@@ -185,10 +224,10 @@ Phase에서 로드 스모크까지 끝내 리스크를 일찍 드러낸다(실�
 
 ---
 
-## Phase 11 — 리더기 설정 화면 실동작 배선
+## Phase 12 — 리더기 설정 화면 실동작 배선
 
 **목표**: 1차 범위에서 스텁(3초 타이머)으로 남겨둔 리더기 설정 화면을 실제 하드웨어에 연결한다. 이 Phase가
-끝나면 **사람이 화면에서 직접** 리더기 제어를 확인할 수 있으므로, 결제 Flow(Phase 13~)보다 먼저 배치했다.
+끝나면 **사람이 화면에서 직접** 리더기 제어를 확인할 수 있으므로, 결제 Flow(Phase 14~)보다 먼저 배치했다.
 
 PRD §6(초기화/상태체크/무결성체크)에 더해, **1차 범위에서 "외부 DLL 연동 필요"를 이유로 보류된 항목들**을
 여기서 함께 해소한다 — 이 항목들은 `PRD.md`에 아직 없으므로 착수 전 PRD 갱신이 필요하다
@@ -197,7 +236,7 @@ PRD §6(초기화/상태체크/무결성체크)에 더해, **1차 범위에서 "
 - [ ] 초기화(`0x60`→`0x70`, 응답 `00`) / 상태체크(`0x61`→`0x71`, 응답 `00` 또는 `08`) / 무결성체크
       (`0x61`→`0x71`→`0x62`→`0x72`, 응답 `00`) — PRD §6.1/§6.2/§6.4의 성공·실패 알림 문구 그대로
 - [ ] 상태체크·무결성체크 성공 시 리더기 인증 식별번호/모듈 ID 화면 출력
-- [ ] 무결성체크 결과를 Phase 10의 DB에 저장 + 리스트 조회를 더미에서 실제 조회로 교체
+- [ ] 무결성체크 결과를 Phase 11의 DB에 저장 + 리스트 조회를 더미에서 실제 조회로 교체
 - [ ] 키다운로드/업데이트는 **버튼만 유지**(동작은 PRD §11 추후 구현) — 기존 스텁 그대로 둔다
 - [ ] 〔1차 보류〕실제 COM 포트 열거 (`docs/home_reader_setup/PRD_WPF.md` 4.13) — `SerialPort.GetPortNames()`, "미사용" 첫 항목,
       저장된 포트가 목록에 없으면 `"<port>(사용불가)"`로 유지
@@ -217,9 +256,9 @@ PRD §6(초기화/상태체크/무결성체크)에 더해, **1차 범위에서 "
 
 ---
 
-## Phase 12 — 결제 알림창 UI
+## Phase 13 — 결제 알림창 UI
 
-**목표**: 결제 흐름이 쓸 알림창을 **독립적으로** 완성한다(Flow 연결은 Phase 14).
+**목표**: 결제 흐름이 쓸 알림창을 **독립적으로** 완성한다(Flow 연결은 Phase 15).
 
 - [ ] `Views/PaymentNoticeWindow` 신설 — IC(`BG_IMG_IC`)/FALLBACK(`BG_IMG_MS`)/통신중(`BG_IMG_PROCESSING`)
       3개 상태 전환 (PRD §5.2)
@@ -237,7 +276,7 @@ PRD §6(초기화/상태체크/무결성체크)에 더해, **1차 범위에서 "
 
 ---
 
-## Phase 13 — 소켓 서버 + 단일 워커 Queue
+## Phase 14 — 소켓 서버 + 단일 워커 Queue
 
 **목표**: POS 요청을 받아 순차 처리하는 골격을 만든다(결제 내용은 아직 비어 있어도 됨).
 
@@ -252,9 +291,9 @@ PRD §6(초기화/상태체크/무결성체크)에 더해, **1차 범위에서 "
 
 ---
 
-## Phase 14 — 결제 Flow 조립
+## Phase 15 — 결제 Flow 조립
 
-**목표**: Phase 9(리더기)·10(DB)·12(알림창)·13(Queue)을 엮어 PRD §4.1의 순서를 완성한다.
+**목표**: Phase 10(리더기)·11(DB)·13(알림창)·14(Queue)을 엮어 PRD §4.1의 순서를 완성한다.
 
 - [ ] `Services/Payment/PaymentOrchestrator` — PRD §4.1 7단계 순서 구현
 - [ ] 무결성 선행 판정 (PRD §4.2): 설정된 **리더기 각각** 금일 성공 이력 확인 → 없으면 그 포트만 무결성 체크
@@ -278,17 +317,17 @@ PRD §6(초기화/상태체크/무결성체크)에 더해, **1차 범위에서 "
 
 ---
 
-## Phase 15 — 사용자 취소 & Timeout 동시성 확정
+## Phase 16 — 사용자 취소 & Timeout 동시성 확정
 
 **목표**: PRD §8.3의 경합 4종에서 **결과가 정확히 하나만** 확정되게 한다.
 
-Phase 14까지는 정상 흐름 위주이므로, 경합 처리를 별도 Phase로 분리해 집중 검증한다(이 프로젝트에서 가장
+Phase 15까지는 정상 흐름 위주이므로, 경합 처리를 별도 Phase로 분리해 집중 검증한다(이 프로젝트에서 가장
 버그가 나기 쉬운 지점).
 
 - [ ] 사용자 취소 (PRD §4.8): 취소 버튼/ESC → **응답 대기 중인 모든 리더기**에 초기화(`0x60`) → POS에 취소
       응답 (이중화에서 한쪽만 정리하면 나머지가 계속 카드를 기다린다)
 - [ ] 카드 입력 Timeout 120초 (PRD §4.9): 자체 타이머 → **대기 중인 모든 리더기** 초기화 → POS에 Timeout 응답
-- [ ] 단일 결과 확정 게이트 — Phase 9의 게이트를 **확장**해 다음 경합에서 1건만 처리(새 게이트를 만들지
+- [ ] 단일 결과 확정 게이트 — Phase 10의 게이트를 **확장**해 다음 경합에서 1건만 처리(새 게이트를 만들지
       않는다): 카드리딩 완료+취소 / 카드리딩 완료+Timeout / 취소+Timeout / 콜백 중복 /
       **두 리더기가 거의 동시에 응답**
 - [ ] 거래 종료 시 타이머·콜백·ESC 후킹 등 리소스 해제 (PRD §9)
@@ -299,7 +338,7 @@ Phase 14까지는 정상 흐름 위주이므로, 경합 처리를 별도 Phase�
 
 ---
 
-## Phase 16 — VAN 연동 (`KFTC_GIRO.dll`)
+## Phase 17 — VAN 연동 (`KFTC_GIRO.dll`)
 
 **목표**: `FNAISCRDVAN` 호출로 결제 요청을 완결한다(전문은 임시).
 
@@ -316,14 +355,14 @@ Phase 14까지는 정상 흐름 위주이므로, 경합 처리를 별도 Phase�
       `nRet == -1`은 통신 실패. `out_szRetCode`도 함께 확인
 - [ ] **"VAN DLL 통신 실패"와 "VAN 서버 거절"을 구분**해 POS에 응답, 실패 시 리더기 초기화
 - [ ] 통신 중 알림창을 PROCESSING으로 전환 (PRD §4.10)
-- [ ] DLL 로드/호출 실패 시에도 앱이 죽지 않을 것 (PRD §9, Phase 7의 로드 스모크와 연결)
+- [ ] DLL 로드/호출 실패 시에도 앱이 죽지 않을 것 (PRD §9, Phase 8의 로드 스모크와 연결)
 
 **완료 기준**: 테스트 서버(`OT`/`IT`) 대상으로 호출이 성립하고, 통신 실패·서버 거절·승인 3가지가 구분되어
 POS까지 전달된다. INI/실서버 미확보로 검증 못 한 범위는 명시한다.
 
 ---
 
-## Phase 17 — 통합 검증 & 안정성
+## Phase 18 — 통합 검증 & 안정성
 
 **목표**: PRD §9를 점검하고 2차 범위를 마무리한다.
 
@@ -344,9 +383,9 @@ POS까지 전달된다. INI/실서버 미확보로 검증 못 한 범위는 명�
 baudRate, 포트 생명주기, 리더기 이중화, 무결성 2대 처리, 재요청 대상, VAN Mode, AOP 제외 등). 아직 열려
 있는 것은 다음뿐이며, 해당 Phase 착수 전에 확인해 PRD를 먼저 갱신한다(작업 방식 규칙 3).
 
-1. **알림창 크기 조절 트리거** (Phase 12) — 자산(기본/`_VERYSMALL`)만 확보된 상태. 이번 범위 밖으로 두고
+1. **알림창 크기 조절 트리거** (Phase 13) — 자산(기본/`_VERYSMALL`)만 확보된 상태. 이번 범위 밖으로 두고
    두 크기를 준비만 한다.
-2. **실제 통신 전문 전체** (Phase 13·16) — POS↔앱 소켓 전문, 앱↔VAN 전문, `inData`/`outData` 길이와 버퍼
+2. **실제 통신 전문 전체** (Phase 14·17) — POS↔앱 소켓 전문, 앱↔VAN 전문, `inData`/`outData` 길이와 버퍼
    크기, `KFTC_GIROPOS.ini`. PRD §10대로 임시 테스트 전문으로 진행하며, 확정 시 `Protocol/`만 교체한다.
 
 ---

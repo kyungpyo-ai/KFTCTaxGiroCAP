@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **현재 상태: 1차 범위(홈 화면 + 리더기 설정 화면 UX/UI 재구현, Phase 0~6) 완료.** 1차 범위 문서는 `docs/home_reader_setup/`(PRD_WPF.md, ROADMAP.md, screenshots/)에 모아 관리한다.
 
-**2차 범위(결제 중계 기능, Phase 7~, 준비 단계): `docs/payment_relay/PRD.md`가 요구사항 정본.** 소켓 서버(`localhost:8002`)로 POS 결제 요청을 받아 `ReaderSerial.dll`로 카드를 리딩하고 `KFTC_GIRO.dll`(`FNAISCRDVAN`)로 VAN 서버에 결제를 요청하는 기능을 **같은 `KFTCOneCAP.Wpf` 앱에 통합**한다(별도 실행 파일 아님). Phase 진행은 새 PRD를 계속 만들더라도 `docs/home_reader_setup/ROADMAP.md` 하나에 이어서 기록한다(Phase 7부터).
+**2차 범위(결제 중계 기능, Phase 7~, 준비 단계): `docs/payment_relay/PRD.md`가 요구사항 정본.** 소켓 서버(`localhost:8002`)로 POS 결제 요청을 받아 `ReaderSerial.dll`로 카드를 리딩하고 `KFTC_GIRO.dll`(`FNAISCRDVAN`)로 VAN 서버에 결제를 요청하는 기능을 **같은 `KFTCOneCAP.Wpf` 앱에 통합**한다(별도 실행 파일 아님). Phase 진행은 `docs/payment_relay/ROADMAP.md`에 Phase 7부터 이어서 기록한다.
 
 ## 빌드 / 실행
 
@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 솔루션: `KFTCOneCAP.Wpf.sln` (루트) → 프로젝트: `src/KFTCOneCAP.Wpf/KFTCOneCAP.Wpf.csproj`
 - 빌드: `dotnet build` (루트에서 실행)
 - 실행: `dotnet run --project src/KFTCOneCAP.Wpf/KFTCOneCAP.Wpf.csproj`
-- MVVM: `CommunityToolkit.Mvvm` 사용 (소스 제너레이터 기반 `[ObservableProperty]`/`[RelayCommand]`, .NET Framework 4.6.2+ 호환 확인됨)
+- MVVM: `CommunityToolkit.Mvvm` 사용 (소스 제너레이터 기반 `[ObservableProperty]`/`[RelayCommand]`, .NET Framework 4.6.2+ 호환 확인됨). **1차 범위(Phase 0~6)는 패키지만 넣고 실제로는 코드비하인드로 구현됐다** — Phase 7(`docs/payment_relay/ROADMAP.md`)에서 두 화면을 ViewModel 기반으로 전환하며, **그 이후 모든 화면 작업은 MVVM으로 한다**(새 화면을 코드비하인드로 만들지 않는다). 단 트레이 아이콘·DWM 타이틀바처럼 창 핸들/OS에 직접 묶인 코드는 코드비하인드에 남긴다.
 - **Windows 10 1809+ 전용 API(DWM 이머시브 타이틀바 등) 사용 시 반드시 OS 버전 체크 후 조건부 적용** — Win7에서 no-op 처리 필요 (원본 MFC 앱도 동일 패턴).
 
 ## 반드시 먼저 읽을 문서
@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`docs/home_reader_setup/screenshots/home_screen.png`, `docs/home_reader_setup/screenshots/reader_setup.png`** — 원본 MFC 앱을 실행해 캡처한 실측 화면. 텍스트/색상/레이아웃을 소스 코드 리터럴보다 우선하는 근거로 삼는다(빌드된 실행 파일과 소스가 일부 어긋나는 것이 이미 확인됨 — PRD 6장 미확정 사항 #7 참고).
 - **`docs/payment_relay/PRD.md`** — 2차 범위(결제 중계 기능) 요구사항 정본. `KFTC_GIRO.dll`(VAN 연동)은 별도 SPEC 문서가 없어 이 PRD의 §2.3이 유일한 계약 정보다 — 임의로 필드를 추측하지 않는다.
 
-**2차 범위는 `docs/payment_relay/` 한 폴더에 3단 문서 구성(PRD → ROADMAP → 실행계획서)으로 모아 관리한다**: `PRD.md`(무엇을) → `ROADMAP.md`(어떤 순서로 — Phase 7~17 + 계층 구조 설계 원칙) → `development_plan.md`(Task 단위 작업 지시/완료 조건, 각 Phase 착수 직전 작성). 같은 폴더에 `dll/`(KFTC_GIRO.dll)과 `images/`(결제 알림창 자산)도 있다. 코드 작성은 해당 Phase의 실행계획서가 준비된 뒤에 시작한다.
+**2차 범위는 `docs/payment_relay/` 한 폴더에 3단 문서 구성(PRD → ROADMAP → 실행계획서)으로 모아 관리한다**: `PRD.md`(무엇을) → `ROADMAP.md`(어떤 순서로 — Phase 7~18 + 계층 구조 설계 원칙) → `development_plan.md`(Task 단위 작업 지시/완료 조건, 각 Phase 착수 직전 작성). 같은 폴더에 `dll/`(KFTC_GIRO.dll)과 `images/`(결제 알림창 자산)도 있다. 코드 작성은 해당 Phase의 실행계획서가 준비된 뒤에 시작한다.
 
 **Phase 번호는 두 ROADMAP에 걸쳐 이어진다** — 1차 0~6(`docs/home_reader_setup/ROADMAP.md`), 2차 7~(`docs/payment_relay/ROADMAP.md`). 같은 앱을 계속 확장하는 것이므로 번호를 새로 시작하지 않는다.
 
@@ -50,5 +50,5 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `vendor/ReaderSerial/`(DLL/헤더/lib, 검증된 C# P/Invoke 예제)에 스냅샷으로 가져와 뒀다 — 먼저
 `docs/reader_dll/00_OVERVIEW.md`를 읽는다. DLL 연동 SPEC 확인은 `reader-pinpad-spec-expert`, 실제 P/Invoke
 구현은 `reader-dll-integration-developer` 서브에이전트에 위임한다. 이 DLL 자체의 소스 수정은 이 저장소의
-범위 밖이다(원본 저장소에서 진행). 실제 연동 요구사항은 아직 PRD로 정리되지 않았다 — 새 PRD 문서 작성 후
-`docs/home_reader_setup/ROADMAP.md`를 Phase 7부터 이어서 진행한다.
+범위 밖이다(원본 저장소에서 진행). 연동 요구사항은 `docs/payment_relay/PRD.md`에 정리돼 있으며, 실제 P/Invoke
+연동은 Phase 9부터 시작한다(`docs/payment_relay/ROADMAP.md`).
