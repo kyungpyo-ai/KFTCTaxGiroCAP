@@ -89,7 +89,7 @@
     <Color x:Key="TblHdrTextColor">#4E5968</Color>
     <SolidColorBrush x:Key="TblHdrTextBrush" Color="{StaticResource TblHdrTextColor}"/>
 
-    <Color x:Key="TblBodyTextColor">#191F28</Color>
+    <Color x:Key="TblBodyTextColor">#333D4B</Color>
     <SolidColorBrush x:Key="TblBodyTextBrush" Color="{StaticResource TblBodyTextColor}"/>
 
     <Color x:Key="TblEmptyTextColor">#8B95A1</Color>

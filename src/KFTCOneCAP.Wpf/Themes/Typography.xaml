@@ -137,7 +137,7 @@
         <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
 
-    <!-- 리스트 테이블 데이터 셀 : 선명하고 또렷한 딥 차콜(#191F28) 13.0px 실데이터 텍스트 -->
+    <!-- 리스트 테이블 데이터 셀 : 부드럽고 가독성 높은 다크 차콜(#333D4B) 13.0px 실데이터 텍스트 -->
     <Style x:Key="ReaderTableCellTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
         <Setter Property="FontSize" Value="13.0"/>

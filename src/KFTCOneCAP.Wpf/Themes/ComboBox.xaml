@@ -100,10 +100,10 @@
         리소스로 분리해 다른 요소들과 함께 컴팩트 세트로 스왑되도록 했다.
     -->
     <Style x:Key="SkinnedComboBoxStyle" TargetType="ComboBox">
-        <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+        <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
         <Setter Property="FontSize" Value="{StaticResource ReaderComboFontSize}"/>
-        <Setter Property="FontWeight" Value="Bold"/>
-        <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource CardTitleTextBrush}"/>
         <Setter Property="Background" Value="White"/>
         <Setter Property="BorderBrush" Value="{StaticResource ComboBoxBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1.5"/>
@@ -161,15 +161,13 @@
                                Focusable="False"
                                PopupAnimation="Fade">
                             <Border Background="White"
-                                    BorderBrush="{StaticResource ComboBoxBorderBrush}"
+                                    BorderBrush="#D1D5DB"
                                     BorderThickness="1"
                                     CornerRadius="6"
                                     MinWidth="{TemplateBinding ActualWidth}"
                                     MaxHeight="{TemplateBinding MaxDropDownHeight}"
-                                    Margin="0,4,0,0">
-                                <Border.Effect>
-                                    <DropShadowEffect Color="#1A202C" Opacity="0.15" BlurRadius="12" ShadowDepth="2"/>
-                                </Border.Effect>
+                                    Margin="0,4,0,0"
+                                    SnapsToDevicePixels="True">
                                 <ScrollViewer SnapsToDevicePixels="True">
                                     <ItemsPresenter/>
                                 </ScrollViewer>

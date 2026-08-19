@@ -468,10 +468,8 @@
         -->
         <Popup x:Name="MultipadInfoPopup" AllowsTransparency="True" StaysOpen="False" Placement="Bottom">
             <Border Background="White" BorderBrush="{StaticResource TblBorderBrush}" BorderThickness="1"
-                    CornerRadius="10" Padding="14,12" MaxWidth="260" Margin="0,6,0,0">
-                <Border.Effect>
-                    <DropShadowEffect Color="#1A202C" Opacity="0.18" BlurRadius="16" ShadowDepth="3"/>
-                </Border.Effect>
+                    CornerRadius="10" Padding="14,12" MaxWidth="260" Margin="0,6,0,0"
+                    SnapsToDevicePixels="True">
                 <StackPanel>
                     <TextBlock Text="멀티패드 여부" Style="{StaticResource ReaderSectionTitleTextStyle}" FontSize="13.33"/>
                     <TextBlock Margin="0,8,0,0" Style="{StaticResource ReaderSmallTextStyle}" TextWrapping="Wrap">
