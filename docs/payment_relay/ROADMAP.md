@@ -233,6 +233,10 @@ PRD §6(초기화/상태체크/무결성체크)에 더해, **1차 범위에서 "
 여기서 함께 해소한다 — 이 항목들은 `PRD.md`에 아직 없으므로 착수 전 PRD 갱신이 필요하다
 (아래 "확인 필요" 참고).
 
+- [ ] **MVVM 유지**(공통 원칙, Phase 7) — 이 Phase는 새 화면을 만들지 않고 기존 `ReaderSetupViewModel`을
+      확장한다. 3초 타이머 스텁을 실제 리더기 통신으로 교체할 때도 `Services/Reader/ReaderService`(Phase 10)
+      호출 결과를 ViewModel 프로퍼티에 반영하는 흐름을 유지하고, `ReaderSetupWindow.xaml.cs`에 통신 로직이나
+      `x:Name` 직접 대입을 다시 들이지 않는다
 - [ ] 초기화(`0x60`→`0x70`, 응답 `00`) / 상태체크(`0x61`→`0x71`, 응답 `00` 또는 `08`) / 무결성체크
       (`0x61`→`0x71`→`0x62`→`0x72`, 응답 `00`) — PRD §6.1/§6.2/§6.4의 성공·실패 알림 문구 그대로
 - [ ] 상태체크·무결성체크 성공 시 리더기 인증 식별번호/모듈 ID 화면 출력
@@ -260,6 +264,10 @@ PRD §6(초기화/상태체크/무결성체크)에 더해, **1차 범위에서 "
 
 **목표**: 결제 흐름이 쓸 알림창을 **독립적으로** 완성한다(Flow 연결은 Phase 15).
 
+- [ ] **`ViewModels/PaymentNoticeViewModel` 신설**(공통 원칙, Phase 7) — 새 화면이므로 처음부터 MVVM으로
+      만든다. IC/FALLBACK/통신중 3개 상태를 하나의 열거값 프로퍼티로 표현하고, `Views/PaymentNoticeWindow`는
+      그 값에 바인딩해 이미지·문구를 전환한다(개별 `Visibility`를 화면마다 따로 대입하지 않는다 — Phase 7
+      P7-3에서 정립한 "상태 열거값 하나에서 파생" 원칙을 그대로 따른다)
 - [ ] `Views/PaymentNoticeWindow` 신설 — IC(`BG_IMG_IC`)/FALLBACK(`BG_IMG_MS`)/통신중(`BG_IMG_PROCESSING`)
       3개 상태 전환 (PRD §5.2)
 - [ ] 이미지 자산 배치 결정: 원본은 `images/`에 보관 중이며, 앱이 쓰는 사본을
