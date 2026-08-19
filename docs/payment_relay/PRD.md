@@ -128,8 +128,9 @@ POS 프로그램
 
 - VAN 서버 통신은 `KFTC_GIRO.dll`을 사용한다. **이 DLL은 별도 SPEC 문서·샘플 소스가 없다** — 아래 함수
   시그니처와 사용 규칙이 현재 확보된 유일한 계약 정보다. DLL 파일 자체는
-  `docs/payment_relay/dll/KFTC_GIRO.dll`에 이미 있다(32bit/x86). 결제 알림창 이미지 자산(§5.2)도 확보되는
-  대로 같은 `docs/payment_relay/`(예: `docs/payment_relay/images/`) 아래에 모은다.
+  `vendor/KftcGiro/KFTC_GIRO.dll`에 있다(32bit/x86, Phase 8에서 `docs/payment_relay/dll/`에서 이동 —
+  `vendor/`는 외부 바이너리, `docs/`는 문서라는 기존 구분을 `vendor/ReaderSerial/`과 통일). 결제 알림창
+  이미지 자산(§5.2)도 확보되는 대로 같은 `docs/payment_relay/`(예: `docs/payment_relay/images/`) 아래에 모은다.
 - `KFTC_GIRO.dll`은 32bit(x86) DLL이므로 KFTCTaxGiroCAP(=`KFTCOneCAP.Wpf`)도 이 DLL을 직접 연동할 수
   있도록 **Win32(x86) 환경을 기준으로 구성**해야 한다 — `ReaderSerial.dll`과 동일한 제약(x86 전용,
   `PlatformTarget`을 `x86`으로 명시해야 함).

@@ -32,7 +32,7 @@ Reader DLL 연동 참조 자료(`docs/reader_dll/`, `vendor/ReaderSerial/`)와 �
 | Phase | 내용 | 상태 |
 |---|---|---|
 | 7 | **MVVM 전환** — 1차 화면(홈/리더기 설정) ViewModel 분리, 이후 전 Phase의 UI 작성 방식 통일 | ✅ 완료 |
-| 8 | 기반 정비 — `PlatformTarget=x86` 전환, 두 DLL 배치 및 로드 스모크 | ⬜ 대기 |
+| 8 | 기반 정비 — `PlatformTarget=x86` 전환, 두 DLL 배치 및 로드 스모크 | ✅ 완료 |
 | 9 | Reader DLL P/Invoke 바인딩 + 파일럿 명령(`0x60` 초기화) 왕복 | ⬜ 대기 |
 | 10 | Reader 서비스 계층 — 명령 4종 확장, Protocol 계층 분리, 단일 유효 응답 게이트 | ⬜ 대기 |
 | 11 | 로컬 DB(SQLite) — 무결성 체크 이력 저장/조회 (PRD §7) | ⬜ 대기 |
@@ -130,19 +130,24 @@ src/KFTCOneCAP.Wpf/
 `WSOCK32.dll`에 의존(PRD §2.3)하는데 이 의존성 충족 여부는 **로드를 시도해봐야만** 알 수 있으므로, 이번
 Phase에서 로드 스모크까지 끝내 리스크를 일찍 드러낸다(실제 함수 호출은 Phase 17).
 
-- [ ] `KFTCOneCAP.Wpf.csproj`에 `<PlatformTarget>x86</PlatformTarget>` 명시, `dotnet build`/실행 확인
-- [ ] 빌드 산출물 옆에 두 DLL이 복사되도록 csproj 배선 — 빌드에 쓰이는 사본의 위치 결정 필요:
-      `vendor/ReaderSerial/`은 이미 빌드 자산 성격이나, `KFTC_GIRO.dll`은 현재 이 폴더의 `dll/`(=문서 폴더)에
-      있다. **`vendor/KftcGiro/`로 옮겨 `vendor/` 아래로 통일**할지 결정한다(권장 — `docs/`는 문서,
-      `vendor/`는 외부 바이너리라는 기존 구분 유지)
-- [ ] 두 DLL의 로드 스모크: 앱 기동 시(또는 진단 명령으로) `LoadLibrary` 수준 확인 → 성공/실패와 실패 사유를
-      로그로 남긴다. **로드 실패해도 앱이 죽지 않고 오류로 처리**되어야 한다(PRD §9)
-- [ ] 진단/오류 로그 기록 수단 확보 — 이후 모든 Phase가 하드웨어·외부 DLL 오류를 남겨야 하므로 최소한의
+- [x] `KFTCOneCAP.Wpf.csproj`에 `<PlatformTarget>x86</PlatformTarget>` 명시, `dotnet build`/실행 확인
+- [x] 빌드 산출물 옆에 두 DLL이 복사되도록 csproj 배선 — `KFTC_GIRO.dll`을 `docs/payment_relay/dll/`(=문서
+      폴더)에서 **`vendor/KftcGiro/`로 옮겨 `vendor/ReaderSerial/`과 위치 규칙을 통일**했다(`docs/`는 문서,
+      `vendor/`는 외부 바이너리). csproj의 `None Include` + `CopyToOutputDirectory` + `<Link>`로 출력 폴더
+      루트에 두 DLL을 복사한다
+- [x] 두 DLL의 로드 스모크: 앱 기동 시 `LoadLibrary` 수준 확인 → 성공/실패와 실패 사유를 로그로 남긴다.
+      **로드 실패해도 앱이 죽지 않고 오류로 처리**되어야 한다(PRD §9)
+- [x] 진단/오류 로그 기록 수단 확보 — 이후 모든 Phase가 하드웨어·외부 DLL 오류를 남겨야 하므로 최소한의
       파일 로깅을 여기서 정한다(과도한 로깅 프레임워크 도입은 하지 않는다)
-- [ ] 회귀 확인: 홈 화면·리더기 설정 화면이 x86 전환 후에도 1차 범위와 동일하게 렌더링/동작
+- [x] 회귀 확인: 홈 화면·리더기 설정 화면이 x86 전환 후에도 1차 범위와 동일하게 렌더링/동작
 
 **완료 기준**: x86으로 빌드·실행되고 홈/리더기 설정 화면에 시각적·기능적 회귀가 없다. 두 DLL의 로드 결과가
 로그로 확인되며, 로드 실패 시에도 앱이 정상 기동한다.
+
+> **완료 결과(2026-08-19)**: 이 개발 PC에서는 `ReaderSerial.dll`·`KFTC_GIRO.dll` 둘 다 로드 성공(로그에
+> "DLL 로드 스모크 성공" 기록). 다만 이는 이 PC에 `MFC42.DLL`/`MSVCRT.dll`/`WSOCK32.dll`이 이미 갖춰져
+> 있음을 확인한 것일 뿐이며, **실제 배포 대상 PC에서도 동일하다는 보장은 아니다** — 배포 시점에 재확인
+> 필요(자세한 검증 내역은 `development_plan.md` P8-4 참고).
 
 ---
 
@@ -405,5 +410,6 @@ baudRate, 포트 생명주기, 리더기 이중화, 무결성 2대 처리, 재�
 - `docs/reader_dll/00_OVERVIEW.md` — Reader DLL 연동 참조 자료 인덱스
 - `vendor/ReaderSerial/CSharpSample/` — C# P/Invoke 참조 구현 (`SendCommandSafe` 재시도 래퍼)
 - `vendor/ReaderSerial/MfcSample/` — **리더기 이중화 페일오버 참조 구현** (`BroadcastFailover()`, 실장비 검증 완료)
-- `dll/KFTC_GIRO.dll` — VAN 연동 DLL (32bit, SPEC 문서 없음 — `PRD.md` §2.3이 유일한 계약)
+- `vendor/KftcGiro/KFTC_GIRO.dll` — VAN 연동 DLL (32bit, SPEC 문서 없음 — `PRD.md` §2.3이 유일한 계약,
+  Phase 8에서 `docs/payment_relay/dll/`에서 이동)
 - `images/` — 결제 알림창 이미지 자산 (기본 750×650 / `_VERYSMALL` 375×325)

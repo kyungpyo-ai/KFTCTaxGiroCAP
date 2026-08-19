@@ -1,5 +1,8 @@
 using System;
+using System.IO;
+using System.Reflection;
 using System.Windows;
+using KFTCOneCAP.Wpf.Services.Diagnostics;
 
 namespace KFTCOneCAP.Wpf;
 
@@ -16,6 +19,13 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // Phase 8(docs/payment_relay/development_plan.md P8-4): 앱 기동 시 두 네이티브 DLL의 로드
+        // 가능 여부를 미리 확인해 로그로 남긴다. 실제 함수 호출은 Phase 9/17 몫이며, 여기서는 로드
+        // 실패해도 앱 기동을 막지 않는다(PRD §9).
+        FileLogger.Info("애플리케이션 기동 시작");
+        string baseDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? AppDomain.CurrentDomain.BaseDirectory;
+        NativeDllLoadSmokeTest.RunAll(baseDirectory);
+
         // 컴팩트 모드 판정(임의 판단, 2026-08-14 Phase 6): SystemParameters.WorkArea.Height(작업
         // 표시줄 등을 제외한 가용 영역) 대신 SystemParameters.PrimaryScreenHeight(모니터 자체의
         // 해상도 높이)를 사용한다. PRD 원문이 "화면 높이(screen height) ≤800px"라고 명시하고

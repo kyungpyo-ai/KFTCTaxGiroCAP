@@ -7,6 +7,14 @@
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
     <!--
+      Phase 8(docs/payment_relay/ROADMAP.md): 결제 중계 기능이 연동하는 두 네이티브 DLL
+      (vendor/ReaderSerial/ReaderSerial.dll, vendor/KftcGiro/KFTC_GIRO.dll)이 모두 32bit(x86)
+      전용이라, 프로세스도 반드시 32bit여야 DllImport 호출 시 BadImageFormatException이 나지
+      않는다. AnyCPU로 되돌리면(64bit OS에서 64bit 프로세스로 기동) 두 DLL을 전혀 로드할 수 없다
+      — PRD.md §2.3 근거, 절대 제거하지 말 것.
+    -->
+    <PlatformTarget>x86</PlatformTarget>
+    <!--
       Phase 3(ROADMAP.md): 트레이 아이콘 구현에 System.Windows.Forms.NotifyIcon 을 사용하기 위해
       WinForms interop 활성화. WPF에는 네이티브 트레이 API가 없어 PRD 3.6이 명시적으로 이 방식을
       지정함. net48이므로 Windows 7까지 문제없이 동작(CLAUDE.md 제약과 무관 — .NET Framework
@@ -24,6 +32,23 @@
     <Resource Include="Assets\Fonts\Pretendard-Medium.ttf" />
     <Resource Include="Assets\Fonts\Pretendard-Bold.ttf" />
     <Resource Include="Assets\Images\img_ci_mark.png" />
+  </ItemGroup>
+
+  <!--
+    Phase 8(docs/payment_relay/development_plan.md P8-2): 두 네이티브 DLL은 프로젝트 참조가 아니라
+    런타임에 DllImport로 로드되는 고정 바이너리이므로(빌드 산출물이 아님), 조건부 Copy Target 대신
+    단순한 None + CopyToOutputDirectory로 배선한다. <Link>로 출력 폴더 루트에 평평하게 놓는다 —
+    DllImport의 기본 탐색 경로는 실행 파일이 있는 폴더다.
+  -->
+  <ItemGroup>
+    <None Include="..\..\vendor\ReaderSerial\ReaderSerial.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>ReaderSerial.dll</Link>
+    </None>
+    <None Include="..\..\vendor\KftcGiro\KFTC_GIRO.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>KFTC_GIRO.dll</Link>
+    </None>
   </ItemGroup>
 
 </Project>
