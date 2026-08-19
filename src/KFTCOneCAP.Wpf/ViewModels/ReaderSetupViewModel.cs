@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KFTCOneCAP.Wpf.Models;
+using KFTCOneCAP.Wpf.Services.Diagnostics;
+using KFTCOneCAP.Wpf.Services.Reader;
 using KFTCOneCAP.Wpf.Services.Settings;
 
 namespace KFTCOneCAP.Wpf.ViewModels;
@@ -36,6 +39,13 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
 {
     private readonly ReaderSettingsService _settingsService = new();
 
+    // Phase 9(P9-3) 파일럿 전용 — Reader1의 "초기화" 버튼만 이 서비스로 실제 0x60/0x70 왕복을
+    // 수행한다. 포트별 인스턴스 설계(Services/Reader/ReaderService)라 Phase 10에서 Reader2용
+    // 인스턴스를 추가하고 재연결 래퍼·단일 유효 응답 게이트로 감싸는 형태로 자연스럽게 확장된다.
+    // TODO(Phase 12): 포트 생명주기(PRD §2.2.2 — 앱 기동 시 열고 유지, 콤보 변경 시에만 재오픈),
+    // 성공/실패 문구(PRD §6.1), 나머지 버튼(상태체크/무결성체크 등) 정식 배선.
+    private readonly ReaderService _reader1Service = new();
+
     // PRD 4.13/4.12 dirty-check 스냅샷(취소 시 비교용) — Load() 직후 값을 기준으로 잡는다.
     private string _snapshotReader1Port = "미사용";
     private string _snapshotReader2Port = "미사용";
@@ -44,7 +54,9 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
 
     public ReaderSetupViewModel()
     {
-        Reader1InitButton = new ReaderActionButtonViewModel(this, "초기화", "초기화중...");
+        // P9-3: "초기화" 버튼의 기존 3초 스텁을 실제 리더기 통신 경로로 임시 연결한다. 정식 배선은
+        // Phase 12(development_plan.md P9-3 지시)이며, 그 전까지는 결과를 로그로만 남긴다.
+        Reader1InitButton = new ReaderActionButtonViewModel(this, "초기화", "초기화중...", ExecuteReader1InitAsync);
         Reader1StatusCheckButton = new ReaderActionButtonViewModel(this, "상태체크", "확인중...");
         Reader1KeyDownloadButton = new ReaderActionButtonViewModel(this, "키다운로드", "다운로드중...");
         Reader1IntegrityCheckButton = new ReaderActionButtonViewModel(this, "무결성체크", "체크중...");
@@ -254,5 +266,76 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
             Multipad1 = Reader1Multipad,
             Multipad2 = Reader2Multipad,
         });
+    }
+
+    // ===================== Phase 9 파일럿 — Reader1 초기화(0x60/0x70) =====================
+
+    /// <summary>
+    /// P9-3: 레지스트리 COMPORT1_FIELD("COM 01" 같은 표시 문자열)에서 포트 번호를 뽑아 필요하면
+    /// 포트를 열고, 0x60 초기화를 전송해 0x70 응답의 업무 응답코드를 판정한다. baudRate는 115200
+    /// 고정, pinpadCallback은 사용하지 않는다(PRD §2.2.1/§10). 결과는 아직 화면에 표시하지 않고
+    /// 로그로만 남긴다 — 성공/실패 문구·리더기 인증 식별번호 표시는 Phase 12(P10-1 파서 확장 이후)
+    /// 몫이다.
+    /// </summary>
+    private async Task ExecuteReader1InitAsync()
+    {
+        if (Reader1PortSelection == "미사용")
+        {
+            // 카드 자체가 비활성화되므로 버튼을 누를 수 없어야 하지만, 방어적으로 한 번 더 확인한다.
+            FileLogger.Warn("[Reader1 초기화] 포트가 \"미사용\"으로 설정되어 있어 실행하지 않음");
+            return;
+        }
+
+        if (!_reader1Service.IsConnected)
+        {
+            int portNumber = ExtractPortNumber(Reader1PortSelection);
+            if (portNumber <= 0)
+            {
+                FileLogger.Warn($"[Reader1 초기화] 포트 번호 파싱 실패: '{Reader1PortSelection}'");
+                return;
+            }
+
+            var openResult = _reader1Service.OpenPort(portNumber, 115200);
+            FileLogger.Info(
+                $"[Reader1 초기화] Reader_OpenPort(COM{portNumber}, baud=115200) -> " +
+                $"{openResult.DllResultName}({openResult.DllResult}), readerId={openResult.ReaderId}");
+
+            if (!openResult.Success)
+            {
+                return;
+            }
+        }
+
+        var outcome = await _reader1Service.SendInitCommandAsync(TimeSpan.FromSeconds(5));
+        LogInitOutcome(outcome);
+    }
+
+    private static void LogInitOutcome(InitCommandOutcome outcome)
+    {
+        switch (outcome.Kind)
+        {
+            case InitOutcomeKind.Success:
+                FileLogger.Info($"[Reader1 초기화] 0x60->0x70 왕복 성공, 응답코드={outcome.ResponseCode}");
+                break;
+            case InitOutcomeKind.BusinessFailure:
+                FileLogger.Warn($"[Reader1 초기화] 0x70 응답 수신, 업무 응답코드 실패={outcome.ResponseCode}");
+                break;
+            case InitOutcomeKind.DllCallFailure:
+                FileLogger.Warn($"[Reader1 초기화] DLL 연동 실패: {outcome.DllResultName}({outcome.DllResult}) — {outcome.Detail}");
+                break;
+            case InitOutcomeKind.Timeout:
+                FileLogger.Warn("[Reader1 초기화] 응답 타임아웃");
+                break;
+            case InitOutcomeKind.CommunicationError:
+                FileLogger.Warn($"[Reader1 초기화] 통신 오류: {outcome.Detail}");
+                break;
+        }
+    }
+
+    /// <summary>"COM 01" 같은 레지스트리 표시 문자열에서 숫자만 뽑아 portNumber로 변환한다.</summary>
+    private static int ExtractPortNumber(string displayValue)
+    {
+        var digits = new string(displayValue.Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out int value) ? value : -1;
     }
 }

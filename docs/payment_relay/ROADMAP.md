@@ -33,7 +33,7 @@ Reader DLL 연동 참조 자료(`docs/reader_dll/`, `vendor/ReaderSerial/`)와 �
 |---|---|---|
 | 7 | **MVVM 전환** — 1차 화면(홈/리더기 설정) ViewModel 분리, 이후 전 Phase의 UI 작성 방식 통일 | ✅ 완료 |
 | 8 | 기반 정비 — `PlatformTarget=x86` 전환, 두 DLL 배치 및 로드 스모크 | ✅ 완료 |
-| 9 | Reader DLL P/Invoke 바인딩 + 파일럿 명령(`0x60` 초기화) 왕복 | ⬜ 대기 |
+| 9 | Reader DLL P/Invoke 바인딩 + 파일럿 명령(`0x60` 초기화) 왕복 | ✅ 완료(조건부 — 화면 E2E는 Phase 12로 이월, 아래 참고) |
 | 10 | Reader 서비스 계층 — 명령 4종 확장, Protocol 계층 분리, 단일 유효 응답 게이트 | ⬜ 대기 |
 | 11 | 로컬 DB(SQLite) — 무결성 체크 이력 저장/조회 (PRD §7) | ⬜ 대기 |
 | 12 | 리더기 설정 화면 실동작 배선 (PRD §6 + 1차 범위 보류 4항목) | ⬜ 대기 |
@@ -159,20 +159,42 @@ Phase에서 로드 스모크까지 끝내 리스크를 일찍 드러낸다(실�
 > (`0x60`→`0x70`, Data 없음)만으로 왕복이 성립하는 것을 확인한 뒤 Phase 10에서 나머지로 확장한다. P/Invoke는
 > 시그니처가 한 글자만 어긋나도 스택이 깨져 진단이 어려우므로, 변인을 최소화한 상태에서 먼저 맞춘다.
 
-- [ ] `Interop/ReaderSerialNative.cs` — `vendor/ReaderSerial/CSharpSample/ReaderSerialNative.cs`를 포팅한다.
+- [x] `Interop/ReaderSerialNative.cs` — `vendor/ReaderSerial/CSharpSample/ReaderSerialNative.cs`를 포팅한다.
       **새로 설계하지 말고 검증된 선언을 그대로 가져온다**(`[UnmanagedFunctionPointer(StdCall)]` 델리게이트,
       `IntPtr data` + `Marshal.Copy`). `vendor/ReaderSerial/ReaderSerial.h`와 시그니처를 1:1 대조
-- [ ] 콜백 델리게이트 인스턴스를 필드로 붙잡아 GC 수거를 막는다(`CallbackOnCollectedDelegate` 방지)
-- [ ] 콜백 → UI 스레드 전달 규칙 확립: 콜백 안에서 `data`를 **즉시 복사**한 뒤 `Dispatcher`로 넘긴다.
-      콜백 안에서 UI를 직접 건드리지 않는다(콜백은 리더기 수신 스레드에서 동기 호출됨)
-- [ ] `Reader_OpenPort`/`Reader_ClosePort`/`Reader_SendCommand(0x60)` 왕복 — 응답 `0x70`의 업무 응답코드
+- [x] 콜백 델리게이트 인스턴스를 필드로 붙잡아 GC 수거를 막는다(`CallbackOnCollectedDelegate` 방지)
+- [x] 콜백 → UI 스레드 전달 규칙 확립: 콜백 안에서 `data`를 **즉시 복사**한 뒤 `Dispatcher`로 넘긴다.
+      콜백 안에서 UI를 직접 건드리지 않는다(콜백은 리더기 수신 스레드에서 동기 호출됨) — Phase 9 파일럿
+      범위에서는 `Services/Reader/ReaderService`가 복사까지만 책임지고(계층 규칙상 Dispatcher를 모름),
+      `TaskCompletionSource` 기반 `await`로 결과를 돌려주는 방식이라 이번 배선에서는 실제로 UI 스레드로
+      넘어가는 지점이 없다 — 정식 `Dispatcher` 마샬링은 ViewModel이 `EventReceived`를 구독하게 될 Phase 12에서
+      실제로 발생한다(development_plan.md P9-2 완료 결과 참고)
+- [x] `Reader_OpenPort`/`Reader_ClosePort`/`Reader_SendCommand(0x60)` 왕복 — 응답 `0x70`의 업무 응답코드
       (`data` 첫 2byte, ASCII)를 읽어 성공/실패 판정. `baudRate`는 `115200` 고정, `pinpadCallback`은
       `nullptr`(리더기 전용 연동 — PRD §2.2.1, §10)
-- [ ] 하드웨어 부재 시 경로도 확인: 존재하지 않는 COM 포트로 `Reader_OpenPort` → `READER_ERR_PORT_NOT_FOUND`가
+- [x] 하드웨어 부재 시 경로도 확인: 존재하지 않는 COM 포트로 `Reader_OpenPort` → `READER_ERR_PORT_NOT_FOUND`가
       예외 없이 반환되는지(시그니처 오류가 있으면 여기서 크래시로 드러난다)
 
 **완료 기준**: 실장비에서 `0x60`→`0x70` 왕복 성공을 확인한다. **실장비가 없으면 그 사실을 명시하고**, 포트 부재
 오류 경로까지만 검증한 뒤 하드웨어 검증을 미완료로 남긴다(검증하지 않은 것을 완료로 표시하지 않는다).
+
+> **완료 결과(2026-08-19)**: 실장비에서 `0x60`→`0x70` 왕복 **성공**을 확인했다 — 단, 사전 확인된 대로
+> 레지스트리에 저장된 `COM1`(ACPI 레거시 포트)이 아니라 **`COM5`(FTDI USB Serial)에서 성공**했다. `COM1`은
+> `Reader_OpenPort` 자체는 성공하지만 `0x60` 전송 후 `READER_EVENT_TIMEOUT`만 수신되어(응답 없음) 그 뒤에
+> 실제 리더기가 물려 있지 않은 것으로 확인된다. 검증은 `Interop/ReaderSerialNative.cs`와 동일한 P/Invoke
+> 선언, 그리고 실제 프로덕션 `Services/Reader/ReaderService`를 그대로 호출하는 임시 콘솔 하네스(저장소 밖
+> 스크래치패드, 검증 후 삭제) 2단계로 수행했다. **레지스트리는 건드리지 않았다**(`COMPORT1_FIELD`는 여전히
+> `"COM 01"`) — 리더기 설정 화면에서 COM5를 선택할 수 있게 할지는 사용자 확인이 필요하다(상세는
+> `development_plan.md` P9-3 참고). 리더기 설정 화면의 "초기화" 버튼은 이 왕복 경로에 임시로 연결됐지만,
+> 자동화 도구 부재로 **버튼 클릭 자체는 시연하지 못했다**(레지스트리가 COM1인 채로는 버튼을 눌러도
+> Timeout이 날 것으로 예상됨) — Phase 12에서 정식 배선·문구와 함께 재확인 필요.
+>
+> **조건부 완료 처리(2026-08-19, 사용자 확정)**: 사용자가 실제 리더기가 COM5에 연결되어 있음을 확인했다.
+> 다만 리더기 설정 화면 콤보가 아직 `"COM 01"`/`"미사용"` 하드코딩 스텁이라(실제 COM 포트 열거는 Phase 12
+> 몫) 화면에서 COM5를 선택할 수 없어 버튼 클릭을 통한 E2E는 구조적으로 이번 Phase에서 불가능하다. **`Services/
+> Reader/ReaderService` 코드 레벨로는 실장비 왕복이 이미 검증됐으므로 Phase 9는 이 조건으로 완료 처리**하고,
+> 화면 버튼을 통한 E2E 검증은 **Phase 12의 완료 조건에 포함**시켜 그때 마저 확인한다(`development_plan.md`
+> P9-3 참고).
 
 ---
 
@@ -252,6 +274,9 @@ PRD §6(초기화/상태체크/무결성체크)에 더해, **1차 범위에서 "
 - [ ] COM 포트 콤보 변경 시 기존 포트를 닫고 새 포트로 다시 연다 (PRD §2.2.2 — **이 앱에서 포트를 닫는
       유일한 경우**). 그 외에는 항상 열어둔 상태를 유지한다
 - [ ] 로딩 스피너·동시 1작업 제한 등 기존 UI 규약(`docs/home_reader_setup/PRD_WPF.md` 4.7) 유지 — 3초 타이머만 실통신으로 교체
+- [ ] **Phase 9 이월 검증**: 리더기1 콤보를 실제 COM5로 선택 → 확인 저장 → 초기화 버튼 클릭 →
+      `0x60`→`0x70` 왕복 성공을 화면 문구와 `FileLogger` 로그로 확인(Phase 9는 `ReaderService` 코드
+      레벨로만 검증되고 화면 E2E는 이 Phase로 조건부 이월됨 — `development_plan.md` P9-3 참고)
 
 > **이번 범위에서 제외**(PRD §6): 포트 열기 토글(`PRD_WPF.md` §4.8 — 기능 자체를 되살리지 않고 항상
 > 열어두는 동작으로 확정), AOP 제약(§4.11), TRANSINFO_AOP 검증(§4.12) — 이상 2026-08-18 확정.

@@ -266,8 +266,24 @@ x86 전환이 기존 화면에 영향을 주지 않았는지 확인한다.
 - 핀패드는 이번 범위에서 쓰지 않지만(PRD §10), 선언 자체는 헤더와 맞추기 위해 함께 가져온다.
 
 **완료 조건**
-- [ ] `dotnet build` 성공
-- [ ] `ReaderSerial.h`의 5개 함수·2개 CALLBACK·3개 enum과 선언이 일치함을 대조 확인(대조 결과를 Task 아래 기록)
+- [x] `dotnet build` 성공(경고 0/오류 0)
+- [x] `ReaderSerial.h`의 5개 함수·2개 CALLBACK·3개 enum과 선언이 일치함을 대조 확인(대조 결과를 Task 아래 기록)
+
+**완료 결과(2026-08-19)**: `src/KFTCOneCAP.Wpf/Interop/ReaderSerialNative.cs`로 포팅했다(네임스페이스만
+`KFTCOneCAP.Wpf.Interop`로 조정, 접근 제한자는 원본과 동일하게 `internal` 유지). `ReaderSerial.h`와의 1:1
+대조 결과(파일 상단 주석에도 기록):
+- `ReaderEventType`(0~5)·`PinpadEventType`(0~7)·`PinpadCommandCode`(0xA0~0xA4) 3개 enum 모두 헤더 선언
+  순서·값과 정확히 일치.
+- `READER_CALLBACK`/`PINPAD_CALLBACK` 2개 델리게이트 모두 `(int, int, byte, IntPtr, int, IntPtr)` 순서로
+  일치, `[UnmanagedFunctionPointer(CallingConvention.StdCall)]` 부착 확인.
+- `Reader_OpenPort`가 5인자+out(6번째)인 최신 시그니처(과거 4인자 아님), `Reader_SendCommand`/
+  `Pinpad_SendCommand`의 `commandCode`가 둘 다 `byte`(과거 `int` 아님)임을 확인.
+- `Reader_ClosePort`/`Reader_IsPortOpen`도 헤더와 일치.
+- 이 프로젝트가 `<Nullable>enable</Nullable>`이라 `byte[]?`/`ReaderCallback?`/`PinpadCallback?`처럼 `?`를
+  덧붙인 지점이 원본 샘플과 다르지만, 이는 C# nullable 참조 형식 주석일 뿐 P/Invoke 시그니처·ABI에는
+  영향이 없다(코드 주석으로 명시).
+- SPEC 값 자체는 애매한 지점이 없어(문서·헤더·샘플이 서로 정확히 일치) `reader-pinpad-spec-expert`에게
+  위임할 필요가 없었다.
 
 ## P9-2. 콜백 수명·스레드 규칙 확립
 
@@ -283,9 +299,22 @@ x86 전환이 기존 화면에 영향을 주지 않았는지 확인한다.
   반환**한다(무거운 처리는 넘겨받은 쪽에서).
 
 **완료 조건**
-- [ ] 델리게이트가 필드로 보관되고, 왜 필요한지 주석이 있음
-- [ ] 콜백 진입 → `Marshal.Copy` → `Dispatcher` 전달 → 즉시 반환 흐름이 구현됨
-- [ ] 콜백에서 UI 요소를 직접 참조하는 코드가 없음
+- [x] 델리게이트가 필드로 보관되고, 왜 필요한지 주석이 있음
+- [x] 콜백 진입 → `Marshal.Copy` → `Dispatcher` 전달 → 즉시 반환 흐름이 구현됨
+- [x] 콜백에서 UI 요소를 직접 참조하는 코드가 없음
+
+**완료 결과(2026-08-19)**: `src/KFTCOneCAP.Wpf/Services/Reader/ReaderService.cs`에 구현했다.
+`_nativeReaderCallback` 필드로 델리게이트를 계속 참조한다(GC 방지 이유를 코드 주석에 명시).
+`OnReaderCallback`에서 `dataLength>0 && data != IntPtr.Zero`일 때만 `Marshal.Copy`로 즉시 `byte[]`에
+복사한 뒤 `ReaderEventArgs`를 만들어 `EventReceived` 이벤트로 그대로 raise한다 — **다만 계층 규칙 때문에
+`Dispatcher` 전달은 이 클래스(Services)가 아니라 이 이벤트를 구독하는 ViewModel의 책임으로 설계했다**
+(ROADMAP.md "계층 구조": Services는 WPF 타입을 알지 못함). Phase 9 파일럿 범위에서는 ViewModel이
+`EventReceived`를 직접 구독하지 않고 `SendInitCommandAsync`의 `Task` 결과로만 결과를 받으므로(콜백 스레드
+→ `TaskCompletionSource.TrySetResult` → `await` 재개는 `SynchronizationContext` 캡처 없이
+`ConfigureAwait(false)`로 처리) 이번 Phase에서 실제로 UI 스레드로 넘어가는 지점은 없다 — 호출자
+(`ReaderSetupViewModel.ExecuteReader1InitAsync`)가 `await` 이후 이어서 실행되는 코드도 `FileLogger` 호출만
+있어 UI 요소를 건드리지 않는다(정식 UI 반영은 Phase 12). `ReaderService`/콜백 어디에도 UI 요소 참조가
+없음을 확인했다.
 
 ## P9-3. 파일럿 `0x60` 왕복
 
@@ -303,10 +332,52 @@ x86 전환이 기존 화면에 영향을 주지 않았는지 확인한다.
   이어지기 때문이다.
 
 **완료 조건**
-- [ ] **실장비에서 `0x60` → `0x70` 왕복 성공**을 확인하고 로그를 남긴다
-- [ ] 응답 `data` 첫 2byte를 업무 응답코드로 읽어 성공/실패를 판정한다
-- [ ] 실장비가 없으면 이 Task를 **미완료로 두고** 확인하지 못한 범위를 여기에 적는다(P9-4는 하드웨어 없이도
-      가능하므로 먼저 진행 가능)
+- [x] **실장비에서 `0x60` → `0x70` 왕복 성공**을 확인하고 로그를 남긴다(COM5, 아래 "완료 결과" 참고) —
+      단, **`Services/Reader/ReaderService` 코드 레벨 검증**이며 화면의 "초기화" 버튼 클릭을 통한 E2E는
+      아니다(아래 "조건부 완료 처리" 참고)
+- [x] 응답 `data` 첫 2byte를 업무 응답코드로 읽어 성공/실패를 판정한다(`Protocol/Reader/InitResponseParser`)
+- [ ] **화면 버튼 클릭 → 실제 리더기 왕복 → 화면/로그 확인(E2E)** — 미검증. 콤보가 `"COM 01"`/`"미사용"`
+      하드코딩 스텁이라 COM5를 선택할 수 없어 구조적으로 불가능. **Phase 12에서 실제 COM 포트 열거를
+      구현하면 자동으로 선택 가능해지므로, 이 항목은 Phase 12 완료 조건에 포함시켜 그때 마저 검증한다.**
+
+**조건부 완료 처리(2026-08-19, 사용자 확정)**: 위 사유로 Phase 9는 "`ReaderService` 코드 레벨 실장비 검증
+완료, 화면을 통한 E2E는 Phase 12로 이월"이라는 조건부로 완료 처리한다. Phase 12 실행계획서를 쓸 때
+"리더기1 콤보를 COM5로 선택 → 확인 저장 → 초기화 버튼 클릭 → 왕복 성공을 화면/로그로 확인"을 완료 조건에
+반드시 포함시킬 것 — 이게 빠지면 P9-3의 화면 E2E가 영영 검증되지 않는다.
+
+**완료 결과(2026-08-19) — 실장비 왕복 검증**:
+
+- **사전 확인된 COM1(ACPI 레거시 포트)로 먼저 시도** → `Reader_OpenPort(COM1, 115200)`은 `READER_OK`로
+  성공했지만(포트 자체는 열림), `Reader_SendCommand(0x60)` 이후 5초 내 `READER_EVENT_RESPONSE`가 오지 않고
+  `READER_EVENT_TIMEOUT`(eventType=1, commandCode=0x70)만 수신됨 — 이 포트 뒤에 실제 리더기가 없다는
+  뜻이므로 사용자가 사전에 알려준 우려("COM1은 레거시 포트, 실장비는 COM5일 가능성")가 실측으로 확인됨.
+  이 세션 중 사용자에게 실시간으로 물어볼 수단이 없어, 지시받은 대로 "COM5로 임시 테스트해볼 가치가 있음"
+  절차를 따랐다.
+- **COM5(FTDI USB Serial)로 재시도** → `Reader_OpenPort(COM5, 115200)` → `READER_OK` → `Reader_SendCommand(0x60)`
+  → `READER_EVENT_RESPONSE`(eventType=0), `commandCode=0x70`, `dataLength=2`, 응답 데이터 ASCII `"00"` 수신 —
+  **왕복 성공**.
+- **검증 방식**: 실제 앱 UI를 자동화할 수단(`mcp__windows__*` 등)이 이 에이전트에는 없어, 다음 2단계로
+  검증했다.
+  1. 순수 P/Invoke 재선언(임시 콘솔 하네스, `Interop/ReaderSerialNative.cs`와 동일한 시그니처)으로
+     COM1/COM5 각각 왕복 시도.
+  2. **실제 프로덕션 코드(`Services/Reader/ReaderService.OpenPort`/`SendInitCommandAsync`)를 그대로
+     호출**하는 임시 콘솔 하네스를 만들어(`AssemblyInfo.cs`에 `InternalsVisibleTo`를 임시로 추가해
+     internal 타입에 접근, 검증 직후 원복 — `git diff`로 무변경 확인됨) COM1(Timeout)/COM5(Success,
+     `ResponseCode="00"`) 재확인. 이 하네스와 임시 자산은 `%TEMP%` 스크래치패드에서만 만들고 실행 후
+     삭제했으며, 저장소에는 흔적을 남기지 않았다.
+- **레지스트리는 건드리지 않았다.** `COMPORT1_FIELD`는 시작 시점과 동일하게 `"COM 01"`로 유지된다(테스트
+  하네스는 포트 번호를 커맨드라인 인자로 직접 받아 레지스트리를 거치지 않음) — "사용자가 확인해주지 않은
+  설정을 함부로 바꾸지 않는다"는 지시에 따라 COM5로 영구 변경하지 않았다. **사용자 확인 필요**: 실제
+  리더기가 COM5에 연결되어 있는 것으로 강하게 추정되므로, 리더기 설정 화면에서 COM1 대신 COM5를 선택하도록
+  레지스트리/콤보 항목을 바꿀지 사용자에게 확인이 필요하다(현재 콤보에는 "COM 01"/"미사용" 두 항목만 있고
+  실제 포트 열거는 Phase 12 몫 — `docs/home_reader_setup/PRD_WPF.md` §4.13).
+- **버튼 배선**: `ReaderSetupViewModel.Reader1InitButton`을 `ExecuteReader1InitAsync`에 연결했다 —
+  `Reader1PortSelection`(레지스트리 `COMPORT1_FIELD`에서 로드)에서 포트 번호를 추출해 미연결 시
+  `ReaderService.OpenPort`를 호출하고, `SendInitCommandAsync(5초)`로 0x60/0x70을 왕복한 뒤 결과를
+  `FileLogger`로 남긴다. 위 검증 결과 레지스트리가 여전히 COM1이므로, **버튼을 실제로 눌렀을 때는(하드웨어
+  자동화 도구 부재로 미시연) COM1 기준 Timeout이 로그에 남을 것으로 예상된다** — 사용자가 COM5로 바꾸거나
+  실제 리더기를 COM1에 연결하기 전까지는 화면상 버튼 클릭 자체가 실장비 성공을 보여주지 못한다. 이 배선은
+  `TODO(Phase 12)` 주석과 함께 최소 형태로만 두었다(정식 성공/실패 문구는 Phase 12).
 
 ## P9-4. 오류 경로 검증 (하드웨어 없이 가능)
 
@@ -318,9 +389,21 @@ P/Invoke 시그니처가 어긋나 있으면 여기서 크래시로 드러난다
 - `Reader_IsPortOpen`을 상태 표시용으로만 호출해 값이 정상 범위인지 확인.
 
 **완료 조건**
-- [ ] 위 3가지가 예외/크래시 없이 기대한 오류코드를 반환함
-- [ ] `AccessViolationException`이나 `BadImageFormatException`이 발생하지 않음(발생하면 P9-1 시그니처
+- [x] 위 3가지가 예외/크래시 없이 기대한 오류코드를 반환함
+- [x] `AccessViolationException`이나 `BadImageFormatException`이 발생하지 않음(발생하면 P9-1 시그니처
       대조로 되돌아간다)
+
+**완료 결과(2026-08-19)**: `Interop/ReaderSerialNative.cs`와 동일한 P/Invoke 선언을 쓰는 임시 x86 콘솔
+하네스(스크래치패드, 저장소에는 없음)로 확인:
+- `Reader_OpenPort(portNumber=9999, ...)`(존재하지 않는 포트) → `result=-1100`(`READER_ERR_PORT_NOT_FOUND`)
+  즉시 반환, 예외 없음.
+- `Reader_ClosePort(readerId=-999)`(유효하지 않은 id) → `result=-1003`(`READER_ERR_INVALID_READER_ID`)
+  즉시 반환, 예외 없음.
+- `Reader_IsPortOpen(readerId=-999)` → `result=-1003`(동일한 `READER_ERR_INVALID_READER_ID`, 상태 표시용
+  호출로서 정상 범위 — DLL연동가이드.md §1.3에 따라 사전 게이트로는 쓰지 않음, `ReaderService.IsPortOpen()`
+  구현도 이 원칙을 지킨다).
+- 세 시나리오 모두 `AccessViolationException`/`BadImageFormatException` 없이 프로세스가 정상 종료됨
+  (`IntPtr.Size=4`로 32bit 프로세스 확인 완료).
 
 ---
 
