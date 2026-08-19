@@ -22,11 +22,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 반드시 먼저 읽을 문서
 
 - **`docs/home_reader_setup/PRD_WPF.md`** — 요구사항 정의서. 색상/폰트/레이아웃 수치, 화면별 상세 동작(버튼 로직, 토글, AOP 제약, 레지스트리 매핑)의 단일 진실 공급원(source of truth). 구현 중 애매한 부분이 있으면 추측하지 말고 이 문서를 먼저 확인한다.
-- **`docs/home_reader_setup/ROADMAP.md`** — Phase 0~8 순서대로 진행되는 개발 계획. 반드시 이 순서를 따르고, 각 Phase의 "완료 기준"(빌드+실행+스크린샷 대조)을 통과한 뒤에만 다음 Phase로 넘어간다. PRD와 실제 구현이 어긋나면 코드보다 먼저 PRD를 갱신한다.
+- **`docs/home_reader_setup/ROADMAP.md`** — 1차 범위 개발 계획(Phase 0~6, 완료). 반드시 순서를 따르고, 각 Phase의 "완료 기준"(빌드+실행+스크린샷 대조)을 통과한 뒤에만 다음 Phase로 넘어간다. PRD와 실제 구현이 어긋나면 코드보다 먼저 PRD를 갱신한다.
 - **`docs/home_reader_setup/screenshots/home_screen.png`, `docs/home_reader_setup/screenshots/reader_setup.png`** — 원본 MFC 앱을 실행해 캡처한 실측 화면. 텍스트/색상/레이아웃을 소스 코드 리터럴보다 우선하는 근거로 삼는다(빌드된 실행 파일과 소스가 일부 어긋나는 것이 이미 확인됨 — PRD 6장 미확정 사항 #7 참고).
 - **`docs/payment_relay/PRD.md`** — 2차 범위(결제 중계 기능) 요구사항 정본. `KFTC_GIRO.dll`(VAN 연동)은 별도 SPEC 문서가 없어 이 PRD의 §2.3이 유일한 계약 정보다 — 임의로 필드를 추측하지 않는다.
 
-**2차 범위는 3단 문서 구성(PRD → ROADMAP → 실행계획서)을 따른다**: `docs/payment_relay/PRD.md`(무엇을) → `docs/home_reader_setup/ROADMAP.md`의 "2차 개발" 절(어떤 순서로, Phase 7~17 + 계층 구조 설계 원칙) → `docs/payment_relay/development_plan.md`(Task 단위 작업 지시/완료 조건, 각 Phase 착수 직전 작성). 코드 작성은 해당 Phase의 실행계획서가 준비된 뒤에 시작한다.
+**2차 범위는 `docs/payment_relay/` 한 폴더에 3단 문서 구성(PRD → ROADMAP → 실행계획서)으로 모아 관리한다**: `PRD.md`(무엇을) → `ROADMAP.md`(어떤 순서로 — Phase 7~17 + 계층 구조 설계 원칙) → `development_plan.md`(Task 단위 작업 지시/완료 조건, 각 Phase 착수 직전 작성). 같은 폴더에 `dll/`(KFTC_GIRO.dll)과 `images/`(결제 알림창 자산)도 있다. 코드 작성은 해당 Phase의 실행계획서가 준비된 뒤에 시작한다.
+
+**Phase 번호는 두 ROADMAP에 걸쳐 이어진다** — 1차 0~6(`docs/home_reader_setup/ROADMAP.md`), 2차 7~(`docs/payment_relay/ROADMAP.md`). 같은 앱을 계속 확장하는 것이므로 번호를 새로 시작하지 않는다.
 
 ## 원본 MFC 소스 (참고용, 이 저장소 밖)
 
