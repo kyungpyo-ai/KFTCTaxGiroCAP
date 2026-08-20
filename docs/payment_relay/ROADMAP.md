@@ -35,7 +35,7 @@ Reader DLL 연동 참조 자료(`docs/reader_dll/`, `vendor/ReaderSerial/`)와 �
 | 8 | 기반 정비 — `PlatformTarget=x86` 전환, 두 DLL 배치 및 로드 스모크 | ✅ 완료 |
 | 9 | Reader DLL P/Invoke 바인딩 + 파일럿 명령(`0x60` 초기화) 왕복 | ✅ 완료(조건부 — 화면 E2E는 Phase 12로 이월, 아래 참고) |
 | 10 | Reader 서비스 계층 — 명령 4종 확장, Protocol 계층 분리, 단일 유효 응답 게이트 | ✅ 완료(실장비 2대 경합/무효화·실제 카드 태그 경쟁·`PORT_NOT_OPEN` 실장비 재현+재연결 복구까지 전부 검증. `SEND_FAIL`만 API 레벨로 결정적 유도 불가해 미검증 — 구조적 이유 실측 확인, 아래 참고) |
-| 11 | 로컬 DB(SQLite) — 무결성 체크 이력 저장/조회 (PRD §7) | ⬜ 대기 |
+| 11 | 로컬 DB(SQLite) — 무결성 체크 이력 저장/조회 (PRD §7) | ✅ 완료 |
 | 12 | 리더기 설정 화면 실동작 배선 (PRD §6 + 1차 범위 보류 4항목) | ⬜ 대기 |
 | 13 | 결제 알림창 UI — IC/FALLBACK/PROCESSING, Topmost, ESC Hook (PRD §5) | ⬜ 대기 |
 | 14 | 소켓 서버 + 단일 워커 Queue (PRD §3) | ⬜ 대기 |
@@ -281,17 +281,33 @@ Phase에서 로드 스모크까지 끝내 리스크를 일찍 드러낸다(실�
 
 **목표**: PRD §7의 저장/조회를 Phase 12·15가 쓸 수 있는 형태로 완성한다.
 
-- [ ] SQLite 도입 — `net48`/x86에서 동작하는 패키지 선정(네이티브 인터롭이 있으므로 **x86에서 실제 로드되는지**
+- [x] SQLite 도입 — `net48`/x86에서 동작하는 패키지 선정(네이티브 인터롭이 있으므로 **x86에서 실제 로드되는지**
       확인 필요. Phase 8의 x86 전환과 충돌하지 않을 것)
-- [ ] 스키마: 체크 일시 / COM Port / 결과 / 응답코드 / 모듈 ID / 리더기 인증 식별번호 / POS 식별번호
+- [x] 스키마: 체크 일시 / COM Port / 결과 / 응답코드 / 모듈 ID / 리더기 인증 식별번호 / POS 식별번호
       (기본값 `KFTCTAXGIROCAP01`, PRD §2.1)
-- [ ] 저장 API + 조회 API 2종:
+- [x] 저장 API + 조회 API 2종:
       - 리스트 표시용(조회기간 필터 — 리더기 설정 화면 §4.6)
       - **금일·동일 COM Port 성공 이력 존재 여부** (결제 선행 판정용, PRD §4.2)
-- [ ] DB 파일 위치/생성 시점 결정, 최초 실행 시 자동 생성. DB 오류가 앱을 죽이지 않을 것(PRD §9)
-- [ ] `Models/IntegrityCheckRow.cs`(1차 범위에서 더미용으로 만들어 둔 모델)를 실제 조회 결과에 연결
+- [x] DB 파일 위치/생성 시점 결정, 최초 실행 시 자동 생성. DB 오류가 앱을 죽이지 않을 것(PRD §9)
+- [x] `Models/IntegrityCheckRow.cs`(1차 범위에서 더미용으로 만들어 둔 모델)를 실제 조회 결과에 연결
+      (조회 API가 이 모델을 직접 반환하도록 연결했다 — `ReaderSetupViewModel`의 더미 데이터 배선
+      교체 자체는 화면 작업인 Phase 12 몫)
 
 **완료 기준**: 저장 → 조회 왕복이 확인되고, "금일 성공 이력" 판정이 날짜 경계/포트 구분에서 올바르게 동작한다.
+
+> **완료 결과(2026-08-20)**: `Microsoft.Data.Sqlite` 10.0.11을 1차 시도에서 채택했다(x86/net48에서
+> 네이티브 로드·연결·쿼리 성공 실측, `System.Data.SQLite.Core` 전환 불필요). `Services/Storage/
+> IntegrityCheckStore`(공개 클래스, `Save`/`GetHistory`/`HasSuccessToday` 3개 API)를 신설하고,
+> DB 파일은 `%LOCALAPPDATA%\KFTCTaxGiroCAP\integrity_check.db`(P8-3 `FileLogger`와 동일한 폴더
+> 규칙)에 둔다. 프로덕션 코드를 그대로 참조하는 x86/net48 콘솔 하네스(`ProjectReference`로
+> `KFTCOneCAP.Wpf.csproj` 참조, 스크래치패드, 저장소 밖 — 클래스가 전부 `public`이라
+> `InternalsVisibleTo` 등 저장소 변경 불필요)로 저장→조회 왕복, 날짜/포트 경계값, DB 파일 손상 시
+> 오류 내성(예외 없이 값으로 실패 반환)까지 전부 실측 검증했다. 실제 배포 경로를 그대로 썼지만
+> 테스트 전후로 기존 파일을 백업/복원해 사용자 데이터를 건드리지 않았다. **"DB 파일 잠금"(다른
+> 프로세스의 배타적 잠금) 시나리오만 코드 검토로 갈음했다** — SQLite가 `SQLITE_BUSY` 등을
+> `SqliteException`으로 던지는 것은 파일 손상과 동일한 `try/catch` 경로로 흡수되므로 코드 경로가
+> 같지만, 다른 프로세스로 실제 잠금을 거는 실행 검증까지는 하지 않았다. 상세는
+> `development_plan.md` P11-1~P11-4 "완료 결과" 참고.
 
 ---
 

@@ -873,9 +873,25 @@ SQLite는 **네이티브 라이브러리를 동반**하므로 Phase 8의 x86 고
   않는다(네이티브 로드는 런타임에 일어난다).
 
 **완료 조건**
-- [ ] x86 프로세스에서 DB 연결·간단 쿼리가 성공
-- [ ] 출력 폴더에 필요한 네이티브 파일이 복사됨
-- [ ] 선택한 패키지와 그 이유를 이 Task 아래에 기록
+- [x] x86 프로세스에서 DB 연결·간단 쿼리가 성공
+- [x] 출력 폴더에 필요한 네이티브 파일이 복사됨
+- [x] 선택한 패키지와 그 이유를 이 Task 아래에 기록
+
+**완료 결과(2026-08-20)**: `Microsoft.Data.Sqlite` 10.0.11을 `dotnet add package`로 추가했다 —
+`System.Data.SQLite.Core`로 전환할 필요 없이 1차 시도에서 성공했다.
+- **네이티브 로드 실측**: 빌드 후 `bin/Debug/net48/` 루트에 `e_sqlite3.dll`(네이티브 SQLite 본체)·
+  `Microsoft.Data.Sqlite.dll`·`SQLitePCLRaw.*.dll` 3종이 자동 복사됨을 확인했다(net48 SDK 스타일
+  csproj는 `runtimes/win-x86/native/e_sqlite3.dll`을 출력 폴더 루트로 평탄화해 복사한다 — 별도
+  csproj 배선 없이 패키지 기본 동작만으로 됨). `e_sqlite3.dll`의 PE 헤더(`IMAGE_FILE_MACHINE`
+  필드, 오프셋 `0x3C`가 가리키는 위치+4)를 직접 읽어 `0x014C`(x86)임을 확인했다.
+- **"열고 쿼리 한 번" 실행 확인**: 별도 x86/net48 콘솔 하네스(스크래치패드, 저장소 밖)로
+  `SqliteConnection.Open()` → `CREATE TABLE` → `INSERT` → `SELECT`까지 실제로 성공시켰다
+  (`IntPtr.Size=4`로 32bit 프로세스 확인, 쿼리 결과 `"hello"` 정상 반환). 이후 P11-2~P11-4
+  검증은 이 패키지를 실제로 쓰는 프로덕션 `IntegrityCheckStore`로 다시 확인했다(아래 참고).
+- **패키지 선택 이유**: PRD/development_plan.md 지시대로 `Microsoft.Data.Sqlite`를 우선 시도했고,
+  SDK 스타일 csproj에서 `runtimes/win-x86/native` 해석이 문제없이 동작해 `System.Data.SQLite.Core`
+  전환이 필요 없었다. 버전은 이 시점 NuGet 최신 안정 버전(10.0.11)을 그대로 사용했다 — net48을
+  명시적으로 지원하는 TFM이 nupkg에 포함되어 있어 `dotnet build`가 아무 경고 없이 통과했다.
 
 ## P11-2. 스키마 및 저장
 
@@ -888,9 +904,37 @@ PRD §7 저장 항목: 체크 일시 / COM Port / 결과 / 응답코드 / 모듈
 - 날짜는 "금일" 판정이 정확해야 하므로 저장 형식을 명확히 정한다(로컬 시간 기준, 정렬·범위 비교가 가능한 형식).
 
 **완료 조건**
-- [ ] 최초 실행 시 DB/테이블이 자동 생성됨
-- [ ] 7개 항목이 저장되고 다시 읽힘
-- [ ] DB 파일을 삭제한 뒤 재실행해도 정상 재생성됨
+- [x] 최초 실행 시 DB/테이블이 자동 생성됨
+- [x] 7개 항목이 저장되고 다시 읽힘
+- [x] DB 파일을 삭제한 뒤 재실행해도 정상 재생성됨
+
+**완료 결과(2026-08-20)**: `Services/Storage/IntegrityCheckStore.cs`에 구현했다. DB 파일 위치는
+`%LOCALAPPDATA%\KFTCTaxGiroCAP\integrity_check.db`(P8-3 `FileLogger`가 로그를 두는
+`%LOCALAPPDATA%\KFTCTaxGiroCAP\` 폴더와 같은 규칙, 하위에 `logs\`와 나란히 DB 파일을 둔다).
+`IntegrityCheckHistory` 테이블(`CheckedAtLocal`/`ComPort`/`IsSuccess`/`ResponseCode`/`ModuleId`/
+`ReaderAuthId`/`PosId` 7컬럼)과 인덱스 2개(`IX_IntegrityCheckHistory_Today`(ComPort, IsSuccess,
+CheckedAtLocal) — P11-3의 "금일·포트·성공" 조회용, `IX_IntegrityCheckHistory_CheckedAt` — 리스트
+최신순 조회용)를 `CREATE TABLE/INDEX IF NOT EXISTS`로 정의해 매 연결마다 멱등하게 보장한다. POS
+식별번호는 `IntegrityCheckStore.PosId = "KFTCTAXGIROCAP01"` 상수로 코드에 고정(PRD §2.1) —
+`IntegrityCheckRecord` 입력 모델에는 포함하지 않아 호출자가 실수로 다른 값을 넣을 수 없게 했다.
+날짜는 `"yyyy-MM-dd HH:mm:ss.fff"`(로컬 시각) 문자열로 저장해 문자열 사전식 비교가 곧 시간순
+비교와 일치하도록 했다(범위 조건에 별도 날짜 파싱 함수 없이 `>=`/`<` 문자열 비교로 정확한 결과를
+얻는다).
+- **검증**: 프로덕션 코드를 그대로 참조하는 x86/net48 콘솔 하네스(`ProjectReference`로
+  `KFTCOneCAP.Wpf.csproj`를 참조, 스크래치패드, 저장소 밖 — 이 클래스는 전부 `public`이라
+  `InternalsVisibleTo` 등 저장소 변경이 필요 없었다)로 확인했다. 기본(공개) 생성자를 그대로 써서
+  **실제 배포 경로**(`%LOCALAPPDATA%\KFTCTaxGiroCAP\integrity_check.db`)에 대해 검증했다 — 하네스
+  실행 전 그 경로에 기존 파일이 있으면 백업 후 진행하고, 종료 시(성공/실패 무관, `finally`) 항상
+  원상 복구하도록 만들어 실제 사용자 데이터를 건드리지 않았다(테스트 종료 후
+  `%LOCALAPPDATA%\KFTCTaxGiroCAP\`에 `logs\`만 남고 DB 파일 잔여물 없음을 확인).
+  - DB 디렉터리·파일이 최초 `Save()` 호출 시 자동 생성됨을 확인(`Directory.Exists`/`File.Exists`).
+  - 7개 항목(체크일시/포트/결과/응답코드/모듈ID/리더기인증식별번호/POS식별번호)을 저장한 뒤
+    `GetHistory()`로 다시 읽어 `IntegrityCheckRow`의 각 프로퍼티(`CheckTime`/`Port`/`ResultCode`/
+    `ModuleId`/`ReaderId`/`PosId`)와 정확히 일치함을 확인(성공 케이스 1건 + 응답코드/모듈ID/
+    리더기ID가 모두 `null`인 실패 케이스 1건 양쪽 모두 저장 성공, `Save().Success == true`).
+  - DB 파일을 `File.Delete()`로 지운 뒤(`SqliteConnection.ClearAllPools()`로 커넥션 풀을 먼저 비워
+    파일 잠금 해제) 새 `IntegrityCheckStore` 인스턴스로 `Save()`를 호출 — 파일이 자동 재생성되고
+    저장이 정상 성공함을 확인(P11-2 세 번째 완료 조건).
 
 ## P11-3. 조회 API 2종
 
@@ -903,21 +947,75 @@ PRD §7 저장 항목: 체크 일시 / COM Port / 결과 / 응답코드 / 모듈
   돌거나, 반대로 필요한 체크를 건너뛴다.
 
 **완료 조건**
-- [ ] 기간 필터 조회가 경계값(시작일/종료일 당일 포함)에서 올바름
-- [ ] "금일 성공 이력" 판정이 자정 경계에서 올바름(어제 성공 → 오늘 조회 시 `false`)
-- [ ] 포트가 다르면 서로 영향 없음(`COM1` 성공이 `COM2` 판정에 영향 없음)
+- [x] 기간 필터 조회가 경계값(시작일/종료일 당일 포함)에서 올바름
+- [x] "금일 성공 이력" 판정이 자정 경계에서 올바름(어제 성공 → 오늘 조회 시 `false`)
+- [x] 포트가 다르면 서로 영향 없음(`COM1` 성공이 `COM2` 판정에 영향 없음)
+
+**완료 결과(2026-08-20)**: `IntegrityCheckStore.GetHistory(DateTime fromInclusive, DateTime
+toInclusive)`(리스트 표시용, 최신순)와 `HasSuccessToday(string comPort)`(결제 선행 판정용, PRD
+§4.2) 2종을 구현했다. `Models/IntegrityCheckRow`(1차 범위 더미 모델)를 그대로 재사용해 실제 조회
+결과를 연결했다 — `ReaderSetupViewModel`의 `IntegrityRows`/`BuildDummyRows` 배선 교체는 화면
+작업인 Phase 12 몫이라 이번 Phase에서는 손대지 않았다.
+- `GetHistory`는 `fromInclusive.Date`(00:00:00.000)부터 `toInclusive.Date.AddDays(1)`(다음 날
+  00:00:00.000) **미만**으로 조회해, 종료일 23:59:59.999를 리터럴로 계산하는 대신 배타적 상한으로
+  경계 실수를 줄였다. `HasSuccessToday`도 같은 방식(`DateTime.Now.Date` ~ `AddDays(1)` 미만)으로
+  자정 경계를 처리한다.
+- **검증**(P11-2와 같은 하네스로 이어서 실행, 실제 배포 경로 사용 후 원상 복구):
+  - **경계값**: 오늘 2건 저장 후 `GetHistory(오늘, 오늘)` → 정확히 2건, `CheckTime` 내림차순(문자열
+    비교로 `row0 >= row1`) 확인. 어제 1건을 추가로 저장한 뒤 다시 `GetHistory(오늘, 오늘)` →
+    여전히 2건(어제 데이터가 섞이지 않음), `GetHistory(어제, 오늘)` → 3건(경계 양쪽 포함) 확인.
+  - **금일 성공 이력 자정 경계**: `HasSuccessToday("COM 01")`(오늘 성공 이력 있음) → `true`,
+    `HasSuccessToday("COM 02")`(오늘 실패 이력만 있음) → `false`, `HasSuccessToday("COM 03")`(이력
+    없음) → `false`. 이어서 `COM 09`에 **어제 날짜의 성공** 레코드만 저장한 뒤
+    `HasSuccessToday("COM 09")` → `false`(어제 성공이 오늘 판정에 영향 없음, 자정 경계 확인).
+  - **포트 독립성**: 위 `COM 01`/`COM 02`/`COM 03`/`COM 09` 4개 포트가 서로 다른 이력 상태(성공/
+    실패만 있음/이력 없음/어제만 성공)로 저장돼 있는데도 각 포트의 `HasSuccessToday` 판정이 서로
+    영향을 주지 않음을 위 4개 어서션으로 함께 확인했다.
 
 ## P11-4. 오류 내성
 
 - DB 파일 손상/잠김/디스크 문제로 저장·조회가 실패해도 **앱이 죽지 않는다**(PRD §9).
-- 저장 실패 시: 결제 자체를 막을 것인지, 로그만 남기고 진행할 것인지 — **사용자 확인 필요**(무결성 이력이
-  남지 않으면 다음 결제에서 무결성 체크를 다시 하게 되므로 기능적으로는 안전한 쪽이다. 다만 매 결제마다
-  체크가 반복되어 느려진다).
+- **저장 실패 시 정책(2026-08-20 사용자 확정)**: DB 저장 자체의 성공/실패와 무결성 체크의 업무 결과(성공/실패)를
+  분리해서 판단한다.
+  - **무결성 체크가 성공**했는데 그 결과를 DB에 저장하는 것만 실패한 경우 → **로그만 남기고 결제는 계속
+    진행**한다(DB 저장 실패가 결제를 막지 않는다).
+  - **무결성 체크 자체가 실패**한 경우 → DB 저장 성공/실패와 무관하게 **결제를 막는다**(이건 원래 PRD §4.2의
+    기본 동작이지 DB 문제가 아니다).
 - 조회 실패 시: "이력 없음"으로 간주해 무결성 체크를 수행하는 쪽이 안전하다(체크를 건너뛰는 것보다 낫다).
 
 **완료 조건**
-- [ ] DB 파일을 잠그거나 손상시킨 상태에서도 앱이 정상 동작(기능만 실패)
-- [ ] 저장 실패 시 동작을 사용자에게 확인받아 PRD에 반영한 뒤 구현
+- [x] DB 파일을 잠그거나 손상시킨 상태에서도 앱이 정상 동작(기능만 실패)
+- [x] 무결성 체크 성공 + DB 저장 실패 조합에서 로그만 남고 진행되는 것을 확인(결제 Flow 연결은 Phase 15
+      이후이므로, 이 Phase에서는 저장 API가 예외를 던지지 않고 실패를 값으로 반환하는 것까지만 확인)
+
+**완료 결과(2026-08-20)**: `IntegrityCheckStore`의 `Save`/`GetHistory`/`HasSuccessToday` 3개
+공개 메서드 전부 내부에서 `try/catch`로 감싸 예외를 외부로 던지지 않는다(`IntegrityCheckStore.cs`
+참고) — 실패는 `IntegrityCheckSaveResult.Failed(string errorMessage)`(저장) 또는 빈
+`List<IntegrityCheckRow>`/`false`(조회, "이력 없음"으로 간주)로 표현하고, 원인은
+`FileLogger.Error`로 남긴다. 이 정책 자체가 이번 세션에서 사용자가 확정한 "저장 실패 ≠ 무결성 체크
+업무 실패"를 그대로 반영한 것이다(P11-4 상단 정책 문단, `IntegrityCheckSaveResult`/
+`IntegrityCheckRecord.cs` 클래스 주석에도 근거를 남겼다).
+- **검증**(P11-2/P11-3과 동일한 프로덕션 코드 하네스, 실제 배포 경로 사용 후 원상 복구): DB 파일을
+  `SqliteConnection.ClearAllPools()`로 커넥션 풀을 비운 뒤 `File.Delete` → 유효하지 않은 텍스트로
+  덮어써 "손상된 SQLite 파일" 상태를 실제로 만들었다(단순 이름 변경이 아니라 파일 내용 자체를
+  깨서, `SqliteException`이 실제로 발생하는 것까지 확인).
+  - `Save()` 호출 → **예외를 던지지 않고** `Success=false`를 반환, `ErrorMessage`에 실제 SQLite
+    오류(`"SQLite Error 26: 'file is not a database'."`)가 담김을 확인. 이것이 P11-4가 요구하는
+    "저장 API는 예외가 아닌 값으로 실패를 반환"의 실측 근거다 — **이 반환값 자체가 "무결성 체크는
+    성공했지만 저장만 실패"를 호출자에게 알리는 통로이므로, Phase 15에서 이 값이 `false`여도
+    결제를 막지 않고 로그만 남기도록 호출하면 정책이 그대로 성립한다**(이번 Phase는 결제 Flow가
+    아직 없어 저장 API의 반환값 계약만 확인, 실제 배선은 Phase 15).
+  - `GetHistory()`/`HasSuccessToday()` 둘 다 같은 손상 DB에서 예외 없이 각각 빈 목록/`false`를
+    반환함을 확인(정책대로 "이력 없음"으로 안전하게 간주).
+  - 손상된 DB 파일을 지운 뒤 재실행하면 정상적으로 재생성되어 저장이 다시 성공함도 함께 확인했다
+    (P11-2 완료 조건과 겹치는 부분이지만 오류 내성 관점에서 "손상 → 삭제 → 정상 복구"까지 한
+    흐름으로 검증됐다는 점을 여기 함께 기록한다).
+- **미검증 범위**: "DB 파일 잠금(다른 프로세스가 배타적으로 열어 둔 상태)"은 파일 손상과는 다른
+  경로라 별도로 재현을 시도하지 않았다 — SQLite는 파일 잠금 시 `SQLITE_BUSY`/`SQLITE_LOCKED`
+  오류를 반환하는데, 이 역시 `Microsoft.Data.Sqlite`가 `SqliteException`으로 던지고 위와 동일한
+  `try/catch` 경로로 흡수되므로(코드 경로가 손상 케이스와 동일) 실행 검증 없이 코드 검토로
+  갈음했다 — 무리하게 파일 잠금을 인위적으로 재현하지 않았다(다른 프로세스가 SQLite 파일을
+  독점 잠그려면 별도 프로세스 조율이 필요해 이번 범위에서는 시도하지 않음).
 
 ---
 

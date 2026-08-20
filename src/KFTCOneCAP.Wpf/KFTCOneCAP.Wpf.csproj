@@ -25,6 +25,15 @@
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!--
+      Phase 11(docs/payment_relay/development_plan.md P11-1): 무결성 체크 이력 저장(PRD §7)에 쓸
+      SQLite 클라이언트. Microsoft.Data.Sqlite를 우선 시도해 x86/net48에서 "열고 쿼리 한 번"까지
+      실제로 성공함을 확인했다(네이티브 e_sqlite3.dll이 출력 폴더 루트에 자동 복사되고, PE 헤더가
+      IMAGE_FILE_MACHINE_I386(x86)임을 실측 확인) — System.Data.SQLite.Core로 전환할 필요가
+      없었다. 버전 10.0.11은 nupkg가 net48을 명시적으로 지원하는 최신 버전(패키지 메타데이터가
+      .NET 10 트랙 번호를 쓸 뿐, TFM 자체는 net48을 포함한다).
+    -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>
