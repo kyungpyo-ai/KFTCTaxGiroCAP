@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using Microsoft.Data.Sqlite;
-using KFTCOneCAP.Wpf.Models;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 
 namespace KFTCOneCAP.Wpf.Services.Storage;
@@ -98,9 +97,11 @@ VALUES
     /// <summary>
     /// 리스트 표시용 조회(리더기 설정 화면 §4.6) — <paramref name="fromInclusive"/>일
     /// 00:00:00.000부터 <paramref name="toInclusive"/>일 23:59:59.999까지(날짜 경계 양쪽 포함),
-    /// 최신순으로 반환한다. 조회 실패 시 빈 목록을 반환한다(P11-4 — "이력 없음"으로 간주).
+    /// 최신순으로 반환한다. 조회 실패 시 빈 목록을 반환한다(P11-4 — "이력 없음"으로 간주). 원본
+    /// 값을 그대로 담은 DTO를 반환하며, 화면 표시용 서식·변환은 호출자(ViewModel) 책임이다
+    /// (계층 규칙, <see cref="IntegrityCheckHistoryEntry"/> 참고).
     /// </summary>
-    public List<IntegrityCheckRow> GetHistory(DateTime fromInclusive, DateTime toInclusive)
+    public List<IntegrityCheckHistoryEntry> GetHistory(DateTime fromInclusive, DateTime toInclusive)
     {
         try
         {
@@ -119,38 +120,32 @@ ORDER BY CheckedAtLocal DESC;";
             DateTime toExclusive = toInclusive.Date.AddDays(1);
             command.Parameters.AddWithValue("$toExclusive", toExclusive.ToString(TimestampFormat, CultureInfo.InvariantCulture));
 
-            var rows = new List<IntegrityCheckRow>();
+            var entries = new List<IntegrityCheckHistoryEntry>();
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
                 string checkedAtLocal = reader.GetString(0);
                 string comPort = reader.GetString(1);
                 bool isSuccess = reader.GetInt64(2) != 0;
-                string responseCode = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
-                string moduleId = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
-                string readerAuthId = reader.IsDBNull(5) ? string.Empty : reader.GetString(5);
+                string? responseCode = reader.IsDBNull(3) ? null : reader.GetString(3);
+                string? moduleId = reader.IsDBNull(4) ? null : reader.GetString(4);
+                string? readerAuthId = reader.IsDBNull(5) ? null : reader.GetString(5);
                 string posId = reader.GetString(6);
 
-                string checkTimeDisplay = DateTime.TryParseExact(
+                DateTime checkedAt = DateTime.TryParseExact(
                     checkedAtLocal, TimestampFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
-                    ? parsed.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture)
-                    : checkedAtLocal;
+                    ? parsed
+                    : DateTime.MinValue;
 
-                // IntegrityCheckRow.IsOk는 ResponseCode == "00"으로 판정한다(Models/IntegrityCheckRow.cs).
-                // 저장 시의 IsSuccess(업무 최종 판정)와 화면 표시용 칩 색상을 일치시키기 위해, 저장된
-                // 응답코드가 없는 실패 건(DLL 연동 실패 등)은 화면에서도 실패로 보이도록 "00"이 아닌
-                // 임의 코드로 채운다 — 실제 원본 코드가 있으면 그 값을 그대로 쓴다.
-                string displayResultCode = isSuccess ? "00" : (string.IsNullOrEmpty(responseCode) ? "FAIL" : responseCode);
-
-                rows.Add(new IntegrityCheckRow(checkTimeDisplay, comPort, displayResultCode, moduleId, readerAuthId, posId));
+                entries.Add(new IntegrityCheckHistoryEntry(checkedAt, comPort, isSuccess, responseCode, moduleId, readerAuthId, posId));
             }
 
-            return rows;
+            return entries;
         }
         catch (Exception ex)
         {
             FileLogger.Error($"무결성 체크 이력 조회 실패: {ex.GetType().Name} - {ex.Message}");
-            return new List<IntegrityCheckRow>();
+            return new List<IntegrityCheckHistoryEntry>();
         }
     }
 

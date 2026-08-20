@@ -929,17 +929,22 @@ CheckedAtLocal) — P11-3의 "금일·포트·성공" 조회용, `IX_IntegrityCh
   `%LOCALAPPDATA%\KFTCTaxGiroCAP\`에 `logs\`만 남고 DB 파일 잔여물 없음을 확인).
   - DB 디렉터리·파일이 최초 `Save()` 호출 시 자동 생성됨을 확인(`Directory.Exists`/`File.Exists`).
   - 7개 항목(체크일시/포트/결과/응답코드/모듈ID/리더기인증식별번호/POS식별번호)을 저장한 뒤
-    `GetHistory()`로 다시 읽어 `IntegrityCheckRow`의 각 프로퍼티(`CheckTime`/`Port`/`ResultCode`/
-    `ModuleId`/`ReaderId`/`PosId`)와 정확히 일치함을 확인(성공 케이스 1건 + 응답코드/모듈ID/
-    리더기ID가 모두 `null`인 실패 케이스 1건 양쪽 모두 저장 성공, `Save().Success == true`).
+    `GetHistory()`로 다시 읽어 각 프로퍼티(`CheckedAt`/`ComPort`/`IsSuccess`/`ResponseCode`/
+    `ModuleId`/`ReaderAuthId`/`PosId` — 검증 당시엔 `IntegrityCheckRow`, 이후 계층 규칙 위반 수정으로
+    `IntegrityCheckHistoryEntry`로 교체됐으나 필드 값 자체는 동일하게 왕복됨을 재확인함)와 정확히
+    일치함을 확인(성공 케이스 1건 + 응답코드/모듈ID/리더기ID가 모두 `null`인 실패 케이스 1건 양쪽
+    모두 저장 성공, `Save().Success == true`).
   - DB 파일을 `File.Delete()`로 지운 뒤(`SqliteConnection.ClearAllPools()`로 커넥션 풀을 먼저 비워
     파일 잠금 해제) 새 `IntegrityCheckStore` 인스턴스로 `Save()`를 호출 — 파일이 자동 재생성되고
     저장이 정상 성공함을 확인(P11-2 세 번째 완료 조건).
 
 ## P11-3. 조회 API 2종
 
-1. **리스트 표시용**(리더기 설정 화면 §4.6): 조회기간 필터, 최신순. `Models/IntegrityCheckRow`에 연결
-   (1차 범위에서 더미용으로 만들어 둔 모델을 재사용).
+1. **리스트 표시용**(리더기 설정 화면 §4.6): 조회기간 필터, 최신순. `Services/Storage/IntegrityCheckHistoryEntry`
+   (순수 DTO, 신규)로 반환한다 — **`Models/IntegrityCheckRow`에 직접 연결하지 않는다.** 그 모델은
+   `System.Windows.Media.Brush`/`Application.Current.Resources`를 참조하는 화면 표시용 타입이라, Storage가
+   그걸 반환하면 계층 규칙(ROADMAP.md "계층 구조" — Services는 WPF 타입을 모른다)이 깨진다. `IntegrityCheckRow`로의
+   변환(시각 서식, 결과 코드 표시값)은 이 값을 쓰는 ViewModel(Phase 12)의 책임이다.
 2. **금일·동일 COM Port 성공 이력 존재 여부**(결제 선행 판정, PRD §4.2): 리더기 2대를 쓰므로 **포트별로**
    물을 수 있어야 한다.
 
@@ -952,10 +957,29 @@ CheckedAtLocal) — P11-3의 "금일·포트·성공" 조회용, `IX_IntegrityCh
 - [x] 포트가 다르면 서로 영향 없음(`COM1` 성공이 `COM2` 판정에 영향 없음)
 
 **완료 결과(2026-08-20)**: `IntegrityCheckStore.GetHistory(DateTime fromInclusive, DateTime
-toInclusive)`(리스트 표시용, 최신순)와 `HasSuccessToday(string comPort)`(결제 선행 판정용, PRD
-§4.2) 2종을 구현했다. `Models/IntegrityCheckRow`(1차 범위 더미 모델)를 그대로 재사용해 실제 조회
-결과를 연결했다 — `ReaderSetupViewModel`의 `IntegrityRows`/`BuildDummyRows` 배선 교체는 화면
-작업인 Phase 12 몫이라 이번 Phase에서는 손대지 않았다.
+toInclusive)`(리스트 표시용, 최신순, `List<IntegrityCheckHistoryEntry>` 반환)와
+`HasSuccessToday(string comPort)`(결제 선행 판정용, PRD §4.2) 2종을 구현했다.
+`ReaderSetupViewModel`의 `IntegrityRows`/`BuildDummyRows` 배선 교체는 화면 작업인 Phase 12 몫이라
+이번 Phase에서는 손대지 않았다.
+
+**수정(2026-08-20, Phase 11~ 코드 검토에서 발견 후 즉시 수정)**: 처음 구현에서는 `GetHistory`가
+`Models/IntegrityCheckRow`(1차 범위 더미 모델)를 직접 반환했다. 그런데 이 모델은
+`System.Windows.Media.Brush`/`Application.Current.Resources`를 참조하는 화면 바인딩용 타입이라
+`Services`가 WPF 타입을 모른다는 계층 규칙(공통 규칙 5)이 반환 타입을 통해 우회적으로 깨지고
+있었다 — `Application.Current`가 없는 컨텍스트(콘솔 하네스, Phase 15 결제 워커 스레드)에서
+`ResultBackground`/`ResultForeground`를 평가하면 `NullReferenceException`이 날 수 있는 실질적
+위험도 있었다. 또한 `GetHistory` 안에서 시각을 `"yyyyMMddHHmmss"`로 포맷하고 실패 건에 `"FAIL"`
+매직 문자열을 채우는 등 **표시 서식이 Storage 계층에 새어 들어와 있었다.** `IntegrityCheckStore`가
+아직 아무 데서도 호출되지 않아(배선은 Phase 12) 고치는 비용이 가장 쌀 때 바로잡았다 —
+`Services/Storage/IntegrityCheckHistoryEntry`(순수 DTO, 원본 DB 값을 서식 없이 그대로 담음)를
+새로 만들고 `GetHistory`가 이걸 반환하도록 변경, 시각 서식/표시 코드값 매핑 로직은 전부 제거했다.
+`IntegrityCheckHistoryEntry → IntegrityCheckRow` 변환은 Phase 12에서 ViewModel이 담당한다. 이
+변경 후 `dotnet build` 경고 0/오류 0, `Services/` 전체에 `System.Windows` `using`이 없음을
+재확인했다. **재검증**: 새 DTO 타입으로 실제 배포 경로(`%LOCALAPPDATA%\KFTCTaxGiroCAP\`)에 대해
+Save→GetHistory→HasSuccessToday 왕복 하네스를 다시 실행(기존 파일 백업 후 실행, `finally`로 원상
+복구) — 성공/실패 각 1건 저장 후 `GetHistory`가 `IntegrityCheckHistoryEntry` 2건을 최신순으로
+정확히 반환하고 각 필드(`CheckedAt`/`ComPort`/`IsSuccess`/`ResponseCode`/`ModuleId`/`ReaderAuthId`/
+`PosId`)가 저장값과 일치, `HasSuccessToday`도 포트별로 기존과 동일하게 판정됨을 재확인했다.
 - `GetHistory`는 `fromInclusive.Date`(00:00:00.000)부터 `toInclusive.Date.AddDays(1)`(다음 날
   00:00:00.000) **미만**으로 조회해, 종료일 23:59:59.999를 리터럴로 계산하는 대신 배타적 상한으로
   경계 실수를 줄였다. `HasSuccessToday`도 같은 방식(`DateTime.Now.Date` ~ `AddDays(1)` 미만)으로

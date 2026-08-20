@@ -101,22 +101,30 @@ src/KFTCOneCAP.Wpf/
 > interop), DWM 타이틀바, 창 워밍업 등 **본질적으로 View/OS 책임**이라 옮길 것이 적다 — 무리하게 전부
 > ViewModel로 밀어 넣지 않는다(형식만 MVVM이고 실속이 없는 구조가 된다).
 
-- [ ] `ViewModels/` 폴더 신설 및 ViewModel ↔ View 연결 방식 확정(`DataContext` 설정 위치를 한 가지로 통일)
-- [ ] `ReaderSetupViewModel` — 레지스트리 로드/저장, dirty-check, COM 콤보 선택 상태, "미사용" 연동에 따른
+- [x] `ViewModels/` 폴더 신설 및 ViewModel ↔ View 연결 방식 확정(`DataContext` 설정 위치를 한 가지로 통일)
+- [x] `ReaderSetupViewModel` — 레지스트리 로드/저장, dirty-check, COM 콤보 선택 상태, "미사용" 연동에 따른
       활성/비활성, busy 상태(동시 1작업 제한), 조회 결과 컬렉션을 ViewModel로 이관
-- [ ] 코드비하인드의 **`x:Name` 직접 조작을 바인딩으로 교체** — `IsEnabled`/`Visibility`/`Content`를 코드에서
+- [x] 코드비하인드의 **`x:Name` 직접 조작을 바인딩으로 교체** — `IsEnabled`/`Visibility`/`Content`를 코드에서
       대입하지 않는다. 남는 것은 View 고유 관심사(Popup 배치, ScrollViewer 정렬 보정 등)뿐이어야 한다
-- [ ] `HomeWindow` — 카드 클릭 등 "무엇을 할지"만 ViewModel(Command)로 옮기고, 트레이/DWM/워밍업은
+- [x] `HomeWindow` — 카드 클릭 등 "무엇을 할지"만 ViewModel(Command)로 옮기고, 트레이/DWM/워밍업은
       **코드비하인드에 그대로 남긴다**(그 판단 근거를 주석으로 남긴다)
-- [ ] 레지스트리 접근을 `Services/Settings/`(가칭)로 분리 — Phase 9 이후 결제 Flow도 같은 값(COM 포트)을
+- [x] 레지스트리 접근을 `Services/Settings/`(가칭)로 분리 — Phase 9 이후 결제 Flow도 같은 값(COM 포트)을
       읽어야 하므로(PRD §2.2.1), ViewModel 안에 레지스트리 코드를 두면 재사용이 불가능하다
-- [ ] 액션 버튼 5종/조회의 3초·2초 **스텁 동작은 그대로 유지**한다 — 실통신 교체는 Phase 12 몫이며, 이번
+- [x] 액션 버튼 5종/조회의 3초·2초 **스텁 동작은 그대로 유지**한다 — 실통신 교체는 Phase 12 몫이며, 이번
       Phase에서 같이 건드리면 회귀 원인을 구분할 수 없다
 
 **완료 기준**: 두 화면의 **모든 기존 동작이 1차 범위와 동일**함을 실행으로 확인한다(콤보 "미사용" 연동,
 버튼 로딩 스텁, 조회 더미 행 수, 레지스트리 저장/로드, 취소 dirty-check 확인창, 트레이 최소화/복원).
 `ReaderSetupWindow.xaml.cs`에 업무 로직이 남아 있지 않고, 코드비하인드에서 `x:Name` 요소의 상태를 직접
 대입하는 코드가 없다.
+
+> **완료 결과**: Task 단위 상세 완료 조건·검증 내역은 `development_plan.md` P7-1~P7-5에 기록돼 있다(트레이
+> 아이콘 더블클릭 복원·우클릭 메뉴는 접근성 트리 한계로 자동화 검증 불가 — 해당 코드는 이 Phase에서
+> 무수정이라 회귀 위험 낮음, P7-4/P7-5 참고). 이 섹션의 체크박스는 2026-08-20 코드 재검토에서 실제
+> 코드(`grep`으로 `.Visibility =`/`.IsEnabled =`/`.Content =`/`.ItemsSource =` 직접 대입 없음, `Views/`에
+> 레지스트리 경로 없음, `ViewModels/`에 WinForms/`Window` 타입 참조 없음, `ReaderSetupWindow.xaml.cs`가
+> 416줄→165줄로 축소되고 남은 코드가 전부 View/OS 책임임을 확인)를 대조해 뒤늦게 갱신한 것이다 — 구현은
+> 이보다 먼저 완료돼 있었고 이 문서만 갱신이 누락돼 있었다.
 
 ---
 
