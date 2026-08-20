@@ -3,6 +3,8 @@ using System.IO;
 using System.Reflection;
 using System.Windows;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
+using KFTCOneCAP.Wpf.Services.Reader;
+using KFTCOneCAP.Wpf.Services.Settings;
 
 namespace KFTCOneCAP.Wpf;
 
@@ -16,6 +18,14 @@ public partial class App : Application
     /// docs/home_reader_setup/ROADMAP.md Phase 6 참고.
     /// </summary>
     private const double CompactHeightThreshold = 800.0;
+
+    /// <summary>
+    /// Phase 12(docs/payment_relay/development_plan.md P12-1) — 리더기1/2 포트의 앱 수명 소유자.
+    /// 이 정적 프로퍼티가 유일한 접근점이다(DI 컨테이너를 도입하지 않는 이유는
+    /// <see cref="ReaderConnectionManager"/> 클래스 주석 참고). <c>Views/ReaderSetupWindow.xaml.cs</c>가
+    /// <c>ReaderSetupViewModel</c> 생성 시 이 값을 전달만 하고, ViewModel은 이 매니저를 생성하지 않는다.
+    /// </summary>
+    internal static ReaderConnectionManager? ReaderConnections { get; private set; }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -54,6 +64,21 @@ public partial class App : Application
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("Themes/ToggleSwitch.xaml", UriKind.Relative) });
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("Themes/TextBox.xaml", UriKind.Relative) });
 
+        // Phase 12(P12-1): 리더기 설정 화면이 열리기 전에도 레지스트리에 설정된 포트를 앱 기동 시
+        // 미리 연다(PRD §2.2.2 "항상 열어둔다"). 열기 실패해도 여기서 모달을 띄우지 않는다 — 이
+        // 앱은 트레이 상주로 자동 최소화 기동하므로(원본 동작), 기동 직후 모달은 사용자가 보지도
+        // 못한 채 포커스만 뺏는다. 실패한 포트는 다음 명령 시 SendCommandSafe(P10-3)가 자동으로
+        // 재오픈을 시도한다.
+        ReaderConnections = new ReaderConnectionManager(new ReaderSettingsService());
+        ReaderConnections.InitializeFromSettings();
+
         base.OnStartup(e);
+    }
+
+    /// <summary>Phase 12(P12-1) — 앱 종료 시 열린 포트를 정리한다(PRD §9 리소스 정리).</summary>
+    protected override void OnExit(ExitEventArgs e)
+    {
+        ReaderConnections?.CloseAll();
+        base.OnExit(e);
     }
 }

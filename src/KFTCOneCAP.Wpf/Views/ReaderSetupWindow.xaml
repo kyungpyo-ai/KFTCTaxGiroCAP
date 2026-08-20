@@ -11,7 +11,8 @@
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource DialogBgBrush}"
-        Loaded="ReaderSetupWindow_Loaded">
+        Loaded="ReaderSetupWindow_Loaded"
+        Closing="ReaderSetupWindow_Closing">
     <Window.Resources>
         <!--
             Phase 7(development_plan.md P7-3): 무결성 리스트/빈 상태/로딩 문구 세 Visibility를
@@ -145,12 +146,15 @@
                                         레지스트리 값(있으면 그 값, 없으면 "미사용")으로 명시적으로
                                         선택한다.
                                     -->
+                                    <!--
+                                        2026-08-20 수정(Phase 12, development_plan.md P12-2): 실제
+                                        열거된 COM 포트를 보여줘야 해서 ComboBoxItem 하드코딩을
+                                        ItemsSource 바인딩으로 교체했다(ViewModel.AvailablePorts).
+                                    -->
                                     <ComboBox x:Name="Reader1PortCombo" Width="{StaticResource ReaderComboWidth}" Margin="0,8,0,0"
                                               IsEnabled="{Binding GlobalEnabled}"
-                                              SelectedValuePath="Content" SelectedValue="{Binding Reader1PortSelection, Mode=TwoWay}">
-                                        <ComboBoxItem Content="COM 01"/>
-                                        <ComboBoxItem Content="미사용"/>
-                                    </ComboBox>
+                                              ItemsSource="{Binding AvailablePorts}"
+                                              SelectedItem="{Binding Reader1PortSelection, Mode=TwoWay}"/>
                                 </StackPanel>
 
                                 <!--
@@ -236,13 +240,11 @@
 
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="리더기2 - COM 포트" Style="{StaticResource ReaderLabelTextStyle}"/>
-                                    <!-- 2026-08-14 수정: 위 Reader1PortCombo와 동일 사유로 SelectedIndex 하드코딩 제거. -->
+                                    <!-- 2026-08-20 수정(Phase 12, P12-2): 위 Reader1PortCombo와 동일 사유로 ComboBoxItem 하드코딩 제거. -->
                                     <ComboBox x:Name="Reader2PortCombo" Width="{StaticResource ReaderComboWidth}" Margin="0,8,0,0"
                                               IsEnabled="{Binding GlobalEnabled}"
-                                              SelectedValuePath="Content" SelectedValue="{Binding Reader2PortSelection, Mode=TwoWay}">
-                                        <ComboBoxItem Content="미사용"/>
-                                        <ComboBoxItem Content="COM 01"/>
-                                    </ComboBox>
+                                              ItemsSource="{Binding AvailablePorts}"
+                                              SelectedItem="{Binding Reader2PortSelection, Mode=TwoWay}"/>
                                 </StackPanel>
 
                                 <!-- 리더기2는 "포트 열기" 토글 자체가 UI에 없음(PRD 4.4, 원본 사양) -->
@@ -334,13 +336,20 @@
                                     CornerRadius="8,8,0,0"
                                     SnapsToDevicePixels="True">
                                 <Grid>
+                                    <!--
+                                        2026-08-20 사용자 확정 — 체크일시(실데이터 14자, 예:
+                                        "20260820142537")는 여유가 있어 폭을 줄이고, POS식별번호
+                                        (실데이터 17자 "KFTCTAXGIROCAP01")는 여유가 없어 폭을 늘렸다.
+                                        본문 ItemsControl의 ColumnDefinitions(아래)와 반드시 같은
+                                        값을 유지해야 헤더-데이터 컬럼이 어긋나지 않는다.
+                                    -->
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="23*"/>
+                                        <ColumnDefinition Width="19*"/>
                                         <ColumnDefinition Width="12*"/>
                                         <ColumnDefinition Width="10*"/>
                                         <ColumnDefinition Width="16*"/>
                                         <ColumnDefinition Width="21*"/>
-                                        <ColumnDefinition Width="18*"/>
+                                        <ColumnDefinition Width="22*"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="체크일시" Style="{StaticResource ReaderTableHeaderTextStyle}" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"/>
                                     <Border Grid.Column="0" Width="1" Height="14" Background="{StaticResource TblHdrLineBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" SnapsToDevicePixels="True"/>
@@ -389,13 +398,14 @@
                                                             </Style>
                                                         </Border.Style>
                                                         <Grid Height="36">
+                                                            <!-- 헤더 Grid.ColumnDefinitions(위)와 반드시 동일한 값 -->
                                                             <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="23*"/>
+                                                                <ColumnDefinition Width="19*"/>
                                                                 <ColumnDefinition Width="12*"/>
                                                                 <ColumnDefinition Width="10*"/>
                                                                 <ColumnDefinition Width="16*"/>
                                                                 <ColumnDefinition Width="21*"/>
-                                                                <ColumnDefinition Width="18*"/>
+                                                                <ColumnDefinition Width="22*"/>
                                                             </Grid.ColumnDefinitions>
                                                             <TextBlock Grid.Column="0" Text="{Binding CheckTime}"
                                                                        Style="{StaticResource ReaderTableCellTextStyle}"

@@ -1,10 +1,11 @@
-# 실행계획서: 결제 중계 기능 (Phase 7~11)
+# 실행계획서: 결제 중계 기능 (Phase 7~12)
 
 > `PRD.md`(무엇을) → `ROADMAP.md`(어떤 순서로) → **이 문서(Task 단위로 무엇을 어떻게, 어디까지 하면 끝인지)**.
 > 실제 코드 작성은 이 문서의 Task를 순서대로 따라간다.
 >
-> **Phase 12~18은 아직 작성하지 않았다** — Phase 9에서 실장비 연동 결과에 따라 뒤쪽 계획이 조정될 여지가
-> 있어, 앞 구간을 끝낸 뒤 이어서 작성한다(2026-08-19 사용자 확정).
+> **Phase 13~18은 아직 작성하지 않았다** — 앞 Phase의 실장비 검증 결과에 따라 뒤쪽 계획이 조정될 여지가
+> 커서, **Phase 12부터는 한 Phase씩 착수 직전에 작성**한다(2026-08-20 사용자 확정 — Phase 7~11처럼
+> 여러 Phase를 미리 써두면 앞 결과에 따라 다시 고쳐야 할 계획이 생긴다).
 
 ## 공통 규칙
 
@@ -1043,11 +1044,555 @@ Save→GetHistory→HasSuccessToday 왕복 하네스를 다시 실행(기존 파
 
 ---
 
-## Phase 7~11 완료 후
+# Phase 12 — 리더기 설정 화면 실동작 배선
 
-Phase 9의 실장비 검증 결과와 P11-1의 SQLite 선택 결과를 반영해 **Phase 12~18 실행계획서를 이어서 작성**한다.
-이 시점에 다음이 확정되어 있어야 한다.
+**이 Phase가 끝나면**: 사람이 리더기 설정 화면에서 직접 버튼을 눌러 실제 하드웨어를 제어할 수 있고,
+무결성 체크 결과가 DB에 남아 화면 리스트에 보인다. **이 프로젝트에서 처음으로 "화면 → 실장비" 전체
+경로가 눈에 보이는 Phase**이며, Phase 15 결제 Flow가 쓸 포트 생명주기·무결성 체크 흐름도 여기서 확정된다.
 
-- `KFTC_GIRO.dll` 로드 가능 여부(P8-4) — 실패했다면 Phase 17 전에 환경 문제 해결 필요
-- 실장비 리더기 대수(1대/2대) — 이중화 검증 범위 결정
-- `0x71` 파싱 결과(리더기 인증 식별번호/모듈 ID 필드 구조) — Phase 12 화면 출력에 필요
+> **왜 결제 Flow(Phase 14~)보다 먼저인가**: 결제 Flow는 화면이 없어 동작을 눈으로 확인할 수 없다.
+> 이 Phase에서 "포트 열기 → 명령 전송 → 응답 파싱 → 화면 표시 → DB 저장"이 사람 손으로 검증되면,
+> 뒤쪽 Phase에서 문제가 생겼을 때 **리더기 계층은 이미 검증됐다는 전제**로 범위를 좁힐 수 있다.
+
+> **이 Phase의 가장 큰 설계 결정은 P12-1(포트 소유자)이다.** 나머지 Task는 그 위에 얹히므로 순서를
+> 바꾸지 않는다.
+
+## 이 Phase에서 손대지 않는 것 (범위 밖 확정)
+
+착수 전에 못 박는다 — 아래는 "잊어버린 것"이 아니라 **의도적으로 제외**한 것이다(PRD §6, ROADMAP Phase 12).
+
+- **포트 열기 토글**(`PRD_WPF.md` §4.8) — 기능 자체를 되살리지 않는다. PRD §2.2.2대로 "항상 열어둔다"로
+  확정됐고 UI에서도 제거된 상태(`Visibility="Hidden"`)다. 자리만 남은 요소를 건드리지 않는다.
+- **AOP 제약**(§4.11), **TRANSINFO_AOP 검증**(§4.12) — 2026-08-18 제외 확정.
+- **멀티패드 토글**(§4.9) — 1차 범위대로 값을 레지스트리에 저장만 하고, **이번 DLL 연동에서 그 값을 읽어
+  쓰지 않는다**(2026-08-19 확정 — QR 기능인지 포트 공유인지 개념 미확정, PRD에 요구사항 없음).
+- **키다운로드/업데이트 버튼** — 버튼만 유지, 동작은 PRD §11 추후 구현. **기존 3초 스텁을 그대로 둔다**
+  (실통신으로 바꾸지 않는다).
+- **핀패드 연동** — `Pinpad_*` API는 선언만 있고 이번 범위에서 호출하지 않는다(PRD §10).
+
+## P12-1. 포트 생명주기 소유자 신설 (`ReaderConnectionManager`)
+
+**이 Task가 이번 Phase의 핵심이다.** 현재 `ReaderService` 인스턴스가 `ReaderSetupViewModel`의 필드
+(`_reader1Service`)로 들어 있는데, 이 구조로는 PRD §2.2.2를 만족할 수 없다.
+
+- 리더기 설정 화면은 **열렸다 닫혔다** 하고 그때마다 ViewModel이 새로 생성된다 → 포트가 화면 수명에
+  묶여버려 "항상 열어둔다"가 성립하지 않는다.
+- Phase 15 결제 Flow는 **화면 없이** 같은 포트를 써야 한다(PRD §4.3 카드 리딩) → ViewModel이 소유하면
+  결제 Flow가 접근할 방법이 없다.
+- PRD §2.2.2가 "포트를 닫는 경우는 **하나뿐**"이라고 못 박았는데, 소유자가 흩어져 있으면 이 규칙을
+  강제할 지점이 없다.
+
+따라서 **앱 수명과 같이 사는 단일 소유자**를 만든다.
+
+- 위치: `Services/Reader/ReaderConnectionManager.cs`(계층 규칙상 `Services/Reader/`, WPF 타입 금지).
+- 리더기1/2의 `ReaderService` 인스턴스 **2개를 소유**하고, 외부에는 "리더기1/리더기2"라는 논리적 이름으로
+  노출한다. `ReaderService`는 Phase 10에서 **포트별 인스턴스**로 설계됐으므로 그 전제를 그대로 잇는다.
+- **앱 기동 시** 레지스트리(`ReaderSettingsService`) 값을 읽어 설정된 포트를 연다. `"미사용"`이면 열지
+  않는다. baudRate는 **`115200` 고정**(PRD §2.2.1).
+- **열기 실패해도 앱은 정상 기동한다**(PRD §2.2.2/§9) — 실패는 `FileLogger`에만 남기고 **기동 시점에
+  모달을 띄우지 않는다**. 이 앱은 트레이 상주로 자동 최소화 기동하므로(원본 동작), 기동 직후 모달을
+  띄우면 사용자가 보지도 못한 창이 포커스를 뺏는다. 실패한 포트는 다음 명령 시
+  `SendCommandSafe`(P10-3)의 `readerId` 없음 경로가 자동으로 다시 열기를 시도한다.
+- **포트를 닫는 유일한 지점**: COM 포트 콤보 변경 저장 시(P12-2/P12-3). 이 클래스에 `ReopenAsync`류
+  메서드 하나만 두고, **다른 어떤 코드도 `ClosePort`를 직접 부르지 않는다**(그 규칙을 클래스 주석에 남긴다).
+- 앱 종료 시 정리(포트 닫기)는 여기서 함께 책임진다(PRD §9 리소스 정리).
+- 소유/생성 지점: `App.xaml.cs`(앱 수명주기). ViewModel은 **생성하지 않고 참조만** 한다.
+
+> **DI 컨테이너를 도입하지 않는다.** 이 앱에서 앱 수명 싱글턴이 필요한 것은 현재 이것 하나뿐이고,
+> 컨테이너를 넣으면 Phase 13~17에서 등록/해석 코드가 계속 늘어난다. `App` 정적 프로퍼티(또는 그에
+> 준하는 단순한 접근점) 하나로 충분하다 — 나중에 대상이 3~4개로 늘면 그때 재검토한다(그 판단 근거를
+> 주석에 남긴다).
+
+**완료 조건**
+- [x] `ReaderService` 인스턴스가 `ReaderSetupViewModel` 필드에서 사라지고, 앱 수명 소유자로 옮겨짐
+- [x] 앱 기동 시 설정된 포트가 열리고 그 결과(성공/실패+사유)가 로그에 남음
+- [x] 리더기가 없는 포트/`"미사용"` 설정에서도 앱이 정상 기동하고 모달이 뜨지 않음
+- [x] 리더기 설정 화면을 **열고 닫아도 포트가 닫히지 않음**(로그로 확인 — 창 닫기 후 명령이 그대로 성공)
+- [x] `ClosePort` 호출 지점이 이 클래스 안 1곳뿐임(grep으로 확인)
+
+**완료 결과(2026-08-20)**: `Services/Reader/ReaderConnectionManager.cs`를 신설하고 `App.xaml.cs`
+`OnStartup`에서 `App.ReaderConnections`(internal static) 하나로 생성 — `ReaderSetupViewModel`의
+`_reader1Service` 필드(Phase 9 파일럿)를 제거하고 생성자로 `ReaderConnectionManager`를 전달받아
+참조만 하도록 바꿨다(`Views/ReaderSetupWindow.xaml.cs`가 `new ReaderSetupViewModel(App.ReaderConnections!)`).
+- **앱 기동 시 자동 오픈 확인**: 로그
+  `[리더기1] COM1 열기 성공(readerId=0)` / `[리더기2] 포트 미설정('미사용') — 열지 않음`(레지스트리
+  Port1="COM 01", Port2="미사용" 상태에서 기동) — 모달 없이 홈 화면이 바로 뜸을 `mcp__windows__*`
+  스냅샷으로 확인.
+- **창 열고 닫아도 포트 유지**: 리더기 설정 화면을 열어 초기화/상태체크/무결성체크 3버튼을 누른 뒤
+  화면을 닫고 다시 열어 재차 명령을 성공시켰다 — 그 사이 로그에 포트 닫기/열기 라인이 전혀 없음을
+  확인(아래 P12-6 로그 발췌 참고).
+- **`ClosePort` 호출 지점 grep**: `grep -rn "\.ClosePort\(" src` 결과
+  `Services/Reader/ReaderConnectionManager.cs`의 `ClosePortIfOpen` 메서드 1곳뿐(`Reopen`/`CloseAll`
+  둘 다 이 메서드를 거쳐 간접 호출).
+- **앱 종료 시 정리**: 홈 화면 "프로그램 종료" 클릭 → 로그에
+  `[리더기1] 포트 닫기 성공` / `[리더기2] 포트 닫기 성공` 순서로 기록되고 프로세스가 정상 종료됨을
+  `tasklist`로 확인.
+
+**수정(2026-08-20, 사용자 수동 테스트 후 확정)**: 처음 구현은 콤보 변경 시점과 포트 닫기 시점을 모두
+"확인(저장) 버튼 클릭"에 묶어 뒀다. 사용자가 실제로 화면을 조작해보고 "레지스트리 저장은 확인을 누를 때만
+하는 게 맞지만, 창 안에서 콤보 선택 자체를 바꾸는 즉시 기존 포트를 닫아 포트 변경을 준비해야 한다"고
+확정했다 — 확인/취소는 **레지스트리에 반영할지**만 정하는 시점이고, 포트 점유 여부는 콤보 변경에 바로
+반응해야 한다는 것이 사용자 의도다(새 포트를 여는 것은 여전히 확인 시점에만 한다 — 저장 전에 취소될 수
+있는 선택을 미리 점유하지 않기 위해). `ReaderConnectionManager`에 `ClosePortForPendingChange(service,
+label)`를 추가했다(기존 `ClosePortIfOpen` 하나만 거치므로 "ClosePort 호출 지점 1곳" 규칙은 그대로
+유지됨). `ReaderSetupViewModel`의 `OnReader1/2PortSelectionChanged`에서 이걸 호출하되, `Load()`가
+레지스트리 값을 콤보에 최초 반영할 때는 "사용자가 바꾼 것"이 아니므로 `_isLoadingPortSelection` 플래그로
+막아 화면을 열자마자 이미 열려 있는 포트가 닫히는 사고를 방지했다. `dotnet build` 경고 0/오류 0 확인.
+
+**수정(2026-08-20, 후속 — 액션 버튼/취소 시 연결 정합성)**: 위 문단에서 "취소 시 포트 복구 로직은
+의도적으로 넣지 않았다"고 적었으나, 이어진 사용자 확인 과정에서 그 판단이 뒤집혔다 — 아래 3가지가
+추가/변경됐다(전부 실장비 COM5/COM3로 재검증 완료).
+
+1. **액션 버튼이 "화면에 선택된 콤보 값"으로 연결해서 실행**해야 한다는 요구사항이 나왔다 — 콤보만
+   바꾸고 아직 저장 전인 상태에서 초기화 버튼을 누르면, 그때까지는 `ReaderService`가 옛 포트 번호를
+   기억하고 있어 **화면엔 새 포트가 보이는데 실제로는 옛 포트에 명령이 나가는** 불일치가 있었다.
+   `ReaderConnectionManager.EnsureOpenForSelection(service, label, portDisplay)`를 추가해 해결했다 —
+   이미 원하는 포트에 연결돼 있으면 아무 것도 안 하고(불필요한 재연결 방지), 아니면 `Reopen`으로
+   전환한다. `ExecuteInitAsync`/`ExecuteStatusAsync`/`ExecuteIntegrityAsync`(P12-3/P12-4) 전부 명령
+   전송 직전에 이걸 호출하도록 바꿨다.
+2. **취소 시 포트를 스냅샷(레지스트리) 값으로 복원**하는 `ReaderSetupViewModel.DiscardPortChanges()`를
+   추가했다 — 액션 버튼으로 저장 전 포트에 실제 연결해 봤을 수 있기 때문에, 단순히 "닫기"만 하면
+   `ReaderService`가 기억하는 포트 번호가 테스트했던 값으로 남아 나중에 자동 재연결(P10-3)이 레지스트리
+   값이 아닌 그 값으로 시도하는 불일치가 생긴다 — 그래서 "닫기"가 아니라 "스냅샷 포트로 재오픈"이다.
+   `Views/ReaderSetupWindow.xaml.cs`의 `CancelButton_Click`에서 dirty-check 확인창을 통과한 직후 호출한다.
+   스냅샷 포트가 죽어 있어도 예외 없이 조용히 로그만 남긴다(PRD §2.2.2와 동일 원칙).
+3. **`EnsureOpenForSelection`을 "미사용" 케이스까지 처리하도록 확장**하고, `ReaderSetupViewModel.Save()`/
+   `DiscardPortChanges()` 둘 다 각자 스냅샷 비교 로직을 두는 대신 이 메서드 하나로 통일했다 — "이미
+   액션 버튼으로 올바른 포트에 연결된 상태에서 확인을 누르면 다시 열 필요가 있나?"라는 질문에서
+   발견된 중복 재오픈(로그에 불필요한 닫기/열기가 한 번 더 남는 문제)을 없앴다.
+
+**검증**(전부 `mcp__windows__*`로 코디네이터가 직접 실장비 COM5/COM3 대상 실행, 로그·레지스트리 값
+실측): (A) 콤보 안 바꾸고 버튼 클릭 → 재연결 로그 없이 즉시 성공. (B) 콤보 변경 즉시
+`[리더기1] 포트 닫기 성공` 로그. (C) 미저장 상태에서 버튼 클릭 → 실제로 새로 선택한 포트로 연결
+(`COM3 열기 성공` 로그, 화면 표시와 실제 통신 대상 일치 확인). (D) 취소 확정 → 스냅샷 포트로 재오픈
+(닫기+열기 로그), 창을 다시 열어도 레지스트리가 안 바뀌어 있음을 재확인. (E) 이미 올바르게 연결된
+상태에서 확인 클릭 → 로그 추가 없음(중복 재오픈 제거 확인), 레지스트리엔 정상 저장. `dotnet build`
+경고 0/오류 0.
+
+## P12-2. 실제 COM 포트 열거 + **포트 문자열 단일 형식 규칙**
+
+`PRD_WPF.md` §4.13의 1차 보류 항목을 해소한다. 단순해 보이지만 **형식 불일치가 조용한 버그를 만드는
+지점**이라 규칙을 먼저 정하고 시작한다.
+
+- 열거: `System.IO.Ports.SerialPort.GetPortNames()` → `"COM5"`, `"COM11"` 같은 형식으로 돌아온다.
+- 콤보 표시/레지스트리 저장 형식은 1차 범위 그대로 **`"COM %02d"`**(예: `"COM 05"`, 공백 포함 2자리)다.
+  첫 항목은 항상 `"미사용"`, 이후 **번호 오름차순** 정렬.
+- 저장된 포트가 열거 목록에 없으면 `"COM 05(사용불가)"` 형태로 **목록에 추가해 선택 상태를 유지**한다
+  (조용히 `"미사용"`으로 바꿔버리지 않는다 — 리더기가 잠깐 빠졌을 때 설정이 날아가면 안 된다).
+
+> **⚠️ 포트 문자열 형식 규칙(이번 Phase에서 확정, 이후 Phase가 의존한다)**
+>
+> 같은 포트를 가리키는 표현이 최소 3가지다 — 콤보/레지스트리 표시 문자열(`"COM 05"`),
+> `GetPortNames()` 반환값(`"COM5"`), `Reader_OpenPort`의 `portNumber`(정수 `5`). 여기에 **Phase 11
+> DB의 `ComPort` 컬럼**이 더해진다(`IntegrityCheckStore.HasSuccessToday(comPort)`는 **문자열 완전
+> 일치**로 조회한다 — Phase 11 리뷰에서 지적된 지점).
+>
+> 형식이 어긋나면 **에러 없이 조용히** 금일 성공 이력을 못 찾아 매 결제마다 무결성 체크가 반복된다.
+> 따라서:
+> - **DB에 저장·조회하는 `ComPort` 값은 콤보 표시 문자열(`"COM 05"`)로 통일**한다. 저장(P12-4)과
+>   조회(P12-5, Phase 15) 양쪽이 같은 소스에서 값을 얻어야 한다.
+> - 표시 문자열 ↔ 정수 변환은 **한 곳에만** 둔다(현재 `ReaderSetupViewModel.ExtractPortNumber`가
+>   private static으로 있으나, P12-1의 소유자와 ViewModel 양쪽이 써야 하므로 공용 위치로 옮긴다).
+>   변환 유틸의 위치·이름은 구현자가 정하되 **중복 구현을 만들지 않는다**.
+> - `"(사용불가)"` 접미가 붙은 값을 정수 변환/DB 저장에 그대로 흘리지 않는다.
+- 기존 하드코딩 제거: XAML의 `<ComboBoxItem Content="COM 01"/>`/`"미사용"` 정적 항목과
+  `ReaderSetupViewModel.NormalizePortSelection`의 `"COM 01"` 하드코딩(P7 당시 스텁)을 걷어내고
+  **`ItemsSource` 바인딩**으로 바꾼다(P7-3에서 세운 "코드비하인드가 `ItemsSource`를 대입하지 않는다"
+  규칙을 그대로 지킨다 — ViewModel의 컬렉션에 바인딩).
+
+**완료 조건**
+- [x] 실제 연결된 포트가 콤보에 `"COM %02d"` 형식으로 나오고, 첫 항목이 `"미사용"`
+- [x] 저장된 포트가 목록에 없을 때 `"(사용불가)"`가 붙어 선택이 유지됨
+- [x] 표시 문자열 → 정수 변환 코드가 저장소에 **1곳만** 존재(grep으로 확인)
+- [x] XAML에 COM 포트 `ComboBoxItem` 하드코딩이 남아 있지 않음
+
+**완료 결과(2026-08-20)**: `Services/Reader/ComPortFormat.cs`를 신설해 표시 문자열(`"COM 05"`)
+↔ 정수(`ToPortNumber`, `ParseSystemPortName`) ↔ "(사용불가)" 표시(`ToUnavailableDisplay`/
+`StripUnavailableSuffix`) 변환을 이 한 곳에 모았다. `ReaderSetupViewModel.RebuildAvailablePorts`가
+`SerialPort.GetPortNames()`로 실제 열거해 `AvailablePorts`(ObservableCollection&lt;string&gt;)를
+채우고, `Views/ReaderSetupWindow.xaml`의 두 콤보(`Reader1PortCombo`/`Reader2PortCombo`)는
+`ComboBoxItem` 하드코딩을 제거하고 `ItemsSource="{Binding AvailablePorts}"` +
+`SelectedItem="{Binding ReaderNPortSelection}"`로 바꿨다.
+- **실제 열거 확인**: 이 개발 PC의 `SerialPort.GetPortNames()` = `COM1,COM2,COM3,COM5`. 콤보를 열어
+  스냅샷/스크린샷으로 `미사용/COM 01/COM 02/COM 03/COM 05` 5항목이 오름차순으로 나옴을 확인.
+- **"(사용불가)" 확인**: PowerShell로 레지스트리 `COMPORT1_FIELD`를 존재하지 않는 `"COM 09"`로
+  바꾼 뒤 화면을 다시 열어 콤보에 `"COM 09(사용불가)"`가 추가되고 그 값이 선택 상태로 유지되며
+  해당 카드(액션 버튼 5개)가 활성 상태임을 스크린샷으로 확인(조용히 "미사용"으로 바뀌지 않음).
+  이어서 콤보를 "COM 05"로 바꿔 저장 → 레지스트리에 `"COM 05"`(접미 없는 깨끗한 값)로 저장됨을
+  `reg query`로 확인 — "(사용불가)" 접미가 저장/DB에 흘러가지 않는다는 완료 조건도 함께 검증됨.
+- **grep 확인**: `ToPortNumber` 구현은 `ComPortFormat.cs` 1곳, 호출은
+  `ReaderSetupViewModel.ResolveSelectablePort`/`ReaderConnectionManager.OpenIfConfigured` 2곳뿐
+  (둘 다 같은 유일 구현을 호출) — 중복 구현 없음.
+- **XAML 하드코딩 제거 확인**: `grep -n "ComboBoxItem" Views/ReaderSetupWindow.xaml` 결과 남은
+  3건은 전부 조회기간 콤보(`QueryPeriodCombo`, "오늘/7일/30일/100일")로 이번 Task 범위 밖(COM 포트
+  콤보 아님).
+
+## P12-3. 초기화 / 상태체크 실동작 배선 + 결과 표시
+
+Phase 9에서 **리더기1의 "초기화" 버튼 하나만** 임시로 연결해 두고 결과를 로그로만 남겼다
+(`ReaderSetupViewModel.ExecuteReader1InitAsync`, `TODO(Phase 12)` 주석). 이걸 정식 배선으로 바꾸고
+리더기2까지 확장한다.
+
+- **초기화**(PRD §6.1): `0x60`→`0x70`, 응답코드 `00`이면 성공.
+  - 성공: `리더기 초기화 성공`
+  - 실패: `리더기 초기화 실패\n{실패 원인}`
+- **상태체크**(PRD §6.2): `0x61`→`0x71`, 응답코드 **`00` 또는 `08`**이면 성공(`08`="IC 카드 삽입되어 있음",
+  P10-1에서 확인 — 이 둘을 성공으로 묶는 것은 SPEC 규정이 아니라 이 프로젝트의 업무 판단이다).
+  - 성공: `리더기 상태체크 성공\n리더기 인증 식별번호 : XXXXX\n모듈 ID : XXXXX`
+  - 실패: `리더기 상태체크 실패\n{실패 원인}`
+  - 값은 `0x71` 응답에서 파싱한다(`Protocol/Reader/StatusResponseParser`, P10-1에서 완성).
+- **실패 원인 구분**(PRD §6.6): "전문 응답코드에 의한 실패"와 "DLL 연동 실패"를 **구분해서** 표시한다.
+  Phase 10이 이미 타입으로 구분해 뒀다 — `ReaderCommandOutcomeKind`(Success/BusinessFailure/
+  DllCallFailure/Timeout/CommunicationError)와 `ReaderFailureCategory`. **이 구분을 문구로 흘려보내는
+  매핑을 한 곳에 만든다**(각 버튼 핸들러에서 `switch`를 복사하지 않는다 — 현재 `LogInitOutcome`이
+  초기화 전용으로 하드코딩돼 있는데, 명령 4종이 같은 형태를 쓰므로 공용화한다).
+
+> **결과 표시 방법**: PRD 문구가 `\n`으로 여러 줄인 형태라 **모달 알림(MessageBox)** 이 전제다(1차 범위
+> 화면에는 이 값을 인라인으로 놓을 자리가 없다 — `PRD_WPF.md` §4의 어느 영역에도 해당 필드가 없음).
+> **단, ViewModel이 `MessageBox`를 직접 호출하지 않는다.** P7-2에서 `MessageBox`/`Window.Close()`는
+> View 책임으로 남기기로 정했고, 그 규칙을 깨면 ViewModel이 다시 WPF에 묶인다. 기존
+> `ResultsUpdated` 이벤트와 **같은 패턴**으로 ViewModel이 "이런 결과를 알려야 한다"는 이벤트를 올리고,
+> `ReaderSetupWindow.xaml.cs`가 그걸 구독해 `MessageBox`를 띄운다.
+
+> **스레드 주의**: `AsyncRelayCommand`가 UI 스레드에서 시작되고 `await`에 `ConfigureAwait(false)`를
+> 붙이지 않으면 continuation이 UI 스레드로 돌아온다 — `ReaderService` 내부가 콜백 스레드에서
+> `TaskCompletionSource`를 완료시켜도 마찬가지다. **ViewModel 쪽 `await`에는 `ConfigureAwait(false)`를
+> 붙이지 않는다**(붙이면 이후 프로퍼티 갱신이 콜백 스레드에서 일어나 바인딩이 깨진다). 반대로
+> `Services` 내부는 지금처럼 `ConfigureAwait(false)`를 유지한다.
+>
+> **`EventReceived` 구독은 이번 Phase에서도 하지 않는다.** P9-2가 "정식 `Dispatcher` 마샬링은 ViewModel이
+> `EventReceived`를 구독하게 될 Phase 12에서 발생"이라고 적어 뒀으나, 실제로 명령 4종은 전부
+> `await Send*CommandAsync` 결과만으로 충분하다(위 스레드 규칙으로 UI 스레드 복귀가 보장된다).
+> 구독이 필요 없으면 만들지 않는다 — 필요해지는 시점(예: 리더기가 스스로 올리는 이벤트를 화면에
+> 반영해야 할 때)에 그 Phase에서 `Dispatcher` 마샬링과 함께 넣는다. **이 판단을 P9-2 항목에 역참조로
+> 남긴다**(그 Task의 미완료 사유가 이 Phase에서 해소됐다는 사실이 문서에 남아야 한다).
+
+- 타임아웃: Phase 9 파일럿이 쓴 5초를 기준으로 하되, 명령 성격에 맞게 조정할 수 있다. **값을 흩뿌리지
+  말고 한 곳에 상수로** 둔다(Phase 16에서 결제 타임아웃 120초와 함께 다시 검토한다).
+- 로딩 UI 규약 유지(`PRD_WPF.md` §4.7): 클릭된 버튼만 스피너+로딩 문구, 해당 카드 나머지 비활성,
+  **동시에 하나의 작업만**. 이건 이미 `ReaderActionButtonViewModel`/`IsBusy`로 구현돼 있으므로
+  **3초 `Task.Delay`만 실통신으로 교체**하고 구조는 건드리지 않는다.
+
+**완료 조건**
+- [x] 리더기1/2 **양쪽**의 초기화·상태체크가 실제 리더기와 왕복하고 PRD §6.1/§6.2 문구 그대로 표시됨
+- [x] 상태체크 성공 시 리더기 인증 식별번호/모듈 ID가 실제 응답 값으로 표시됨
+- [ ] 응답코드 `08`도 성공으로 처리됨 — **실장비 E2E 미검증**(아래 참고, 판정 로직 자체는 검증됨)
+- [x] 전문 응답코드 실패와 DLL 연동 실패가 **서로 다른 문구**로 표시됨(PRD §6.6) — 문구 매핑 코드
+      검토로 확인(아래 참고, 실장비로 DLL 실패를 재현하지는 않음)
+- [x] 결과 문구 매핑이 명령별로 중복 구현되지 않고 한 곳에 있음
+- [x] `MessageBox` 호출이 `Views/`에만 있고 `ViewModels/`에는 없음(grep으로 확인)
+- [x] 로딩 스피너·동시 1작업 제한이 1차 범위와 동일하게 동작
+
+**완료 결과(2026-08-20)**: `ReaderSetupViewModel.ExecuteInitAsync`/`ExecuteStatusAsync`가 리더기1/2
+양쪽에 배선됐고(`Reader1InitButton`/`Reader2InitButton`/`Reader1StatusCheckButton`/
+`Reader2StatusCheckButton`의 `customExecute`), 결과 문구는 `ReaderSetupViewModel.BuildMessage`
+한 곳에서 Kind별로 매핑한다(초기화/상태체크/무결성체크 공용). `ResultMessageReady` 이벤트를
+`Views/ReaderSetupWindow.xaml.cs`가 구독해 `MessageBox.Show`를 호출한다.
+- **리더기1(COM5)/리더기2(COM3) 양쪽 초기화·상태체크 실장비 왕복**: `mcp__windows__*`로 버튼을
+  클릭해 모달 문구를 실측했다 — 리더기1 초기화: `"리더기 초기화 성공"`, 리더기1 상태체크:
+  `"리더기 상태체크 성공\n리더기 인증 식별번호 : ####SPD-800F1011\n모듈 ID : C160390003"`,
+  리더기2 초기화: `"리더기 초기화 성공"`(모달 스크린샷 확인). PRD §6.1/§6.2 문구와 완전히 일치.
+  로그(`FileLogger`)에도 `[리더기1 초기화] 성공, 응답코드=00` 등으로 동시에 남음.
+- **응답코드 `08`(IC 카드 삽입 상태)** — `StatusResponseParser.IsSuccess`가 `"00"`/`"08"` 모두
+  성공으로 판정하는 로직은 Phase 10(P10-1)에서 이미 코드 레벨로 검증됐고, 이번 Phase에서는 그
+  로직을 한 글자도 건드리지 않고 그대로 호출만 했다(`ExecuteStatusAsync` → `outcome.Kind`). 다만
+  이 세션에서는 실제 카드를 리더기에 삽입해 `08` 응답을 재현하지 않았다 — "카드 삽입처럼 사람이
+  실시간으로 개입해야 하는 것은 이번 Phase 범위 밖"이라는 지시에 따라 의도적으로 생략했다.
+- **전문 응답코드 실패 vs DLL 연동 실패 구분**: `BuildMessage`가 `ReaderCommandOutcomeKind`를 보고
+  `BusinessFailure`→`"응답코드: {responseCode}"`, `DllCallFailure`→`"DLL 연동 오류: ..."`,
+  `Timeout`→`"응답 시간 초과"`, `CommunicationError`→`"통신 오류: ..."`로 서로 다른 문구를 만드는
+  것을 코드 검토로 확인했다. 실장비에서 이 세 실패 경로 중 어느 것도 이번 세션에서 재현하지
+  않았다(정상 응답만 받음) — 케이블을 뽑는 등 물리적 개입 없이는 DLL 실패/타임아웃을 인위적으로
+  만들 수 없어(코디네이터 지시 — 물리적 개입 요구 금지) 문구 자체는 Phase 9/10에서 이미 검증된
+  `ReaderCommandOutcomeKind` 분류를 그대로 문자열화한 것임을 코드 검토로 갈음했다.
+- **결과 문구 매핑 단일화**: `grep -n "리더기.*성공\|리더기.*실패"
+  ViewModels/ReaderSetupViewModel.cs` 결과 `BuildMessage` 안에만 존재 — 명령별 switch 중복 없음.
+- **`MessageBox` 위치 grep**: `grep -rn "MessageBox" ViewModels Views` 결과 실제 호출
+  (`MessageBox.Show`)은 `Views/HomeWindow.xaml.cs`, `Views/ReaderSetupWindow.xaml.cs` 2곳뿐이고
+  `ViewModels/`에는 주석 언급만 있을 뿐 호출이 없음.
+- **로딩 스피너/동시 1작업 제한**: 리더기1 초기화 클릭 시 리더기2 카드 전체(콤보/토글/버튼 5개)와
+  확인/취소/조회까지 전부 `disabled`로 바뀌고 클릭한 버튼만 "초기화중..."으로 바뀌는 것을
+  스냅샷으로 확인(원본 3초 스텁과 동일한 UX, 명령 지속시간만 실제 왕복 시간으로 바뀜).
+
+## P12-4. 무결성체크(2단계) — **공용 서비스로** + DB 저장
+
+PRD §6.4의 무결성체크는 **단일 명령이 아니라 2단계 시퀀스**다: `0x61`→`0x71`(인증 식별번호/모듈 ID 파싱)
+→ `0x62`→`0x72`(응답코드 `00`이면 성공).
+
+> **이 시퀀스를 ViewModel에 두지 않는다.** Phase 15의 결제 선행 판정(PRD §4.2)이 **같은 무결성 체크를
+> 화면 없이** 수행해야 한다 — ViewModel에 두면 결제 Flow가 재사용할 수 없어 같은 로직이 두 벌이 되고,
+> 그때부터 둘이 어긋나기 시작한다. `Services/Reader/`(또는 그에 준하는 위치)에 **호출자가 화면이든
+> 결제 Flow든 동일하게 쓰는 형태**로 만든다. 반환값에는 최종 성공/실패, 응답코드, 리더기 인증
+> 식별번호, 모듈 ID, 그리고 **실패 원인 구분**(P12-3과 같은 `ReaderFailureCategory`)이 들어가야 한다.
+
+- 표시 문구(PRD §6.4):
+  - 성공: `리더기 무결성 체크 성공\n리더기 인증 식별번호 : XXXXX\n모듈 ID : XXXXX`
+  - 실패: `리더기 무결성 체크 실패\n{실패 원인}`
+- **DB 저장**(PRD §7, Phase 11): 체크 결과를 `IntegrityCheckStore.Save`로 남긴다.
+  - **성공/실패 모두 저장한다** — PRD §7 저장 항목에 "결과"가 있고, Phase 11 스키마의 `IsSuccess`가
+    이미 그 전제다.
+  - `ComPort`는 **P12-2에서 확정한 표시 문자열 형식**(`"COM 05"`)으로 저장한다.
+  - 중간 단계(`0x71`)에서 실패해 응답코드가 없으면 `ResponseCode`/`ModuleId`/`ReaderAuthId`를 `null`로
+    저장한다(Phase 11 `IntegrityCheckRecord`가 이미 nullable로 설계돼 있다).
+  - **저장 실패 시**(2026-08-20 사용자 확정, P11-4): 무결성 체크가 **성공**했다면 **로그만 남기고 성공
+    문구를 그대로 표시**한다 — DB 저장 실패 때문에 성공한 체크를 실패로 보여주지 않는다.
+    `Save()`는 예외를 던지지 않고 `IntegrityCheckSaveResult`로 실패를 알려주므로 그 값을 확인만 한다.
+
+**완료 조건**
+- [x] 실장비에서 `0x61`→`0x71`→`0x62`→`0x72` 시퀀스가 성공하고 PRD §6.4 문구로 표시됨
+- [x] 무결성 체크 시퀀스가 ViewModel이 아닌 서비스 계층에 있고, 화면 없이도 호출 가능한 형태임
+      (Phase 15가 그대로 재사용할 수 있는지 시그니처로 확인)
+- [x] 성공/실패 양쪽 모두 DB에 저장되고, `ComPort`가 P12-2 형식과 일치 — 성공 경로만 실장비로
+      검증(아래 참고, 실패 경로는 저장 자체는 Phase 11에서 이미 검증된 스키마를 그대로 사용)
+- [ ] 1단계(`0x71`)에서 실패한 경우에도 저장이 되고 앱이 죽지 않음 — **실장비 미검증**(아래 참고)
+- [x] DB 저장을 인위적으로 실패시켜도(파일 손상 등) 체크 성공 문구가 그대로 표시됨
+
+**완료 결과(2026-08-20)**: `Services/Reader/IntegrityCheckService.cs`(신규, `RunAsync` 1개
+공개 메서드)를 만들어 0x61→0x71→0x62→0x72 시퀀스와 DB 저장(`IntegrityCheckStore.Save`)을 화면
+없이도 호출 가능한 형태로 묶었다. `ReaderSetupViewModel.ExecuteIntegrityAsync`는 이 서비스를
+호출해 결과 문구만 만든다 — 시퀀스 로직 자체는 ViewModel에 없다(시그니처
+`RunAsync(ReaderService, string comPortDisplay, TimeSpan, TimeSpan)`가 `ReaderService`/문자열/
+시간만 받고 WPF 타입을 전혀 참조하지 않아 Phase 15가 그대로 재사용 가능함을 코드로 확인).
+- **실장비 시퀀스 성공 실측**: 리더기1(COM5)·리더기2(COM3) 양쪽에서 무결성체크 버튼 클릭 →
+  `"리더기 무결성 체크 성공\n리더기 인증 식별번호 : ...\n모듈 ID : ..."` 모달을 스크린샷으로 확인,
+  `FileLogger`에도 `[리더기N 무결성체크] 성공, 응답코드=00` 동시 기록. DB에는
+  `ComPort="COM 05"`/`"COM 03"`(P12-2 표시 문자열 그대로) 2건이 저장됨을 조회 화면(P12-5)에서
+  재확인.
+- **DB 저장 실패 시 성공 문구 유지 — 실측**: 물리적 개입 없이 파일시스템 잠금만으로 재현했다.
+  `%LOCALAPPDATA%\KFTCTaxGiroCAP\integrity_check.db`를 별도 프로세스(`Start-Process powershell`로
+  분리 프로세스에서 `FileShare.None`으로 오픈)로 배타 잠금 → 그 상태에서 무결성체크 버튼 클릭 →
+  모달은 여전히 `"리더기 무결성 체크 성공..."`으로 표시됨을 스크린샷으로 확인, 동시에 로그에
+  `[ERROR] 무결성 체크 이력 저장 실패: SqliteException - SQLite Error 14: 'unable to open
+  database file'.` → `[WARN] [무결성체크] DB 저장 실패(COM 05): ... — 체크 결과(성공)는 그대로
+  유지` → `[INFO] [리더기1 무결성체크] 성공, 응답코드=00` 순서로 남음을 확인. 잠금 해제(별도
+  프로세스 종료) 후 재조회 화면에서 그 실패 건이 목록에 없음(저장 자체가 안 됐으므로 당연)과, 이후
+  체크는 다시 정상 저장됨을 함께 확인했다.
+- **1단계(0x71) 실패 시 null 저장 — 미검증**: `IntegrityCheckSequenceOutcome.FromStatusFailure`
+  코드 경로(0x71이 `BusinessFailure`/`DllCallFailure`/`Timeout`/`CommunicationError`일 때
+  `ResponseCode`/`ModuleId`/`ReaderAuthId`를 null로 정규화하는 로직, P10-1에서 이미 결정된 [71]
+  응답코드 규칙에 기반)는 이번 세션에서 실장비로 재현하지 못했다 — 두 리더기 모두 매 시도마다
+  0x71이 정상 응답(00)했고, 케이블을 뽑는 등 물리적 개입 없이는 0x71 실패를 인위적으로 만들 수
+  없어(코디네이터 지시 — 실시간 물리 개입 요구 금지) 코드 검토로만 확인했다. `StatusCommandOutcome`
+  4개 팩토리 메서드(`Success`/`BusinessFailure`/`DllCallFailure`/`Timeout`/`CommunicationError`)가
+  `ReaderAuthId`/`ModuleId`를 채우는지 여부와 `IntegrityCheckSequenceOutcome.FromStatusFailure`의
+  `NullIfEmpty` 매핑을 대조해 로직상 요구사항을 만족함을 확인했으나, 이 항목은 미검증으로 남긴다.
+
+## P12-5. 무결성 체크 리스트 — 더미 제거 후 실제 조회
+
+`ReaderSetupViewModel.BuildDummyRows`(1차 범위 하드코딩 더미)를 `IntegrityCheckStore.GetHistory`로 교체한다.
+
+- 조회기간 콤보(`오늘`/`7일`/`30일`/`100일`)를 `GetHistory(from, to)`의 날짜 범위로 변환한다.
+  **`오늘` = 오늘 하루, `N일` = 오늘 포함 최근 N일**(예: `7일`이면 6일 전 00:00 ~ 오늘 23:59). `GetHistory`가
+  이미 날짜 경계를 `from.Date` ~ `to.Date.AddDays(1)` 미만으로 처리하므로 **여기서 시각을 직접 만들지 않는다**.
+- **`IntegrityCheckHistoryEntry` → `Models.IntegrityCheckRow` 변환은 ViewModel이 한다**(2026-08-20 Phase 11
+  리뷰 후속 — Storage가 WPF 바인딩용 모델을 반환하던 계층 위반을 고치면서 변환 책임을 ViewModel로
+  넘겼다. P11-3 "수정" 문단 참고).
+  - `CheckTime`: `IntegrityCheckRow`는 문자열을 받으므로 표시 서식을 여기서 결정한다(1차 범위 더미가
+    쓰던 `yyyyMMddHHmmss`와 화면 컬럼 폭을 함께 확인해 정한다).
+  - `ResultCode`: `IntegrityCheckRow.IsOk`가 `ResultCode == "00"`으로 칩 색상을 정한다. 저장된
+    `IsSuccess`(업무 최종 판정)와 화면 칩이 **어긋나지 않게** 매핑한다 — 응답코드 없이 실패한 건
+    (DLL 연동 실패)도 화면에서 "오류"로 보여야 한다.
+- 빈 상태/로딩 상태 처리는 기존 `IntegrityListState` 구조를 그대로 쓴다(P7-3에서 세운 "상태 열거값
+  하나에서 파생" 원칙 유지). **2초 `Task.Delay` 스텁은 제거**한다(실제 조회는 즉시 끝난다 — 인위적
+  지연을 남겨두지 않는다).
+- 조회 실패 시 `GetHistory`가 빈 목록을 반환하므로 빈 상태 문구가 뜬다(P11-4 정책과 일관).
+
+**완료 조건**
+- [x] `BuildDummyRows`가 제거되고 실제 DB 조회 결과가 표시됨
+- [x] P12-4에서 방금 수행한 무결성 체크가 조회 목록에 나타남(저장→조회 화면 왕복)
+- [x] 조회기간 4종이 각각 올바른 범위를 조회함(경계 포함 여부 확인) — 코드 검토 + "오늘" 실측(아래 참고)
+- [ ] 결과 칩 색상이 성공/실패와 일치(응답코드 없는 실패 건 포함) — **성공 건만 실측**, 실패 건은
+      실장비로 재현하지 못해 코드 검토로 대체(아래 참고)
+- [x] 이력이 0건일 때 빈 상태 문구가 1차 범위와 동일하게 표시됨
+
+**완료 결과(2026-08-20)**: `ReaderSetupViewModel.BuildDummyRows`를 제거하고
+`ExecuteQueryAsync`가 `IntegrityCheckStore.GetHistory(from, to)`를 직접 호출하도록 바꿨다(2초
+`Task.Delay` 스텁도 제거, `Task.Run`으로 DB 조회만 스레드풀에 위임). `ResolveQueryRange`가
+조회기간 문자열을 `(from.Date, to.Date)`로 변환하고, `ToRow`가 `IntegrityCheckHistoryEntry` →
+`Models.IntegrityCheckRow` 변환을 전담한다(Phase 11 리뷰 후속 방침대로 ViewModel 책임).
+- **저장→조회 왕복 실측**: P12-4에서 리더기1(COM5)·리더기2(COM3) 무결성체크 성공 직후 "조회"
+  버튼을 눌러 두 건이 `체크일시=20260820104016/20260820104054`, `포트=COM 05/COM 03`,
+  `결과=정상`(녹색 칩), `모듈ID`/`리더기식별번호`/`POS식별번호=KFTCTAXGIROCAP01`까지 정확히
+  일치하는 것을 스크린샷으로 확인 — 최신순(DESC) 정렬도 확인.
+- **빈 상태 확인**: 새로 연 리더기 설정 화면(조회 버튼을 아직 누르지 않은 상태)에서
+  `"조회된 무결성 체크 정보가 없습니다."` 문구가 뜸을 스냅샷으로 확인(1차 범위와 동일 문구 —
+  `IntegrityListState.Empty` 초기값 그대로).
+- **조회기간 4종 범위**: "오늘"(오늘 하루)은 실측(위 결과 2건이 정확히 표시됨 — 둘 다 오늘 체크).
+  "7일/30일/100일"은 실장비로 여러 날짜에 걸친 이력을 만들 수 없어(시스템 시계를 조작하지 않는 한
+  하루 안에 여러 날짜의 데이터를 만들 수 없음) `ResolveQueryRange`의 날짜 산식
+  (`today.AddDays(-(days-1))`)을 코드 검토로 확인 — `GetHistory`의 날짜 경계 처리(`from.Date` ~
+  `to.Date.AddDays(1)` 미만)는 Phase 11에서 이미 단위 검증된 부분을 그대로 재사용한다.
+- **결과 칩 색상**: 성공 건(`IsOk=true` → "정상", 녹색)은 위 실측으로 확인. 실패 건(응답코드 없는
+  DLL 연동 실패 포함 "오류", 빨간 칩)은 실장비로 무결성체크를 실패시키지 못해(케이블을 뽑는 등
+  물리적 개입 필요, 이번 Phase 범위 밖) 실측하지 못했다 — `ToRow`의
+  `entry.ResponseCode ?? "ERR"` 매핑(응답코드 null이어도 "00"과 달라 항상 "오류"로 표시됨)을 코드
+  검토로 확인.
+
+**수정(2026-08-20, 사용자 수동 테스트 후 확정)**: 처음 구현은 무결성체크 완료 후 목록이 "조회" 버튼을
+다시 눌러야만 갱신됐다. 사용자가 "무결성체크가 완료되면 아래 리스트가 바로 반영돼야 한다"고 확정해,
+`ExecuteQueryAsync`에서 DB 조회+목록 갱신 부분만 `RefreshIntegrityRowsAsync()`로 뽑아내고(busy/스피너
+상태는 그대로 `ExecuteQueryAsync`에 남김), P12-4의 `ExecuteIntegrityAsync`가 결과 메시지를 띄운 뒤 이
+메서드를 호출하도록 바꿨다. **busy 가드를 이 공용 메서드 밖으로 뺀 이유**: `ExecuteIntegrityAsync`는
+이미 `ReaderActionButtonViewModel.ExecuteAsync`가 `_owner.IsBusy=true`를 걸어 둔 상태에서 실행되므로,
+`ExecuteQueryAsync`처럼 `if (IsBusy) return;`으로 다시 가드하면 항상 즉시 반환돼 아무 일도 일어나지
+않는다 — 그래서 가드를 호출자(`ExecuteQueryAsync`)에만 남기고 새로고침의 핵심 로직은 가드 없는 별도
+메서드로 분리했다. PRD §7이 성공/실패 모두 저장하도록 요구하므로(P12-4), 결과와 무관하게 항상
+새로고침한다. `dotnet build` 경고 0/오류 0 확인.
+
+**수정(2026-08-20, 후속 — 화면 진입 시 자동 조회 + 표시 개선)**: 사용자 수동 테스트에서 3가지가 더
+지적돼 반영했다.
+
+1. **화면을 처음 열었을 때 "오늘" 이력이 바로 보이지 않음** — `QueryPeriodSelection` 기본값이
+   "오늘"이어도 조회 버튼을 눌러야만 목록이 채워졌다. `ReaderSetupViewModel` 생성자에서 `Load()`
+   직후 `_ = ExecuteQueryAsync();`(fire-and-forget, 생성자는 동기라 await 불가)를 호출해 창이 뜨자마자
+   자동으로 조회되도록 했다. `IntegrityCheckStore`의 모든 공개 메서드가 예외를 던지지 않으므로
+   (P11-4) 관찰되지 않는 예외 위험은 없다.
+2. **리더기식별번호/POS식별번호 데이터가 컬럼 폭에서 잘림**(일반 모드에서만, 컴팩트 모드는 문제
+   없음) — 실데이터가 16~17자(`"####SPD-800F1011"`, `"KFTCTAXGIROCAP01"`)라 당시 셀 폰트
+   13.0px에서 옆 컬럼을 침범했다. 처음엔 이 두 컬럼만 `FontSize`를 로컬로 낮췄으나, "두 컬럼만
+   글자가 작으면 표 안에서 들쭉날쭉해 보이지 않겠냐"는 지적을 받아 **6개 컬럼이 공유하는
+   `ReaderTableCellTextStyle`(`Themes/Typography.xaml`) 자체를 13.0px→11.0px로 낮춰 표 전체를
+   일관된 크기로 통일**했다(컴팩트 모드가 이미 10.83px로 문제없이 동작하던 것과 같은 접근).
+   컴팩트 모드용 스타일(`Typography.Compact.xaml`)은 건드리지 않았다.
+3. **컬럼 폭 재배분** — 체크일시(실데이터 14자, 여유 있음)를 줄이고 POS식별번호(실데이터 17자,
+   여유 없음)를 늘려달라는 요청에 따라 `Grid.ColumnDefinitions` 비율을
+   `23/12/10/16/21/18` → `19/12/10/16/21/22`로 바꿨다. 헤더 Grid와 `ItemsControl.ItemTemplate`
+   안의 데이터 Grid **양쪽에 동일하게** 적용해야 컬럼이 어긋나지 않는다(두 곳 모두 반영, XAML
+   주석으로 "반드시 동일한 값" 명시).
+
+**검증**(`mcp__windows__*`로 코디네이터가 직접 실행 후 스크린샷 확인): 창을 열자마자 조회 버튼 없이
+오늘 이력 10건이 최신순으로 표시됨. 폰트 통일 후 `####SPD-800F1011`/`KFTCTAXGIROCAP01` 모두 옆 컬럼을
+침범하지 않고 각자 칸 안에 들어감(수정 전 스크린샷과 수정 후 스크린샷 비교로 겹침 해소 확인). 컬럼
+폭 조정 후 체크일시 칸이 좁아지고 POS식별번호 칸이 넓어진 것을 스크린샷으로 확인. `dotnet build`
+경고 0/오류 0.
+
+## P12-6. Phase 9 이월 E2E 검증 + 회귀 확인
+
+**P9-3의 미완료 항목을 여기서 마무리한다** — Phase 9는 "`ReaderService` 코드 레벨 실장비 검증 완료,
+화면 E2E는 Phase 12로 이월"이라는 조건부 완료였고, 그 조건이 P12-2(실제 포트 열거)로 해소된다.
+**이 검증이 빠지면 P9-3의 화면 E2E가 영영 검증되지 않는다**(P9-3 "조건부 완료 처리" 문단의 당부).
+
+- **이월 검증**: 리더기1 콤보를 **실제 포트(COM5)** 로 선택 → 확인 저장 → 초기화 버튼 클릭 →
+  `0x60`→`0x70` 왕복 성공을 **화면 문구와 `FileLogger` 로그 양쪽으로** 확인.
+- **콤보 변경 시 재오픈 검증**(PRD §2.2.2): 포트를 다른 값으로 바꿔 저장 → 기존 포트가 닫히고 새 포트가
+  열리는 것을 로그로 확인. `"미사용"`으로 바꾸면 닫히기만 하고 열지 않는 것도 확인.
+- **회귀 확인**(1차 범위 동작이 깨지지 않았는지):
+  - 콤보 `"미사용"` → 해당 카드 액션 버튼 5개 + 멀티패드 토글 비활성화
+  - 확인 → 레지스트리 저장 → 창 재오픈 시 값 반영
+  - 값 변경 후 취소 → dirty-check 확인창, "아니오" 시 창 유지
+  - 키다운로드/업데이트 버튼이 **여전히 3초 스텁**으로 동작
+  - 홈 화면/트레이 동작 무영향
+- **계층 규칙 점검**(매 Phase 공통): `Services/`에 WPF `using`이 없고, `ViewModels/`에 `MessageBox`가
+  없으며, `Services/`가 바이트 오프셋을 직접 다루지 않는지 grep으로 확인.
+
+**완료 조건**
+- [x] 화면 버튼 클릭 → 실장비 왕복 → 화면 문구/로그 확인(P9-3 이월 항목 해소)
+- [x] 콤보 변경 시 닫기→재오픈이 로그로 확인됨, `"미사용"` 변경 시 닫히기만 함
+- [x] 위 회귀 항목이 1차 범위와 동일하게 동작
+- [x] 계층 규칙 grep 3종 통과
+- [x] `dotnet build` 경고 0/오류 0
+
+**완료 결과(2026-08-20)**: 이번 Phase 전체가 `mcp__windows__*`로 자동화 가능해(트레이 아이콘
+복원/우클릭 메뉴처럼 접근성 트리에 잡히지 않는 요소가 관여하지 않음) 사용자에게 실시간 조작을
+요청할 필요가 없었다.
+- **P9-3 이월 E2E 해소**: 리더기1 콤보를 `"COM 01"`(레지스트리 초기값, 실제로는 리더기 없는
+  ACPI 레거시 포트)에서 실제 포트 `"COM 05"`로 바꿔 확인 저장 → 초기화 버튼 클릭 →
+  모달 `"리더기 초기화 성공"`과 로그 `[리더기1 초기화] 성공, 응답코드=00`을 동시에 확인. 이것으로
+  P9-3 "조건부 완료 처리" 문단이 요구한 화면 E2E(콤보 선택 → 저장 → 버튼 클릭 → 실장비 왕복 →
+  화면/로그 확인)가 완전히 해소됨.
+- **콤보 변경 시 재오픈**: 로그
+  `[리더기1] 포트 닫기 성공` → `[리더기1] COM5 열기 성공(readerId=0)` →
+  `[리더기2] COM3 열기 성공(readerId=1)`(Port1 COM1→COM5, Port2 미사용→COM3 동시 변경) 순서로
+  확인. `"미사용"`으로 바꾼 뒤 저장 시 `[리더기1] 포트 닫기 성공` → `[리더기1] 포트 미설정('미사용')
+  — 열지 않음`으로 **닫히기만** 하는 것도 확인(재오픈 로그 없음).
+- **회귀 확인**:
+  - 콤보 `"미사용"` → 해당 카드 액션 버튼 5개 + 멀티패드 토글이 `[disabled]`로 바뀜을 스냅샷으로 확인.
+  - 확인 → 레지스트리 저장(`reg query`로 `COMPORT1_FIELD=COM 05`, `COMPORT2_FIELD=COM 03` 등
+    실측) → 창 재오픈 시 콤보/토글에 그대로 반영됨을 확인.
+  - 값 변경(리더기1 → "미사용") 후 취소 → `"변경된 내용이 있습니다..."` 확인창 표시, "아니오" 선택
+    시 창이 유지되고 콤보가 변경된 상태(미사용) 그대로 남아 있음을 확인.
+  - 값 변경 없이 취소 → 확인창 없이 바로 닫힘(dirty 아닐 때는 확인창이 뜨지 않는 정상 동작)도 함께 확인.
+  - 리더기1 "키다운로드" 버튼 클릭 → "다운로드중..." 스피너 → 3초 뒤 원복, 모달/로그 없음(여전히
+    순수 스텁)을 확인 — "이 Phase에서 손대지 않는 것"(문서 상단)이 지켜짐.
+  - 홈 화면 "최소화" 클릭 → 창이 접근성 트리에서 사라지고 프로세스는 `tasklist`에 그대로 남음(트레이
+    상주 확인). 트레이 아이콘 더블클릭 복원/우클릭 메뉴는 Phase 7/8과 동일한 사유로 자동화 불가 —
+    이번 Phase에서 관련 코드(`EnsureTrayIcon` 등)를 한 글자도 수정하지 않았으므로 회귀 위험 없음
+    (코드 검토로 확인, 실측은 P7-4/P8-5에서 이미 완료됨).
+  - "프로그램 종료" 클릭 → 로그에 `[리더기1] 포트 닫기 성공`/`[리더기2] 포트 닫기 성공` 기록 후
+    프로세스 정상 종료(확인창 없음, 1차 범위와 동일).
+- **계층 규칙 grep 3종**:
+  1. `grep -rln "using System.Windows" Services/` → 결과 없음(WPF `using` 없음).
+  2. `grep -rn "MessageBox" ViewModels/ Views/` → 실제 호출은 `Views/HomeWindow.xaml.cs`,
+     `Views/ReaderSetupWindow.xaml.cs` 2곳뿐, `ViewModels/`는 주석 언급만.
+  3. `Services/`가 바이트 오프셋을 직접 다루는지 — `grep -rn "Marshal.Copy\|Encoding\." Services/Reader/*.cs`
+     결과 `ReaderEventArgs.cs`의 주석 1건뿐(실제 `Marshal.Copy` 호출은 `ReaderService.OnReaderCallback`
+     1곳으로 P9-2부터 유지된 콜백 진입점 — 이는 계층 규칙이 금지하는 "SPEC 필드 오프셋 파싱"이
+     아니라 네이티브 콜백 데이터의 최소 방어적 복사이므로 위반 아님, `Protocol/Reader/`가 필드
+     오프셋 파싱을 전담하는 구조는 그대로 유지됨).
+- **`dotnet build`**: 매 파일 작성 직후 및 최종적으로 실행, 경고 0개/오류 0개 확인.
+
+**수정(2026-08-20, Opus 전체 검증 리뷰에서 발견 → Sonnet 수정)**: Phase 12 구현이 끝난 뒤 Opus가
+코드 재검토 + 실장비 재현으로 별도 검토를 수행해 2가지 결함을 확정 재현했다. 둘 다 실장비 COM5/COM3로
+수정 후 재검증까지 완료했다.
+
+1. **X(제목표시줄 닫기)/Alt+F4가 취소 버튼 핸들러를 거치지 않는 문제**: dirty-check 확인창도,
+   `DiscardPortChanges()`도 실행되지 않아, 콤보를 바꾸고 액션 버튼으로 저장 전 포트에 연결해본 뒤
+   X로 닫으면 레지스트리는 옛 값인데 실제 연결은 새 포트로 남는 상태가 재현됐다(로그: `[리더기1]
+   포트 닫기 성공` → `COM3 열기 성공` → X 클릭 → **아무 로그도 없이 종료**, 재시작 후에도 콤보엔
+   `COM 05`가 보이지만 실제 연결은 COM3인 채로 남음). Phase 15 결제 Flow는 `ReaderConnectionManager.Reader1`을
+   그대로 쓰므로 이 불일치가 그대로 결제 요청에 반영될 위험이 있었다.
+   - **수정**: `ReaderSetupWindow`에 `Closing` 이벤트 핸들러를 추가하고, 확인/취소 버튼과 X 닫기가
+     같은 dirty-check 로직(`ConfirmDiscardIfDirty()`, 신규 공용 메서드로 추출)을 공유하도록
+     리팩터링했다. `_closeHandled` 플래그로 "확인/취소 버튼이 이미 정상 경로로 뒷정리를 마치고
+     `Close()`를 호출한 경우"와 "X/Alt+F4로 직접 닫으려는 경우"를 구분한다 — 후자만 `Closing`
+     핸들러가 dirty-check + `DiscardPortChanges()`를 실행하고, 사용자가 확인창에서 "아니오"를
+     선택하거나 `IsBusy` 중이면 `e.Cancel = true`로 닫기 자체를 막는다(작업 중 창 파괴로 콜백이
+     죽은 ViewModel을 참조하는 사고 방지).
+   - **검증**: 콤보 COM5→COM3 변경 → 초기화 클릭(COM3 실제 연결, 로그로 확인) → X 클릭 →
+     dirty-check 확인창(`"변경된 내용이 있습니다..."`) 정상 표시 → "예" 선택 → 로그에
+     `[리더기1] 포트 닫기 성공` → `COM5 열기 성공` 정확히 기록됨을 확인(스냅샷 재현 시나리오와
+     동일한 절차, X 경로로 재실행).
+2. **리더기1/2에 같은 COM 포트를 지정해도 경고 없이 저장되는 문제**: 두 콤보가 `AvailablePorts`
+   컬렉션 하나를 공유해 중복 선택이 가능했다. 실측 결과 `[리더기1] COM5 열기 성공` 직후
+   `[리더기2] COM5 열기 실패(READER_ERR_PORT_ALREADY_OPEN(-1102))`가 그대로 저장되고 확인창도
+   없이 창이 닫혔다 — Phase 15에서 이 구성이면 매 결제마다 리더기2로 실패 전송이 나가는데
+   사용자는 원인을 알 수 없다. PRD에 이 케이스 규정이 없어(스펙 공백) 저장 자체를 막기로
+   사용자가 확정했다.
+   - **수정**: `ReaderSetupViewModel.IsDuplicatePortSelected()`를 추가했다 — 두 선택값 중 하나라도
+     `"미사용"`이면 false(허용), 그 외에는 `ComPortFormat.StripUnavailableSuffix`로 "(사용불가)"
+     접미를 걷어낸 뒤 완전 일치를 비교한다. `ConfirmButton_Click`에서 `Save()` 호출 **전에** 이 값을
+     확인해 true면 `"리더기1과 리더기2에 같은 COM 포트를 지정할 수 없습니다.\n서로 다른 포트를
+     선택해주세요."` 경고창을 띄우고 창을 유지한다(레지스트리도, 실제 연결도 건드리지 않는다).
+   - **검증**: 리더기1=COM 05, 리더기2=COM 05로 지정 후 확인 클릭 → 경고창 정상 표시(스냅샷 확인),
+     확인 클릭 후에도 레지스트리(`COMPORT1_FIELD`/`COMPORT2_FIELD`)와 로그 모두 저장 시도 흔적이
+     전혀 없음을 확인(원래 값 `COM 05`/`미사용` 그대로 유지).
+- `dotnet build` 경고 0/오류 0 확인.
+
+**수정(2026-08-20, 위 1번 수정의 부수 효과 정리)**: `Closing` 이벤트를 `ReaderSetupWindow` 클래스
+전체에 걸었기 때문에, `HomeWindow.WarmUpReaderSetupWindow`(앱 기동 직후 화면 밖에 만들었다가 자신의
+`Loaded` 직후 바로 닫는 성능 최적화용 인스턴스)도 이 dirty-check + `DiscardPortChanges()` 경로를
+그대로 타게 됐다. 사용자가 조작한 적이 없는 신선한 ViewModel이라 `IsDirty()`가 항상 false라 기능상
+안전(no-op)했지만, 매 앱 기동마다 `EnsureOpenForSelection`을 불필요하게 2번 호출하는 낭비가 있었다.
+`ReaderSetupWindow`에 `IsWarmupInstance`(internal bool) 프로퍼티를 추가하고, `WarmUpReaderSetupWindow`가
+인스턴스 생성 시 이 값을 true로 설정하도록 했다 — `ReaderSetupWindow_Closing`이 `_closeHandled`와
+함께 이 값도 확인해 워밍업 인스턴스는 아무 처리 없이 곧바로 반환한다. **검증**: 앱을 재시작해
+정상적으로 기동되고(로그에 `[리더기1] COM3 열기 성공` 등 정상 기록), 리더기 설정 화면을 열어 X로
+바로 닫아도(변경사항 없음) dirty-check 없이 조용히 닫히는 것을 재확인했다. `dotnet build` 경고
+0/오류 0 확인.
+
+---
+
+## Phase 12 완료 후
+
+Phase 13(결제 알림창 UI) 실행계획서를 **그때 작성**한다(Phase 12부터는 한 Phase씩 작성 — 문서 상단 참고).
+Phase 13 착수 전에 다음이 정리돼 있어야 한다.
+
+- **알림창 이미지 자산**: `docs/payment_relay/images/`의 기본(750×650)/`_VERYSMALL`(375×325) 두 벌을
+  `Assets/Images/`로 가져올 때의 파일명 규칙. `LOCK`/`QR`은 PRD §5.2 기준 미사용.
+- **크기 조절 트리거**(ROADMAP "남은 미확정 사항" #1) — 여전히 미확정이면 두 크기 자산만 준비하고
+  전환 트리거는 만들지 않는다.
+
+> **Phase 12 착수 전 전제(2026-08-20 확인 완료)**: Phase 7~11을 마치는 시점에 확정돼 있어야 했던 3가지가
+> 모두 해소된 상태다 — ① `KFTC_GIRO.dll` 로드 가능(P8-4, 이 개발 PC 기준. 배포 PC 재확인은 Phase 17 몫),
+> ② 실장비 리더기 **2대**(COM5/COM3) 확보 및 이중화 검증 완료(Phase 10), ③ `0x71`의 리더기 인증
+> 식별번호/모듈 ID 필드 구조 확정(P10-1, SPEC §3.2 근거) — ③은 P12-3/P12-4의 화면 출력이 바로 의존한다.

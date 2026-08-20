@@ -57,6 +57,14 @@ namespace KFTCOneCAP.Wpf.Services.Reader
 
         internal int ReaderId => _readerId;
 
+        /// <summary>
+        /// 마지막으로 <see cref="OpenPort"/>에 넘긴 포트 번호(닫혀 있어도 기억된 값이 남는다 —
+        /// 위 필드 주석 참고). 2026-08-20(P12 수정) — 리더기 설정 화면이 "화면에 선택된 콤보 값
+        /// = 실제 연결 대상"을 항상 유지하려면(확인/취소로 저장되기 전에도), 액션 버튼을 누르기
+        /// 전에 이 값과 현재 콤보 선택이 같은지 비교해야 한다(<see cref="ReaderConnectionManager.EnsureOpenForSelection"/>).
+        /// </summary>
+        internal int PortNumber => _portNumber;
+
         /// <summary>네이티브 콜백 스레드에서 그대로 raise된다(P9-2 규칙) — 구독자가 UI 스레드로
         /// 마샬링해야 한다. data는 이미 이 이벤트가 만들어지기 전에 Marshal.Copy로 복사됐다.</summary>
         internal event EventHandler<ReaderEventArgs>? EventReceived;

@@ -135,6 +135,10 @@ public partial class HomeWindow : Window
                 Top = -32000,
                 ShowInTaskbar = false,
                 ShowActivated = false,
+                // 2026-08-20 추가(Opus 리뷰 후속): 이 인스턴스는 사용자가 조작한 적이 없으므로
+                // ReaderSetupWindow.Closing의 dirty-check/DiscardPortChanges를 실행할 이유가 없다
+                // (Views/ReaderSetupWindow.xaml.cs 참고).
+                IsWarmupInstance = true,
             };
             warmup.Loaded += (_, _) => warmup.Close();
             warmup.Show();
