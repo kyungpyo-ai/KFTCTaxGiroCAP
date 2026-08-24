@@ -1,9 +1,12 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Threading;
 using System.Windows;
+using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Payment;
+using KFTCOneCAP.Wpf.Services.Pos;
 using KFTCOneCAP.Wpf.Services.Reader;
 using KFTCOneCAP.Wpf.Services.Settings;
 using KFTCOneCAP.Wpf.ViewModels;
@@ -29,6 +32,16 @@ public partial class App : Application
     /// <c>ReaderSetupViewModel</c> 생성 시 이 값을 전달만 하고, ViewModel은 이 매니저를 생성하지 않는다.
     /// </summary>
     internal static ReaderConnectionManager? ReaderConnections { get; private set; }
+
+    /// <summary>
+    /// Phase 14(docs/payment_relay/development_plan.md P14-3) — 결제 요청을 순차 처리하는 유일한
+    /// 워커/큐. <see cref="ReaderConnections"/>와 같은 이유로 정적 접근점 하나만 둔다(DI 컨테이너
+    /// 미사용). Phase 15가 이 큐의 처리 위임을 스텁에서 <c>PaymentOrchestrator</c>로 교체한다.
+    /// </summary>
+    internal static TransactionQueue? PaymentQueue { get; private set; }
+
+    /// <summary>Phase 14(P14-2) — PRD §3.1 <c>localhost:8002</c> 소켓 서버의 앱 수명 소유자.</summary>
+    internal static PosSocketServer? PosServer { get; private set; }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -77,6 +90,13 @@ public partial class App : Application
 
         // Phase 13(P13-1): 결제 알림창 배경 3장을 미리 디코드해 캐시(표시 지연 방지).
         PaymentNoticeBackgroundSource.WarmUp();
+
+        // Phase 14(P14-2/P14-3): 소켓 서버 + 단일 워커 Queue 기동. 처리 위임은 지금은 스텁이고
+        // (Phase 15에서 PaymentOrchestrator로 교체), 8002 포트가 이미 사용 중이어도(PRD §9) 앱
+        // 기동은 막지 않는다 — PosServer.Start()가 실패를 로그로만 남기고 넘어간다.
+        PaymentQueue = new TransactionQueue(StubPaymentProcessor);
+        PosServer = new PosSocketServer(PaymentQueue);
+        PosServer.Start();
 
         if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--gallery")
         {
@@ -191,6 +211,14 @@ public partial class App : Application
             FileLogger.Info("ESC 훅 스트레스 테스트(알림창 10회 연속 열고 닫기) 완료 — 예외 없음");
             Shutdown();
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--pos-client-test")
+        {
+            // 개발/회귀 검증용(P14-3/P14-4/P14-5 완료 조건, 최종 산출물 아님): 소켓 서버가 이미
+            // 기동돼 있으므로(위에서 Start() 완료) 백그라운드에서 이 프로세스 자신에게 클라이언트로
+            // 접속해 시나리오를 재현한다. UI는 홈 화면을 그대로 띄워 앱이 평소처럼 동작함을 같이 보여준다.
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+            System.Threading.Tasks.Task.Run(PosClientTestScenarios.RunAll);
+        }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--notice-demo")
         {
             // 개발용 결제 알림창 실시간 애니메이션 데모(수동 실행 전용). 예전엔 인자 없는 기본
@@ -208,10 +236,41 @@ public partial class App : Application
         base.OnStartup(e);
     }
 
-    /// <summary>Phase 12(P12-1) — 앱 종료 시 열린 포트를 정리한다(PRD §9 리소스 정리).</summary>
+    /// <summary>Phase 12(P12-1)/Phase 14(P14-2/P14-3) — 앱 종료 시 리소스를 정리한다(PRD §9).</summary>
     protected override void OnExit(ExitEventArgs e)
     {
+        PosServer?.Stop();
+        PaymentQueue?.Stop(TimeSpan.FromSeconds(5));
         ReaderConnections?.CloseAll();
         base.OnExit(e);
+    }
+
+    /// <summary>
+    /// Phase 14 스텁 처리 위임(P14-3) — Phase 15에서 <c>PaymentOrchestrator</c>로 교체될 자리다.
+    /// 지금은 "일정 시간 지연 후 고정 응답"만 돌려준다. 금액 필드에 <c>THROW</c>를 넣으면 일부러
+    /// 예외를 던진다 — 워커가 예외에도 죽지 않는지 확인하는 개발용 테스트 경로(P14-3 완료 조건).
+    /// </summary>
+    private static PosPaymentResponse StubPaymentProcessor(PosPaymentRequest request)
+    {
+        FileLogger.Info($"[stub] 결제 처리 시작 txId={request.TransactionId} amount={request.Amount}");
+
+        if (request.Amount == "THROW")
+        {
+            throw new InvalidOperationException("[stub] 의도적으로 던진 테스트 예외(amount=THROW)");
+        }
+
+        Thread.Sleep(1500);
+
+        FileLogger.Info($"[stub] 결제 처리 종료 txId={request.TransactionId}");
+
+        // 개발용 테스트 경로(H-1 재검증, --pos-client-test): 응답 본문을 최대치 근처까지 부풀려,
+        // 응답을 안 읽는 클라이언트를 상대로 실제 소켓 쓰기 블로킹을 유도할 수 있게 한다. 운영
+        // 경로에서는 amount에 이 값이 올 수 없다(POS가 보내는 임시 전문 필드일 뿐).
+        if (request.Amount == "BIGRESPONSE")
+        {
+            return new Protocol.Pos.PosPaymentResponse("00", request.TransactionId, new string('A', 9900));
+        }
+
+        return new Protocol.Pos.PosPaymentResponse("00", request.TransactionId, "OK(STUB)");
     }
 }
