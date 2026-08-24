@@ -121,6 +121,58 @@ public partial class App : Application
             };
             revealTimer.Start();
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--presenter-test")
+        {
+            // 개발/회귀 검증용(P13-6 완료 조건): IPaymentNoticePresenter의 모든 메서드를 백그라운드
+            // 스레드에서 호출해 예외 없이 동작하는지, 닫힌 뒤 ChangeState/Close가 조용히 무시되는지,
+            // Canceled 이벤트가 취소 1회당 정확히 1번만 발생하는지 확인한다. 각 단계 사이에 사람이
+            // 취소 버튼/ESC를 눌러볼 시간(대기 구간)을 둔다 — 로그(FileLogger)로 결과 확인.
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var presenter = new PaymentNoticePresenter();
+            int cancelCount = 0;
+            presenter.Canceled += (_, _) =>
+            {
+                cancelCount++;
+                FileLogger.Info($"[presenter-test] Canceled 이벤트 발생 (누적 {cancelCount}회)");
+            };
+
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    presenter.Show(PaymentNoticeState.IcCardRequest);
+                    FileLogger.Info("[presenter-test][BG] Show(IcCardRequest) 성공");
+                    System.Threading.Thread.Sleep(1000);
+
+                    presenter.ChangeState(PaymentNoticeState.FallbackCardRequest);
+                    FileLogger.Info("[presenter-test][BG] ChangeState(FallbackCardRequest) 성공");
+                    System.Threading.Thread.Sleep(1000);
+
+                    presenter.ChangeState(PaymentNoticeState.VanProcessing);
+                    FileLogger.Info("[presenter-test][BG] ChangeState(VanProcessing) 성공");
+                    System.Threading.Thread.Sleep(1000);
+
+                    presenter.ChangeState(PaymentNoticeState.IcCardRequest);
+                    FileLogger.Info("[presenter-test][BG] ChangeState(IcCardRequest) 성공 — 이제 취소 가능 상태, 15초 대기(수동 취소 테스트 구간)");
+                    System.Threading.Thread.Sleep(15000);
+
+                    presenter.Close();
+                    FileLogger.Info("[presenter-test][BG] Close() 성공");
+
+                    presenter.Close();
+                    FileLogger.Info("[presenter-test][BG] Close() 재호출(이미 닫힘) — 예외 없이 통과했으면 성공, 위 경고 로그 확인");
+
+                    presenter.ChangeState(PaymentNoticeState.IcCardRequest);
+                    FileLogger.Info("[presenter-test][BG] 닫힌 뒤 ChangeState() — 예외 없이 통과했으면 성공, 위 경고 로그 확인");
+
+                    FileLogger.Info($"[presenter-test] 전체 완료 — 예외 없음, Canceled 누적 {cancelCount}회");
+                }
+                catch (Exception ex)
+                {
+                    FileLogger.Error($"[presenter-test][BG] 예외 발생: {ex}");
+                }
+            });
+        }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--esc-hook-stress-test")
         {
             // 개발/회귀 검증용(docs/payment_relay/development_plan.md P13-5 완료 조건 "10회 연속
