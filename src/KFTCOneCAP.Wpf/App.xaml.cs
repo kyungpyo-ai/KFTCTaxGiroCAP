@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Windows;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
+using KFTCOneCAP.Wpf.Services.Payment;
 using KFTCOneCAP.Wpf.Services.Reader;
 using KFTCOneCAP.Wpf.Services.Settings;
 using KFTCOneCAP.Wpf.ViewModels;
@@ -84,6 +85,58 @@ public partial class App : Application
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--home")
         {
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+        }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--home-notice-test")
+        {
+            // 개발/회귀 검증용(docs/payment_relay/development_plan.md P13-4): 홈 화면을 먼저 띄운 뒤
+            // 2초 후 알림창을 같은 프로세스에서 띄워, "알림창이 홈 화면을 전면에 끌어올리지 않는다"를
+            // 실기로 재현할 수 있게 한다. StartupUri만으로는 창을 하나만 띄울 수 있어 별도 분기로 둔다.
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                new PaymentNoticeWindow().Show();
+            };
+            timer.Start();
+        }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--notice-van-processing-test")
+        {
+            // 개발/회귀 검증용(P13-5 완료 조건 "VanProcessing 중 ESC를 눌러도 취소가 발생하지 않음"):
+            // 3초 자동 순환 데모(PaymentNoticeWindow())는 상태가 계속 바뀌어 타이밍을 맞추기 어려우므로,
+            // State를 VanProcessing으로 고정한 채(순환 없이) 띄워 ESC 게이팅을 정확히 재현/검증한다.
+            var vm = new PaymentNoticeViewModel { State = PaymentNoticeState.VanProcessing };
+            var window = new PaymentNoticeWindow(vm);
+            MainWindow = window;
+            window.Show();
+
+            // VanProcessing 상태에서는 취소 버튼이 항상 disabled로 보이므로(정상 게이팅이든, ESC가
+            // 게이트를 뚫고 실제로 취소해버린 버그든 겉보기엔 똑같다), 5초 뒤 IcCardRequest로 전환해
+            // "여전히 취소 가능한지"(_canceled가 실제로는 false인지)를 눈으로 구분할 수 있게 한다.
+            var revealTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+            revealTimer.Tick += (_, _) =>
+            {
+                revealTimer.Stop();
+                vm.State = PaymentNoticeState.IcCardRequest;
+            };
+            revealTimer.Start();
+        }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--esc-hook-stress-test")
+        {
+            // 개발/회귀 검증용(docs/payment_relay/development_plan.md P13-5 완료 조건 "10회 연속
+            // 열고 닫은 뒤에도 훅이 남아 있지 않음"): 알림창을 같은 프로세스에서 10회 연속 열고 닫아
+            // ESC 훅 설치/해제(PaymentNoticeEscapeHook.Install/Uninstall)가 누적 실패 없이 반복되는지
+            // 확인한다. 훅 설치는 생성자에서, 해제는 Closed에서 동기로 일어나므로 메시지 펌프 없이도
+            // 안전하다. 예외 없이 끝까지 돌면 성공 — 끝나면 조용히 종료한다.
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            for (int i = 0; i < 10; i++)
+            {
+                var window = new PaymentNoticeWindow();
+                window.Show();
+                window.Close();
+            }
+            FileLogger.Info("ESC 훅 스트레스 테스트(알림창 10회 연속 열고 닫기) 완료 — 예외 없음");
+            Shutdown();
         }
         else
         {

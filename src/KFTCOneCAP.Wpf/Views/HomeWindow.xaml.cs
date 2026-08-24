@@ -189,6 +189,22 @@ public partial class HomeWindow : Window
         Hide();
     }
 
+    /// <summary>
+    /// (docs/payment_relay/development_plan.md P13-4) 결제 알림창이 뜨기 직전, 홈 화면이 화면에
+    /// 떠 있는 상태였다면 트레이로 내려 알림창이 홈 화면을 전면에 끌어올리지 않도록 한다
+    /// (<see cref="PaymentNoticeWindow"/> 생성자에서 호출). 최소화 버튼 클릭과 완전히 같은 동작이라
+    /// 기존 <see cref="MinimizeToTray"/>를 그대로 재사용한다 — 별도 경로를 만들면 트레이 아이콘 생성/
+    /// 표시 로직이 두 곳으로 갈라져 어긋날 위험이 있다(P12-6에서 확인된 "정리 로직 복붙" 결함과
+    /// 같은 종류).
+    /// </summary>
+    internal void MinimizeToTrayForPaymentNotice()
+    {
+        if (IsVisible)
+        {
+            MinimizeToTray();
+        }
+    }
+
     private void RestoreFromTray()
     {
         Show();

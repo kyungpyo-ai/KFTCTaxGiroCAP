@@ -54,6 +54,8 @@ public partial class PaymentNoticeWindow : Window
     private const double ArrowMsTop = 175;
 
     private readonly PaymentNoticeViewModel _viewModel;
+    private readonly PaymentNoticeEscapeHook _escapeHook;
+    private EventHandler? _dispatcherShutdownHandler;
     private bool _isFirstRender = true;
     private bool _isTextAFront = true;
 
@@ -82,11 +84,47 @@ public partial class PaymentNoticeWindow : Window
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         DataContext = _viewModel;
 
+        SuppressHomeWindowForeground();
+
         ReaderImage.Source = PaymentNoticeBackgroundSource.ReaderSource;
 
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
         Loaded += (_, _) => ApplyState(_viewModel.State, animate: false);
         Closed += PaymentNoticeWindow_Closed;
+
+        // P13-5: ESC 전역 훅. 창이 뜬 순간부터 설치해 다른 프로그램(POS 등)에 포커스가 있어도
+        // ESC로 취소할 수 있게 한다. 해제는 PaymentNoticeWindow_Closed에서(3중 보장 중 ①), 아래
+        // Dispatcher.ShutdownStarted 백스톱이 ③(development_plan.md P13-5 "해제 3중 보장").
+        _escapeHook = new PaymentNoticeEscapeHook(
+            isCancelAllowed: () => _viewModel.IsCancelAllowed,
+            onEscapeCancel: () => _viewModel.CancelCommand.Execute(null),
+            dispatcher: Dispatcher);
+        _escapeHook.Install();
+
+        _dispatcherShutdownHandler = (_, _) => _escapeHook.Uninstall();
+        Dispatcher.ShutdownStarted += _dispatcherShutdownHandler;
+    }
+
+    /// <summary>
+    /// (docs/payment_relay/development_plan.md P13-4, PRD §5.1) 알림창 표시가 홈 화면을 전면에
+    /// 끌어올리지 않는다 — 반대로, 홈 화면이 떠 있는 상태였다면 알림창이 뜨기 전에 홈 화면을
+    /// 먼저 트레이로 내린다. 그러지 않으면 알림창을 닫을 때 바로 뒤에 있던 홈 화면이 OS 기본
+    /// 활성화 순서상 자동으로 전면에 올라온다(실기 검증 완료 — 2026-08-24).
+    /// </summary>
+    private static void SuppressHomeWindowForeground()
+    {
+        if (Application.Current is null)
+        {
+            return;
+        }
+
+        foreach (Window window in Application.Current.Windows)
+        {
+            if (window is HomeWindow home)
+            {
+                home.MinimizeToTrayForPaymentNotice();
+            }
+        }
     }
 
     private void PlayIcCardAnimation()
@@ -396,5 +434,14 @@ public partial class PaymentNoticeWindow : Window
         ((Storyboard)ArrowImage.Resources["ArrowBounceDownStoryboard"]).Stop(ArrowImage);
         ((Storyboard)ArrowImage.Resources["ArrowBounceLeftStoryboard"]).Stop(ArrowImage);
         _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
+
+        // 해제 3중 보장 ①(P13-5). 창이 사라지는 경로(취소/완료/X/Alt+F4)는 전부 Closed로 모인다 —
+        // 경로마다 해제 코드를 복붙하지 않는다(P12-6에서 확인된 결함과 같은 종류를 반복하지 않기 위함).
+        _escapeHook.Uninstall();
+        if (_dispatcherShutdownHandler != null)
+        {
+            Dispatcher.ShutdownStarted -= _dispatcherShutdownHandler;
+            _dispatcherShutdownHandler = null;
+        }
     }
 }
