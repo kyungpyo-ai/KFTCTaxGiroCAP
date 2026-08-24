@@ -1826,12 +1826,27 @@ Phase 12 말미 "Phase 13 착수 전에 정리돼 있어야 할 것"으로 적�
   상태를 보고 판단하면 두 경로가 어긋난다.
 
 **완료 조건**
-- [ ] `PaymentNoticeState`가 `Services/Payment/`에 있고, WPF 타입을 참조하지 않음
-- [ ] ViewModel에 `Visibility` 타입이 등장하지 않음(grep으로 확인)
-- [ ] 취소 버튼 10회 연타 + ESC 5회 연타 → 취소 통지가 **정확히 1회**임을 로그로 확인
-- [ ] `VanProcessing`으로 전환하면 취소 버튼이 **비활성 상태로 보이고** 클릭이 무시됨
-- [ ] `VanProcessing` 중 ESC를 눌러도 취소가 발생하지 않고, 그 ESC가 다른 프로그램에 정상 전달됨
-- [ ] 취소 가능 여부 판정 지점이 grep으로 **1곳**임
+- [x] `PaymentNoticeState`가 `Services/Payment/`에 있고, WPF 타입을 참조하지 않음(기존부터 완료돼 있었음)
+- [x] ViewModel에 `Visibility` 타입이 등장하지 않음(grep으로 확인 — `PaymentNoticeViewModel.cs`에
+      `State`/`IsCancelAllowed`/`CancelCommand`/`Canceled` 이벤트만 존재)
+- [x] 취소 버튼 연타 → 취소 통지가 **정확히 1회**임을 실기 확인(`windows_click`으로 클릭 1회 후 버튼이
+      즉시 `[disabled]`로 전환되는 것을 스냅샷으로 검증 — `_canceled` 플래그가 `CancelCommand`의
+      `CanExecute`를 통해 두 번째 클릭 자체를 막으므로 `Cancel()` 본문은 1회만 실행됨).
+      **ESC 5회 연타는 P13-5(ESC 훅 자체가 아직 없음)에서 마저 검증**.
+- [x] `VanProcessing`으로 전환하면 취소 버튼이 **비활성 상태로 보이고** 클릭이 무시됨 — 자동 순환
+      데모(`PaymentNoticeWindow()` 3초 타이머)로 IC→MS→VanProcessing 전환 중 스냅샷 실기 확인
+      (VanProcessing 진입 시 `[disabled]`, 다음 상태로 빠져나오면 재활성화됨을 확인)
+- [ ] `VanProcessing` 중 ESC를 눌러도 취소가 발생하지 않고, 그 ESC가 다른 프로그램에 정상 전달됨 — **P13-5로 이월**(ESC 훅 미구현)
+- [x] 취소 가능 여부 판정 지점이 grep으로 **1곳**임 — `PaymentNoticeViewModel.IsCancelAllowed`
+      (`!_canceled && State != PaymentNoticeState.VanProcessing`) 한 곳에서만 판정, `CancelCommand`의
+      `[RelayCommand(CanExecute = nameof(IsCancelAllowed))]`가 그대로 재사용
+
+**구현 메모(2026-08-24)**: `CommunityToolkit.Mvvm`의 `[RelayCommand(CanExecute = ...)]` +
+`[NotifyCanExecuteChangedFor]`/`[NotifyPropertyChangedFor]` 조합으로 코드비하인드 클릭 핸들러 없이도
+버튼 활성/비활성이 자동으로 따라온다(WPF `Button.Command`가 `ICommand.CanExecuteChanged`를 구독해
+`IsEnabled`를 스스로 갱신) — `Views/PaymentNoticeWindow.xaml.cs`의 빈 `CancelButton_Click`을 제거하고
+XAML을 `Command="{Binding CancelCommand}"`로 바꿨다. `Canceled` 이벤트는 아직 아무도 구독하지 않는다
+(Phase 15에서 `IPaymentNoticePresenter` 구현체가 구독할 예정, P13-6).
 
 ## P13-3. `Views/PaymentNoticeWindow` 신설
 
@@ -1968,10 +1983,11 @@ Phase 15가 없어 결제 요청으로 알림창을 띄울 수 없으므로 **�
 
 ## Phase 13 시각 구현 — 중간 정리 (2026-08-24, 일단 여기까지)
 
-**사용자 확정: 알림창 시각 구현은 이 상태로 일단 멈춘다.** 아래 내용은 완료 선언이 아니라 "지금까지
-무엇을 어떻게 만들었고, 왜 이렇게 됐는지" 중간 스냅샷이다 — 정교화(세부 각도·타이밍·자산 품질 다듬기)는
-추후 별도로 다시 진행할 예정이다. P13-2/4/5/6/7(취소 1회 제한, 표시 정책, ESC 훅, 제어 진입점 계약,
-9개 시나리오 검증)은 **아직 손대지 않았다** — 이번 라운드는 P13-1/1-3 범위의 시각 요소만 다뤘다.
+**사용자 확정(2026-08-24): 알림창 시각 정교화는 이 상태로 일단 멈추고, 실제 결제 로직에 필요한
+P13-2부터 이어서 구현한다.** 아래 내용은 완료 선언이 아니라 "지금까지 무엇을 어떻게 만들었고, 왜
+이렇게 됐는지" 중간 스냅샷이다 — 정교화(세부 각도·타이밍·자산 품질 다듬기)는 추후 별도로 다시 진행할
+예정이다. **P13-2(취소 1회 제한)는 이후 완료**(위 P13-2 절 참고). P13-4/5/6/7(표시 정책, ESC 훅,
+제어 진입점 계약, 9개 시나리오 검증)은 **아직 손대지 않았다**.
 
 ### 최종 자산 구성
 
@@ -2027,7 +2043,8 @@ _preview_crop/거래중 애니메이션.png`)을 구현하는 과정에서 같�
 ### 검증
 매 수정마다 `dotnet build`(경고 0/오류 0) 후 실제 실행해 스크린샷/연속 캡처로 확인했다 — IC/MS 카드
 각도·정지 위치, PROCESSING 궤도 글로우가 원판 밖으로 새지 않는지, 홈 화면 회귀 없음까지 포함.
-9개 시나리오 검증표(P13-7)와 취소·ESC 훅(P13-2/5)은 이번 라운드에 다루지 않아 미확인 상태로 남아있다.
+9개 시나리오 검증표(P13-7)와 ESC 훅(P13-5)은 이번 라운드에 다루지 않아 미확인 상태로 남아있다.
+취소 1회 제한(P13-2)은 2026-08-24에 별도로 이어서 구현·검증했다(위 P13-2 절 "구현 메모" 참고).
 
 ## Phase 13 완료 후
 

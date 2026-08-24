@@ -389,10 +389,6 @@ public partial class PaymentNoticeWindow : Window
         }
     }
 
-    private void CancelButton_Click(object sender, RoutedEventArgs e)
-    {
-    }
-
     private void PaymentNoticeWindow_Closed(object? sender, EventArgs e)
     {
         StopCard();
