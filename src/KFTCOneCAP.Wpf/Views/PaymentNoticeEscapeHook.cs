@@ -16,24 +16,28 @@ namespace KFTCOneCAP.Wpf.Views;
 /// 변수로 넘기면 네이티브 쪽은 계속 그 주소를 참조하는데 관리 객체는 GC가 수거해버려 랜덤한 시점에
 /// 프로세스가 죽는다(Phase 9 P9-2에서 리더기 CALLBACK에 대해 세운 것과 정확히 같은 규칙).
 ///
-/// 콜백 안에서는 "삼킬지 말지"를 정하는 데 필요한 최소 동기 판정(<see cref="_isCancelAllowed"/> 호출 —
-/// 필드 읽기 수준)만 하고, 실제 취소 처리(<see cref="_onEscapeCancel"/>)는
-/// <see cref="Dispatcher.BeginInvoke(Delegate)"/>로 미뤄 즉시 반환한다 — 저수준 훅 콜백이 느리면 OS가
-/// 훅을 강제로 떼어내기 때문이다(그 처리 자체는 가볍더라도, 콜백 안에서 직접 실행하지 않는다는 원칙을
-/// 지킨다).
+/// (Opus 검증 리뷰 2026-08-24, H-3) "삼킬지 판정"과 "취소 확정"을 <see cref="_tryCancel"/> 한 호출로
+/// **동기·원자적으로** 처리한다 — 이 훅은 자신을 설치한 UI 스레드 위에서 호출되므로(WH_KEYBOARD_LL의
+/// 표준 동작), 이 호출이 끝나기 전까지는 다른 UI 스레드 작업(Phase 15 워커의
+/// <c>Dispatcher.Invoke(ChangeState)</c> 등)이 끼어들 수 없다. 예전에는 판정만 동기로 하고 실제 취소
+/// 실행을 <see cref="Dispatcher.BeginInvoke(Delegate)"/>로 미뤘는데, 그 사이 Send 우선순위로 들어온
+/// <c>ChangeState(VanProcessing)</c>이 먼저 처리되면 ESC는 이미 삼켰는데 취소는 조용히 무시되는
+/// 결함이 있었다. 무거울 수 있는 외부 통지(<see cref="_notifyCanceled"/>)만 계속
+/// <see cref="Dispatcher.BeginInvoke(Delegate)"/>로 미룬다 — 저수준 훅 콜백이 느리면 OS가 훅을 강제로
+/// 떼어내기 때문에, 상태 확정처럼 빠른 것만 동기로 하고 나머지는 미루는 원칙은 유지한다.
 /// </summary>
 internal sealed class PaymentNoticeEscapeHook : IDisposable
 {
     private readonly LowLevelKeyboardProc _proc;
-    private readonly Func<bool> _isCancelAllowed;
-    private readonly Action _onEscapeCancel;
+    private readonly Func<bool> _tryCancel;
+    private readonly Action _notifyCanceled;
     private readonly Dispatcher _dispatcher;
     private IntPtr _hookId = IntPtr.Zero;
 
-    public PaymentNoticeEscapeHook(Func<bool> isCancelAllowed, Action onEscapeCancel, Dispatcher dispatcher)
+    public PaymentNoticeEscapeHook(Func<bool> tryCancel, Action notifyCanceled, Dispatcher dispatcher)
     {
-        _isCancelAllowed = isCancelAllowed ?? throw new ArgumentNullException(nameof(isCancelAllowed));
-        _onEscapeCancel = onEscapeCancel ?? throw new ArgumentNullException(nameof(onEscapeCancel));
+        _tryCancel = tryCancel ?? throw new ArgumentNullException(nameof(tryCancel));
+        _notifyCanceled = notifyCanceled ?? throw new ArgumentNullException(nameof(notifyCanceled));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _proc = HookCallback; // 필드로 보관 — GC 보호(위 클래스 주석 참고)
     }
@@ -73,12 +77,14 @@ internal sealed class PaymentNoticeEscapeHook : IDisposable
         if (nCode >= 0 && IsKeyDown(wParam))
         {
             var data = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-            if (data.vkCode == LowLevelKeyboardHookNative.VK_ESCAPE && _isCancelAllowed())
+            if (data.vkCode == LowLevelKeyboardHookNative.VK_ESCAPE && _tryCancel())
             {
-                _dispatcher.BeginInvoke(_onEscapeCancel);
+                // 취소는 위 _tryCancel() 안에서 이미 동기로 확정됐다 — 여기서는 통지만 미룬다.
+                _dispatcher.BeginInvoke(_notifyCanceled);
                 // 우리가 취소로 소비했으므로 다른 프로그램(POS 등)에 이중으로 전달하지 않는다
                 // (development_plan.md P13-5 "ESC를 삼킬 것인가" 확정 사항). VanProcessing 등
-                // 취소를 처리하지 않는 구간은 이 분기에 들어오지 않으므로 아래로 흘러 CallNextHookEx.
+                // 취소를 처리하지 않는 구간은 _tryCancel()이 false를 반환해 이 분기에 들어오지 않으므로
+                // 아래로 흘러 CallNextHookEx.
                 return (IntPtr)1;
             }
         }

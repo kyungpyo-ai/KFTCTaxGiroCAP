@@ -178,7 +178,8 @@ public partial class App : Application
             // 개발/회귀 검증용(docs/payment_relay/development_plan.md P13-5 완료 조건 "10회 연속
             // 열고 닫은 뒤에도 훅이 남아 있지 않음"): 알림창을 같은 프로세스에서 10회 연속 열고 닫아
             // ESC 훅 설치/해제(PaymentNoticeEscapeHook.Install/Uninstall)가 누적 실패 없이 반복되는지
-            // 확인한다. 훅 설치는 생성자에서, 해제는 Closed에서 동기로 일어나므로 메시지 펌프 없이도
+            // 확인한다. 훅 설치는 Loaded에서, 해제는 Closed에서 일어나며, Show()가 반환하기 전에
+            // Loaded가 처리되므로(WPF가 Show() 안에서 그만큼 디스패처를 펌프함) 메시지 펌프 없이도
             // 안전하다. 예외 없이 끝까지 돌면 성공 — 끝나면 조용히 종료한다.
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
             for (int i = 0; i < 10; i++)
@@ -190,10 +191,18 @@ public partial class App : Application
             FileLogger.Info("ESC 훅 스트레스 테스트(알림창 10회 연속 열고 닫기) 완료 — 예외 없음");
             Shutdown();
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--notice-demo")
+        {
+            // 개발용 결제 알림창 실시간 애니메이션 데모(수동 실행 전용). 예전엔 인자 없는 기본
+            // 실행이 곧장 이 데모로 갔는데(Opus 검증 리뷰 2026-08-24, H-2), 그러면 배포 빌드에서
+            // exe를 그냥 실행했을 때도 알림창 데모가 뜬다 — 원본 앱은 트레이 상주로 홈 화면 기동이
+            // 정상 동작이므로 어긋난다. 데모는 이 명시적 인자로만 접근하게 분리했다.
+            StartupUri = new Uri("Views/PaymentNoticeWindow.xaml", UriKind.Relative);
+        }
         else
         {
-            // 기본 실행 시 실시간 애니메이션 데모(PaymentNoticeWindow)를 화면에 띄움
-            StartupUri = new Uri("Views/PaymentNoticeWindow.xaml", UriKind.Relative);
+            // 기본 실행: 홈 화면(원본 앱 정상 동작과 일치 — 1차 범위 완료 문서 참고).
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
         }
 
         base.OnStartup(e);

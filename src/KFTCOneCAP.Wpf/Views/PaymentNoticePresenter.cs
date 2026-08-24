@@ -39,11 +39,21 @@ public sealed class PaymentNoticePresenter : IPaymentNoticePresenter
     {
         RunOnUiThread(() =>
         {
+            // (Opus 검증 리뷰 2026-08-24, M-2) 예전엔 이미 떠 있으면 기존 창/뷰모델을 재사용하며
+            // 상태만 바꿨는데, PaymentNoticeViewModel의 _canceled는 sticky라서(P13-2 "취소는 정확히
+            // 한 번만" 규칙) 이전 거래에서 취소된 뒤 Close()를 부르지 않고 곧장 다음 거래를 Show()로
+            // 시작하면, 새 거래인데도 취소가 처음부터 막혀 있는 결함이 있었다. Show()는 항상 "새
+            // 알림을 시작한다"는 뜻이어야 하므로(같은 알림 안에서 상태만 바꾸는 것은 ChangeState의
+            // 역할), 기존 창이 있으면 재사용하지 않고 닫은 뒤 매번 새로 만든다.
             if (_window != null)
             {
-                // 이미 떠 있으면 새 창을 또 만들지 않고 상태만 갱신한다(중복 Show 방지).
-                _viewModel!.State = state;
-                return;
+                var oldWindow = _window;
+                var oldViewModel = _viewModel;
+                oldWindow.Closed -= OnWindowClosed;
+                oldViewModel!.Canceled -= OnViewModelCanceled;
+                _window = null;
+                _viewModel = null;
+                oldWindow.Close();
             }
 
             _viewModel = new PaymentNoticeViewModel { State = state };

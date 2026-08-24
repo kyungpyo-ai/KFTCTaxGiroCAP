@@ -74,6 +74,10 @@ public partial class PaymentNoticeWindow : Window
                 _ => PaymentNoticeState.VanProcessing,
             };
         };
+        // (Opus 검증 리뷰 2026-08-24, H-1) 창을 닫아도 아무도 Stop()하지 않아 타이머가 Dispatcher에
+        // 영구히 남아 계속 발화하고, 그 클로저가 창/뷰모델까지 붙들어 누수로 이어지는 결함이 실측으로
+        // 확인됐다(닫은 뒤 10초간 3초 주기 그대로 계속 발화). Closed에서 반드시 멈춘다.
+        Closed += (_, _) => timer.Stop();
         timer.Start();
     }
 
@@ -89,18 +93,30 @@ public partial class PaymentNoticeWindow : Window
         ReaderImage.Source = PaymentNoticeBackgroundSource.ReaderSource;
 
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
-        Loaded += (_, _) => ApplyState(_viewModel.State, animate: false);
+
+        // P13-5: ESC 전역 훅. _tryCancel은 "삼킬지 판정"과 "취소 확정"을 한 번에 동기 처리한다
+        // (H-3 수정 — ViewModel.TryMarkCanceled 주석 참고). 통지(RaiseCanceledEvent)만 훅 내부에서
+        // Dispatcher.BeginInvoke로 지연된다.
+        _escapeHook = new PaymentNoticeEscapeHook(
+            tryCancel: () => _viewModel.TryMarkCanceled(),
+            notifyCanceled: () => _viewModel.RaiseCanceledEvent(),
+            dispatcher: Dispatcher);
+
+        // (Opus 검증 리뷰 2026-08-24, M-1) 훅 설치를 생성자가 아니라 Loaded로 옮겼다 — 생성자에서
+        // 설치하면 "창을 만들기만 하고 Show()는 하지 않는" 워밍업류 패턴(HomeWindow의
+        // ReaderSetupWindow 워밍업과 같은 최적화가 나중에 이 창에도 적용될 경우)에서 전역 키보드
+        // 훅이 화면에 보이지도 않는 창 때문에 걸린 채 남을 수 있다(실측 확인: Show/Close 안 하고
+        // 생성만 하면 훅이 영구히 걸림). Loaded는 실제로 화면에 표시될 때만 발생하므로, "보일 때만
+        // 설치, 닫히면 해제"가 정확히 대칭을 이룬다.
+        Loaded += (_, _) =>
+        {
+            ApplyState(_viewModel.State, animate: false);
+            _escapeHook.Install();
+        };
         Closed += PaymentNoticeWindow_Closed;
 
-        // P13-5: ESC 전역 훅. 창이 뜬 순간부터 설치해 다른 프로그램(POS 등)에 포커스가 있어도
-        // ESC로 취소할 수 있게 한다. 해제는 PaymentNoticeWindow_Closed에서(3중 보장 중 ①), 아래
-        // Dispatcher.ShutdownStarted 백스톱이 ③(development_plan.md P13-5 "해제 3중 보장").
-        _escapeHook = new PaymentNoticeEscapeHook(
-            isCancelAllowed: () => _viewModel.IsCancelAllowed,
-            onEscapeCancel: () => _viewModel.CancelCommand.Execute(null),
-            dispatcher: Dispatcher);
-        _escapeHook.Install();
-
+        // 해제는 PaymentNoticeWindow_Closed에서(3중 보장 중 ①), 아래 Dispatcher.ShutdownStarted
+        // 백스톱이 ③(development_plan.md P13-5 "해제 3중 보장").
         _dispatcherShutdownHandler = (_, _) => _escapeHook.Uninstall();
         Dispatcher.ShutdownStarted += _dispatcherShutdownHandler;
     }
