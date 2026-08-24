@@ -1,8 +1,7 @@
-﻿<Application x:Class="KFTCOneCAP.Wpf.App"
+<Application x:Class="KFTCOneCAP.Wpf.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:KFTCOneCAP.Wpf"
-             StartupUri="Views/HomeWindow.xaml">
+             xmlns:local="clr-namespace:KFTCOneCAP.Wpf">
     <!--
         2026-08-14 변경(Phase 6, 컴팩트 모드 대응, docs/home_reader_setup/ROADMAP.md 참고): 리소스 딕셔너리 병합을
         전부 App.xaml.cs OnStartup(코드 비하인드)으로 옮겼다. 일반/컴팩트 모드에 따라

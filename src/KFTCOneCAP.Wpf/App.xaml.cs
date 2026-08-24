@@ -5,6 +5,7 @@ using System.Windows;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Reader;
 using KFTCOneCAP.Wpf.Services.Settings;
+using KFTCOneCAP.Wpf.ViewModels;
 using KFTCOneCAP.Wpf.Views;
 
 namespace KFTCOneCAP.Wpf;
@@ -73,9 +74,22 @@ public partial class App : Application
         ReaderConnections = new ReaderConnectionManager(new ReaderSettingsService());
         ReaderConnections.InitializeFromSettings();
 
-        // Phase 13(P13-1): 결제 알림창 배경 3장을 미리 디코드해 캐시(표시 지연 방지). 워밍업 창
-        // 방식은 쓰지 않는다(P12-6에서 부작용 확인됨) — 정적 생성자만 앞당겨 실행.
+        // Phase 13(P13-1): 결제 알림창 배경 3장을 미리 디코드해 캐시(표시 지연 방지).
         PaymentNoticeBackgroundSource.WarmUp();
+
+        if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--gallery")
+        {
+            StartupUri = new Uri("Views/StyleGalleryWindow.xaml", UriKind.Relative);
+        }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--home")
+        {
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+        }
+        else
+        {
+            // 기본 실행 시 실시간 애니메이션 데모(PaymentNoticeWindow)를 화면에 띄움
+            StartupUri = new Uri("Views/PaymentNoticeWindow.xaml", UriKind.Relative);
+        }
 
         base.OnStartup(e);
     }

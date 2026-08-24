@@ -95,7 +95,7 @@ internal static class PaymentNoticeBackgroundSource
     {
         var bitmap = new BitmapImage();
         bitmap.BeginInit();
-        bitmap.UriSource = new Uri($"pack://application:,,,/{packRelativePath}", UriKind.Absolute);
+        bitmap.UriSource = new Uri($"pack://application:,,,/KFTCOneCAP.Wpf;component/{packRelativePath}", UriKind.Absolute);
         bitmap.CacheOption = BitmapCacheOption.OnLoad;
         bitmap.EndInit();
         bitmap.Freeze();

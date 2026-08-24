@@ -34,15 +34,13 @@
     <Grid>
         <Canvas Width="750" Height="650">
 
-            <!-- ===== 정지 리더기(항상 동일, 크로스페이드 대상 아님) =====
-                 Source는 코드비하인드 생성자에서 PaymentNoticeBackgroundSource.ReaderSource로 1회 설정한다
-                 (배경 소스 단일 지점 규칙). -->
+            <!-- ===== 정지 리더기 ===== -->
             <Image x:Name="ReaderImage"
                    Stretch="Uniform" Width="340" Height="226.67"
-                   Canvas.Left="205" Canvas.Top="245" IsHitTestVisible="False"/>
+                   Canvas.Left="205" Canvas.Top="260" IsHitTestVisible="False"/>
 
-            <!-- ===== 문구 크로스페이드 레이어(배경/문구 동시 크로스페이드) ===== -->
-            <StackPanel x:Name="TextPanelA" Canvas.Left="0" Canvas.Top="70" Width="750" Opacity="1"
+            <!-- ===== 문구 크로스페이드 레이어 ===== -->
+            <StackPanel x:Name="TextPanelA" Canvas.Left="0" Canvas.Top="38" Width="750" Opacity="1"
                         HorizontalAlignment="Center">
                 <TextBlock x:Name="TextAKr1" HorizontalAlignment="Center" TextAlignment="Center"
                            FontFamily="{StaticResource PretendardFontFamily}" FontSize="22" FontWeight="Bold"
@@ -51,14 +49,14 @@
                            FontFamily="{StaticResource PretendardFontFamily}" FontSize="22" FontWeight="Bold"
                            Foreground="{StaticResource TitleTextBrush}" Margin="0,4,0,0"/>
                 <TextBlock x:Name="TextAEn1" HorizontalAlignment="Center" TextAlignment="Center"
-                           FontFamily="{StaticResource PretendardFontFamily}" FontSize="17"
-                           Foreground="{StaticResource SubTextBrush}" Margin="0,18,0,0"/>
+                           FontFamily="{StaticResource PretendardFontFamily}" FontSize="16"
+                           Foreground="{StaticResource SubTextBrush}" Margin="0,14,0,0"/>
                 <TextBlock x:Name="TextAEn2" HorizontalAlignment="Center" TextAlignment="Center"
-                           FontFamily="{StaticResource PretendardFontFamily}" FontSize="17"
+                           FontFamily="{StaticResource PretendardFontFamily}" FontSize="16"
                            Foreground="{StaticResource SubTextBrush}" Margin="0,2,0,0"/>
             </StackPanel>
 
-            <StackPanel x:Name="TextPanelB" Canvas.Left="0" Canvas.Top="70" Width="750" Opacity="0"
+            <StackPanel x:Name="TextPanelB" Canvas.Left="0" Canvas.Top="38" Width="750" Opacity="0"
                         HorizontalAlignment="Center">
                 <TextBlock x:Name="TextBKr1" HorizontalAlignment="Center" TextAlignment="Center"
                            FontFamily="{StaticResource PretendardFontFamily}" FontSize="22" FontWeight="Bold"
@@ -67,20 +65,24 @@
                            FontFamily="{StaticResource PretendardFontFamily}" FontSize="22" FontWeight="Bold"
                            Foreground="{StaticResource TitleTextBrush}" Margin="0,4,0,0"/>
                 <TextBlock x:Name="TextBEn1" HorizontalAlignment="Center" TextAlignment="Center"
-                           FontFamily="{StaticResource PretendardFontFamily}" FontSize="17"
-                           Foreground="{StaticResource SubTextBrush}" Margin="0,18,0,0"/>
+                           FontFamily="{StaticResource PretendardFontFamily}" FontSize="16"
+                           Foreground="{StaticResource SubTextBrush}" Margin="0,14,0,0"/>
                 <TextBlock x:Name="TextBEn2" HorizontalAlignment="Center" TextAlignment="Center"
-                           FontFamily="{StaticResource PretendardFontFamily}" FontSize="17"
+                           FontFamily="{StaticResource PretendardFontFamily}" FontSize="16"
                            Foreground="{StaticResource SubTextBrush}" Margin="0,2,0,0"/>
             </StackPanel>
 
-            <!-- ===== 화살표(IC/FALLBACK) / 로딩 인디케이터(PROCESSING) 오버레이 =====
-                 상태 전환 시 순차 페이드(페이드아웃 완료 → 내용 교체 → 페이드인). 카드와 템포를
-                 다르게 하기 위해 화살표는 0.6~0.65초 왕복(카드는 1.1초, PaymentCardShape 참고). -->
-            <!-- Grid는 명시적 크기를 두지 않고 콘텐츠(화살표 이미지 또는 로딩 인디케이터)에 맞춰
-                 자동 크기를 갖는다 — 상태별 위치/크기는 코드비하인드(ConfigureOverlay)가 Image.Width/
-                 Height와 Canvas.Left/Top을 함께 계산해 지정한다. -->
-            <Grid x:Name="OverlayHost" Opacity="0" IsHitTestVisible="False">
+            <!-- ===== 카드 (IC 삽입 / MS 스와이프 / 거래중 카드) ===== -->
+            <Image x:Name="CardImage" Stretch="Uniform" Opacity="0" IsHitTestVisible="False"
+                   Panel.ZIndex="5"
+                   RenderTransformOrigin="0.5,0.5">
+                <Image.RenderTransform>
+                    <TranslateTransform x:Name="CardTranslate" X="0" Y="0"/>
+                </Image.RenderTransform>
+            </Image>
+
+            <!-- ===== 화살표(IC/FALLBACK) / 로딩 인디케이터(PROCESSING) 오버레이 ===== -->
+            <Grid x:Name="OverlayHost" Opacity="0" IsHitTestVisible="False" Panel.ZIndex="10">
                 <Image x:Name="ArrowImage" Stretch="Uniform" Visibility="Collapsed"
                        RenderTransformOrigin="0.5,0.5">
                     <Image.RenderTransform>
@@ -90,19 +92,25 @@
                         </TransformGroup>
                     </Image.RenderTransform>
                     <Image.Resources>
-                        <!-- IC: 아래로 반복 바운스(리더기 슬롯을 향해 내려갔다 올라옴) -->
+                        <!-- IC: 아래로 부드러운 바운스 (슬롯 방향) -->
                         <Storyboard x:Key="ArrowBounceDownStoryboard" RepeatBehavior="Forever" AutoReverse="True">
                             <DoubleAnimation Storyboard.TargetName="ArrowTranslate" Storyboard.TargetProperty="Y"
-                                              From="0" To="14" Duration="0:0:0.6">
+                                             From="0" To="10" Duration="0:0:0.6">
                                 <DoubleAnimation.EasingFunction>
                                     <SineEase EasingMode="EaseInOut"/>
                                 </DoubleAnimation.EasingFunction>
                             </DoubleAnimation>
                         </Storyboard>
-                        <!-- FALLBACK: 왼쪽으로 반복 바운스(긁는 방향으로 갔다가 되돌아옴) -->
+                        <!-- FALLBACK: 대각선 바운스 (MS 슬롯 방향으로 긁기 가이드) -->
                         <Storyboard x:Key="ArrowBounceLeftStoryboard" RepeatBehavior="Forever" AutoReverse="True">
                             <DoubleAnimation Storyboard.TargetName="ArrowTranslate" Storyboard.TargetProperty="X"
-                                              From="0" To="-14" Duration="0:0:0.65">
+                                             From="0" To="-10" Duration="0:0:0.6">
+                                <DoubleAnimation.EasingFunction>
+                                    <SineEase EasingMode="EaseInOut"/>
+                                </DoubleAnimation.EasingFunction>
+                            </DoubleAnimation>
+                            <DoubleAnimation Storyboard.TargetName="ArrowTranslate" Storyboard.TargetProperty="Y"
+                                             From="0" To="7" Duration="0:0:0.6">
                                 <DoubleAnimation.EasingFunction>
                                     <SineEase EasingMode="EaseInOut"/>
                                 </DoubleAnimation.EasingFunction>
@@ -113,25 +121,14 @@
                 <controls:PaymentProcessingIndicator x:Name="ProcessingIndicator" Visibility="Collapsed"/>
             </Grid>
 
-            <!-- ===== 카드(2026-08-21: 벡터 대신 실제 카드 이미지, ArrowImage와 동일한 패턴) =====
-                 반복 슬라이드, 오버레이와 마찬가지로 순차 페이드. Source/Width/Height/Canvas 위치는
-                 코드비하인드 ConfigureCard가 상태별로 지정한다(배경 소스 단일 지점 규칙은
-                 PaymentNoticeBackgroundSource.GetCardSource 한 곳). -->
-            <Image x:Name="CardImage" Stretch="Uniform" Opacity="0" IsHitTestVisible="False"
-                   RenderTransformOrigin="0.5,0.5">
-                <Image.RenderTransform>
-                    <TranslateTransform x:Name="CardTranslate" X="0" Y="0"/>
-                </Image.RenderTransform>
-            </Image>
-
         </Canvas>
 
-        <!-- ===== 취소 버튼(P13-3, 하단 중앙 오버레이, Themes/Buttons.xaml 재사용) ===== -->
+        <!-- ===== 취소 버튼 ===== -->
         <Button x:Name="CancelButton" Content="취소"
                 Style="{StaticResource ReaderSecondaryButtonStyle}"
                 Width="140" Height="40"
                 HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                Margin="0,0,0,18"
+                Margin="0,0,0,24"
                 Click="CancelButton_Click"/>
     </Grid>
 </Window>
