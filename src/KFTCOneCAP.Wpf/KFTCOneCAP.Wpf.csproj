@@ -41,6 +41,21 @@
     <Resource Include="Assets\Fonts\Pretendard-Medium.ttf" />
     <Resource Include="Assets\Fonts\Pretendard-Bold.ttf" />
     <Resource Include="Assets\Images\img_ci_mark.png" />
+    <!--
+      Phase 13(docs/payment_relay/development_plan.md P13-1, 2026-08-21 자산 구조 재구성): 결제
+      알림창 자산. 리더기 몸통은 IC/FALLBACK/PROCESSING 3개 상태 공용 정지 이미지 1장(reader.png,
+      흰색/파란 글로시 스타일), 화살표는 상태별 독립 레이어(arrow_ic.png/arrow_ms.png)로 분리했다.
+      카드도 사용자가 직접 제공한 아이소메트릭 카드 이미지(ic_card.png/ms_card.png)로 교체했다 —
+      벡터로 각도를 직접 재현하려던 시도(Views/Controls/PaymentCardShape.xaml)가 두 차례 실패해
+      (리더기 슬롯 각도 그대로 큰 회전 → 다이아몬드처럼 보임, 세워진 카드+두께 옆면으로 정정해도
+      원본과 미세하게 다름) 실제 카드 이미지로 대체했다(2026-08-21). 이전의 카드까지 합성된 배경
+      (BG_IMG_IC/MS/PROCESSING.png)은 더 이상 쓰지 않는다. LOCK/QR은 배치하지 않는다(범위 밖).
+    -->
+    <Resource Include="Assets\Images\PaymentNotice\reader.png" />
+    <Resource Include="Assets\Images\PaymentNotice\arrow_ic.png" />
+    <Resource Include="Assets\Images\PaymentNotice\arrow_ms.png" />
+    <Resource Include="Assets\Images\PaymentNotice\ic_card.png" />
+    <Resource Include="Assets\Images\PaymentNotice\ms_card.png" />
   </ItemGroup>
 
   <!--

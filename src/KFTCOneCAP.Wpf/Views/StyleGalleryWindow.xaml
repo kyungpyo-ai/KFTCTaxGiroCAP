@@ -119,7 +119,11 @@
                     <TextBlock Text="홈 서브타이틀 (13pt, Regular) : 금융결제원 차세대 결제 솔루션" Style="{StaticResource HomeSubtitleTextStyle}" Margin="0,6,0,0"/>
                     <TextBlock Text="홈 카드 제목 (15pt, Bold) : 리더기 설정" Style="{StaticResource HomeCardTitleTextStyle}" Margin="0,6,0,0"/>
                     <TextBlock Text="홈 카드 설명 (11pt, Regular) : 리더기 연결 상태를 설정하고 점검합니다." Style="{StaticResource HomeCardDescriptionTextStyle}" Margin="0,6,0,0"/>
-                    <TextBlock Text="홈 하단 버튼 (12pt, Regular) : 최소화 / 종료" Style="{StaticResource HomeFooterButtonTextStyle}" Margin="0,6,0,0"/>
+                    <!-- 2026-08-20 수정(Phase 13 검증 중 발견): HomeFooterButtonTextStyle은 더 이상 존재하지
+                         않음(Typography.xaml이 FontSize 전용 sys:Double 리소스로 분리한 이유는 그 파일
+                         상단 주석 참고) — 이 창이 그동안 StartupUri로 실행된 적이 없어 XamlParseException이
+                         잠재해 있었다(이번 결제 알림창 검증을 위해 임시로 StartupUri를 바꿔 실행하며 발견). -->
+                    <TextBlock Text="홈 하단 버튼 (12pt, Regular) : 최소화 / 종료" FontSize="{StaticResource HomeFooterButtonFontSize}" Foreground="{StaticResource MinimizeExitTextBrush}" Margin="0,6,0,0"/>
                     <Separator Margin="0,10,0,10"/>
                     <TextBlock Text="리더기설정 헤더 타이틀 (18pt, Bold) : 리더기 설정" Style="{StaticResource ReaderHeaderTitleTextStyle}"/>
                     <TextBlock Text="리더기설정 헤더 서브타이틀 (13pt, Bold) : 리더기 연결 및 제어 설정을 관리합니다." Style="{StaticResource ReaderHeaderSubtitleTextStyle}" Margin="0,6,0,0"/>
@@ -165,6 +169,23 @@
                 <TextBox Text="비활성화 상태" Width="178" IsEnabled="False"/>
             </StackPanel>
             <TextBlock Text="※ 콤보박스와 동일한 규칙: 두께는 항상 1.5px로 고정, 마우스를 올리면 보더만 진한 회색, 포커스 시 파란색으로 색상만 전환됩니다(레이아웃 흔들림 없음). 텍스트가 잘리지 않고 온전히 보여야 합니다(기본 높이 44px)." FontSize="11" Foreground="{StaticResource SubTextBrush}" Margin="0,6,0,24"/>
+
+            <!-- ===================== 결제 알림창(Phase 13, 시각 구현 개발용 트리거) ===================== -->
+            <!--
+                development_plan.md P13-7: Phase 15(결제 Flow)가 없어 실제 결제 요청으로 알림창을
+                띄울 수 없으므로 만든 개발용 임시 트리거다. 최종 산출물이 아니며, Phase 15에서 실제
+                Flow가 연결되면 이 버튼/핸들러의 제거 여부를 재검토한다.
+            -->
+            <TextBlock Text="7. 결제 알림창 (Phase 13, 시각 구현 데모 — 최종 산출물 아님)" FontSize="16" FontWeight="Bold" Margin="0,16,0,8"/>
+            <Button x:Name="PaymentNoticeDemoButton" Content="결제 알림창 열기 (IC → FALLBACK → PROCESSING 자동 전환)"
+                    Style="{StaticResource PrimaryButtonStyle}" Width="360" Height="40" HorizontalAlignment="Left"
+                    Click="PaymentNoticeDemoButton_Click"/>
+            <TextBlock Text="※ 클릭하면 알림창이 뜨고 2초 간격으로 IC→FALLBACK→PROCESSING 순서로 자동 전환됩니다. 배경/문구 크로스페이드, 카드 반복 슬라이드 애니메이션을 육안으로 확인하세요." FontSize="11" Foreground="{StaticResource SubTextBrush}" Margin="0,6,0,12"/>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,24">
+                <Button Content="IC 상태로 전환" Style="{StaticResource DefaultButtonStyle}" Width="160" Height="36" Margin="0,0,12,0" Click="PaymentNoticeIcButton_Click"/>
+                <Button Content="FALLBACK 상태로 전환" Style="{StaticResource DefaultButtonStyle}" Width="160" Height="36" Margin="0,0,12,0" Click="PaymentNoticeFallbackButton_Click"/>
+                <Button Content="PROCESSING 상태로 전환" Style="{StaticResource DefaultButtonStyle}" Width="160" Height="36" Click="PaymentNoticeProcessingButton_Click"/>
+            </StackPanel>
 
         </StackPanel>
     </ScrollViewer>

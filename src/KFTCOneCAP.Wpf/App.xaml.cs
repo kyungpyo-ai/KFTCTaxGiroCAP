@@ -5,6 +5,7 @@ using System.Windows;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Reader;
 using KFTCOneCAP.Wpf.Services.Settings;
+using KFTCOneCAP.Wpf.Views;
 
 namespace KFTCOneCAP.Wpf;
 
@@ -71,6 +72,10 @@ public partial class App : Application
         // 재오픈을 시도한다.
         ReaderConnections = new ReaderConnectionManager(new ReaderSettingsService());
         ReaderConnections.InitializeFromSettings();
+
+        // Phase 13(P13-1): 결제 알림창 배경 3장을 미리 디코드해 캐시(표시 지연 방지). 워밍업 창
+        // 방식은 쓰지 않는다(P12-6에서 부작용 확인됨) — 정적 생성자만 앞당겨 실행.
+        PaymentNoticeBackgroundSource.WarmUp();
 
         base.OnStartup(e);
     }
