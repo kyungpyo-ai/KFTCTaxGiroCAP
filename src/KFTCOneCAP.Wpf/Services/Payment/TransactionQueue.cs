@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Threading;
+using System.Threading.Tasks;
 using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 
@@ -15,19 +16,30 @@ namespace KFTCOneCAP.Wpf.Services.Payment;
 /// - **전용 워커 스레드 1개**가 FIFO로 소비한다. 스레드풀(Task.Run)을 쓰지 않는 이유: 처리 중 블로킹
 ///   (리더기 응답 대기, VAN 호출)이 길어질 수 있어 스레드풀 기아를 만들 수 있고, "워커는 정확히 하나"라는
 ///   사실이 코드 구조에서 눈에 보여야 한다.
-/// - 실제 처리 로직은 <see cref="_processor"/>로 **주입**받는다 — Phase 14는 스텁(App.xaml.cs)을 넣고,
-///   Phase 15가 이 자리에 <c>PaymentOrchestrator</c>를 꽂는다. 이 클래스 자체는 소켓/리더기/VAN 중
-///   무엇도 알지 못한다.
+/// - 실제 처리 로직은 <see cref="_processor"/>로 **주입**받는다 — Phase 14는 스텁(App.xaml.cs)을 넣었고,
+///   Phase 15(docs/payment_relay/development_plan.md P15-1)부터 이 자리에 <c>PaymentOrchestrator</c>를
+///   꽂는다. 이 클래스 자체는 소켓/리더기/VAN 중 무엇도 알지 못한다.
 /// - 워커 루프 최상위에 try/catch가 있다 — 처리 중 예외가 워커 스레드를 죽이면 그 뒤 모든 거래가
 ///   영원히 멈춘다("앱은 살아 있는데 결제만 안 됨"이라는, 원인 파악이 오래 걸리는 사고).
+/// - **처리 위임은 <c>Task</c>를 반환한다**(P15-1) — Flow가 쓰는 부품(리더기 명령, 무결성 체크, VAN
+///   호출)이 전부 비동기이기 때문이다. 이 앱에서 그 <c>Task</c>를 동기적으로 기다리는 지점은
+///   <see cref="WorkerLoop"/>의 <c>GetAwaiter().GetResult()</c> **한 줄뿐**이어야 한다 — 여기저기서
+///   각자 기다리면 "무엇이 언제 완료되는가"를 추적할 수 없는 구조가 된다.
+///   데드락 걱정이 없는 이유: 이 워커 스레드는 <see cref="SynchronizationContext"/>가 없는 전용
+///   <see cref="Thread"/>이고(스레드풀도, UI 스레드도 아니다), <c>Services/</c> 내부는 공통 규칙 5에
+///   따라 항상 <c>ConfigureAwait(false)</c>를 쓴다 — 그래서 await된 continuation이 "원래 스레드로
+///   돌아가려고" 이 스레드를 다시 필요로 하는 일이 없다(sync-over-async 데드락의 전형적 조건이
+///   애초에 성립하지 않는다). <c>.Result</c>가 아니라 <c>GetAwaiter().GetResult()</c>를 쓰는 이유는
+///   예외가 <see cref="AggregateException"/>으로 감싸이지 않고 원래 타입 그대로 올라오게 하기 위함
+///   — 아래 catch의 <c>ex.GetType().Name</c> 로그나 향후 특정 예외 타입 분기가 어긋나지 않는다.
 /// </summary>
 internal sealed class TransactionQueue
 {
     private readonly BlockingCollection<TransactionWorkItem> _queue = new();
-    private readonly Func<PosPaymentRequest, PosPaymentResponse> _processor;
+    private readonly Func<PosPaymentRequest, Task<PosPaymentResponse>> _processor;
     private readonly Thread _workerThread;
 
-    internal TransactionQueue(Func<PosPaymentRequest, PosPaymentResponse> processor)
+    internal TransactionQueue(Func<PosPaymentRequest, Task<PosPaymentResponse>> processor)
     {
         _processor = processor;
         _workerThread = new Thread(WorkerLoop) { IsBackground = true, Name = "PaymentTransactionWorker" };
@@ -63,7 +75,8 @@ internal sealed class TransactionQueue
             try
             {
                 FileLogger.Info($"[TransactionQueue] 처리 시작 txId={txId}");
-                PosPaymentResponse response = _processor(item.Request);
+                // 이 앱에서 처리 Task를 동기적으로 기다리는 유일한 지점(P15-1) — 클래스 주석 참고.
+                PosPaymentResponse response = _processor(item.Request).GetAwaiter().GetResult();
                 FileLogger.Info($"[TransactionQueue] 처리 종료 txId={txId}");
                 InvokeCompletedSafely(item, response);
             }
@@ -72,7 +85,9 @@ internal sealed class TransactionQueue
                 FileLogger.Error($"[TransactionQueue] 처리 중 예외 txId={txId}: {ex}");
                 // 메시지는 반드시 PosMessageEncoding(ASCII)로 안전하게 표현 가능한 문자만 써야 한다 —
                 // 한글을 넣으면 ASCII 인코딩 시 '?'로 깨진다(2026-08-24 --pos-client-test로 실측 발견).
-                InvokeCompletedSafely(item, new PosPaymentResponse("99", txId, "INTERNAL_ERROR"));
+                // 결과코드 리터럴을 직접 쓰지 않고 PosPaymentResponse.Create를 거친다(P15-3 — Flow/큐
+                // 어디에도 전문 코드 문자열이 등장하지 않아야 한다).
+                InvokeCompletedSafely(item, PosPaymentResponse.Create(PosPaymentResultCode.InternalError, txId, "INTERNAL_ERROR"));
             }
         }
     }

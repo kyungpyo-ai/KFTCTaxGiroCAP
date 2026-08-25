@@ -56,13 +56,48 @@ public partial class ReaderSetupWindow : Window
         ViewModel.ResultsUpdated += ViewModel_ResultsUpdated;
         ViewModel.ResultMessageReady += ViewModel_ResultMessageReady;
         SourceInitialized += ReaderSetupWindow_SourceInitialized;
+        Closed += ReaderSetupWindow_Closed;
     }
+
+    /// <summary>
+    /// Phase 15(P15-4) — 이 창이 (워밍업이 아니게) 실제로 열려 있는 동안 결제 Flow가 카드 리딩을
+    /// 시도하지 않도록 <see cref="App.ReaderSetupGate"/>에 등록한다. <see cref="IsWarmupInstance"/>는
+    /// 객체 초기화 구문(<c>new ReaderSetupWindow { IsWarmupInstance = true, ... }</c>)으로 설정되므로
+    /// 생성자 시점에는 아직 반영되지 않는다 — 이 값이 이미 확정된 뒤에 실행되는 <c>Loaded</c>에서
+    /// 판정해야 정확하다(<c>Loaded</c>는 <c>Show()</c> 이후에 발생하고, 객체 초기화는 <c>Show()</c>
+    /// 호출보다 항상 먼저 끝난다).
+    /// </summary>
+    private bool _registeredInGate;
 
     private void ReaderSetupWindow_Loaded(object sender, RoutedEventArgs e)
     {
         // PRD 4.2: 초기 포커스는 확인(OK) 버튼. 포커스는 시각 트리가 구성된 뒤(Loaded)에만 가능한
         // 순수 View 동작이라 ViewModel로 옮기지 않는다.
         ConfirmButton.Focus();
+
+        // (2026-08-25, Opus 검증 리뷰 L-2 수정) _registeredInGate 가드: 현재 사용 경로에서는 Loaded가
+        // 인스턴스당 정확히 1회만 발생해 재현되지 않지만, 언젠가 Loaded가 재진입하게 바뀌면
+        // 이중 등록으로 카운터가 새고 — 그 실패 모드가 "결제가 영구히 거부됨"이라 예방 가치가 크다.
+        if (!IsWarmupInstance && !_registeredInGate)
+        {
+            App.ReaderSetupGate.Register();
+            _registeredInGate = true;
+        }
+    }
+
+    /// <summary>
+    /// Phase 15(P15-4) — <see cref="ReaderSetupWindow_Loaded"/>에서 등록했으면 반드시 여기서 해제한다.
+    /// <c>Closing</c>이 아니라 <c>Closed</c>에 두는 이유: <c>Closing</c>은 <see cref="CancelEventArgs.Cancel"/>로
+    /// 취소될 수 있어 "실제로 닫혔다"를 보장하지 못한다 — 등록/해제 카운트가 어긋나면 결제 Flow가
+    /// 창이 이미 닫혔는데도 계속 거부하는 결함이 된다.
+    /// </summary>
+    private void ReaderSetupWindow_Closed(object? sender, EventArgs e)
+    {
+        if (_registeredInGate)
+        {
+            App.ReaderSetupGate.Unregister();
+            _registeredInGate = false;
+        }
     }
 
     /// <summary>

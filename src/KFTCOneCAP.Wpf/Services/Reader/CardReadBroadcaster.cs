@@ -14,10 +14,10 @@ namespace KFTCOneCAP.Wpf.Services.Reader
     internal sealed class CardReadBroadcastResult
     {
         internal bool HasWinner => Winner != null;
-        internal ReaderService? Winner { get; }
+        internal IReaderEndpoint? Winner { get; }
         internal CardReadCommandOutcome? WinnerOutcome { get; }
 
-        private CardReadBroadcastResult(ReaderService? winner, CardReadCommandOutcome? outcome)
+        private CardReadBroadcastResult(IReaderEndpoint? winner, CardReadCommandOutcome? outcome)
         {
             Winner = winner;
             WinnerOutcome = outcome;
@@ -25,7 +25,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
 
         internal static CardReadBroadcastResult NoParticipants() => new CardReadBroadcastResult(null, null);
 
-        internal static CardReadBroadcastResult Of(ReaderService winner, CardReadCommandOutcome outcome) =>
+        internal static CardReadBroadcastResult Of(IReaderEndpoint winner, CardReadCommandOutcome outcome) =>
             new CardReadBroadcastResult(winner, outcome);
     }
 
@@ -49,7 +49,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         /// 동일한 필드").
         /// </summary>
         internal static async Task<CardReadBroadcastResult> SendAsync(
-            IReadOnlyList<ReaderService> participants, TransactionInfoRequest request, TimeSpan timeout)
+            IReadOnlyList<IReaderEndpoint> participants, TransactionInfoRequest request, TimeSpan timeout)
         {
             if (participants.Count == 0)
             {
@@ -64,7 +64,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
 
             Task<CardReadCommandOutcome> firstDone = await Task.WhenAny(tasks).ConfigureAwait(false);
             int winnerIndex = Array.IndexOf(tasks, firstDone);
-            ReaderService winner = participants[winnerIndex];
+            IReaderEndpoint winner = participants[winnerIndex];
             CardReadCommandOutcome winnerOutcome = await firstDone.ConfigureAwait(false);
 
             FileLogger.Info($"[카드 리딩 페일오버 전송] 리더기[{winnerIndex}] 채택 (이번 라운드 최초 응답), Kind={winnerOutcome.Kind}");

@@ -3,12 +3,13 @@ using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Windows;
-using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Payment;
 using KFTCOneCAP.Wpf.Services.Pos;
 using KFTCOneCAP.Wpf.Services.Reader;
 using KFTCOneCAP.Wpf.Services.Settings;
+using KFTCOneCAP.Wpf.Services.Storage;
+using KFTCOneCAP.Wpf.Services.Van;
 using KFTCOneCAP.Wpf.ViewModels;
 using KFTCOneCAP.Wpf.Views;
 
@@ -34,14 +35,31 @@ public partial class App : Application
     internal static ReaderConnectionManager? ReaderConnections { get; private set; }
 
     /// <summary>
+    /// Phase 15(docs/payment_relay/development_plan.md P15-4) — 리더기 설정 화면이 열려 있는지
+    /// 결제 Flow가 판정하는 유일한 접근점. <see cref="ReaderConnections"/>와 달리 다른 서비스에
+    /// 의존하지 않아 <c>OnStartup</c>을 기다릴 필요가 없으므로 필드 초기화로 즉시 만든다 —
+    /// <c>ReaderSetupWindow</c>가 <c>OnStartup</c> 이전(테스트 하네스 등)에 생성돼도 안전하다.
+    /// </summary>
+    internal static Views.ReaderSetupWindowGate ReaderSetupGate { get; } = new();
+
+    /// <summary>
     /// Phase 14(docs/payment_relay/development_plan.md P14-3) — 결제 요청을 순차 처리하는 유일한
     /// 워커/큐. <see cref="ReaderConnections"/>와 같은 이유로 정적 접근점 하나만 둔다(DI 컨테이너
-    /// 미사용). Phase 15가 이 큐의 처리 위임을 스텁에서 <c>PaymentOrchestrator</c>로 교체한다.
+    /// 미사용). Phase 15부터 이 큐의 처리 위임은 <see cref="Orchestrator"/>의 <c>ProcessAsync</c>다.
     /// </summary>
     internal static TransactionQueue? PaymentQueue { get; private set; }
 
     /// <summary>Phase 14(P14-2) — PRD §3.1 <c>localhost:8002</c> 소켓 서버의 앱 수명 소유자.</summary>
     internal static PosSocketServer? PosServer { get; private set; }
+
+    /// <summary>
+    /// Phase 15(docs/payment_relay/development_plan.md P15-6) — PRD §4.1 결제 처리 순서를 조립하는
+    /// 자리. <see cref="ReaderConnections"/>와 같은 이유로 정적 접근점 하나만 둔다. 이 프로퍼티 자체는
+    /// 진단/디버깅 외 다른 코드가 참조할 필요가 없다(<see cref="PaymentQueue"/>가 이미
+    /// <c>Orchestrator.ProcessAsync</c>를 위임으로 들고 있다) — 다른 정적 프로퍼티들과의 일관성,
+    /// 그리고 필요 시 진단 하네스가 인스턴스에 접근할 수 있도록 노출해 둔다.
+    /// </summary>
+    internal static PaymentOrchestrator? Orchestrator { get; private set; }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -91,10 +109,29 @@ public partial class App : Application
         // Phase 13(P13-1): 결제 알림창 배경 3장을 미리 디코드해 캐시(표시 지연 방지).
         PaymentNoticeBackgroundSource.WarmUp();
 
-        // Phase 14(P14-2/P14-3): 소켓 서버 + 단일 워커 Queue 기동. 처리 위임은 지금은 스텁이고
-        // (Phase 15에서 PaymentOrchestrator로 교체), 8002 포트가 이미 사용 중이어도(PRD §9) 앱
-        // 기동은 막지 않는다 — PosServer.Start()가 실패를 로그로만 남기고 넘어간다.
-        PaymentQueue = new TransactionQueue(StubPaymentProcessor);
+        // Phase 15(P15-6~P15-9): 결제 Flow 조립. 리더기1/2를 IReaderEndpoint로 감싸고(P15-2 어댑터),
+        // 하나의 IntegrityCheckStore/IntegrityCheckService를 공유시킨다(App.ReaderConnections의
+        // Reader1/Reader2 순서를 그대로 따름 — PaymentOrchestrator 클래스 주석의 "인덱스 0=리더기1"
+        // 전제). VAN은 아직 스텁(P15-5 확정 사항: 실제 FNAISCRDVAN은 Phase 17).
+        var integrityStore = new IntegrityCheckStore();
+        var integrityCheckService = new IntegrityCheckService(integrityStore);
+        var readerEndpoints = new IReaderEndpoint[]
+        {
+            new ReaderEndpoint(ReaderConnections.Reader1, integrityCheckService),
+            new ReaderEndpoint(ReaderConnections.Reader2, integrityCheckService),
+        };
+        var paymentPresenter = new PaymentNoticePresenter();
+        var vanService = new StubVanService();
+        // (2026-08-25, Opus 검증 리뷰 M-2) 이 빌드를 실단말에서 그대로 돌리면 모든 거래가 실제 VAN
+        // 통신 없이 조용히 승인된다 — 로그만 보는 사람이 실거래 승인으로 오해하지 않도록 기동 시점에
+        // 명시적으로 남긴다. Phase 17이 이 스텁을 실제 FNAISCRDVAN 구현으로 교체하면 이 로그도 함께
+        // 제거한다.
+        FileLogger.Warn("[PaymentOrchestrator] VAN 서비스가 스텁(StubVanService)입니다 — 실제 승인이 아닙니다(Phase 17에서 FNAISCRDVAN으로 교체 예정)");
+        Orchestrator = new PaymentOrchestrator(readerEndpoints, integrityStore, paymentPresenter, ReaderSetupGate, vanService);
+
+        // Phase 14(P14-2/P14-3): 소켓 서버 + 단일 워커 Queue 기동. 8002 포트가 이미 사용 중이어도
+        // (PRD §9) 앱 기동은 막지 않는다 — PosServer.Start()가 실패를 로그로만 남기고 넘어간다.
+        PaymentQueue = new TransactionQueue(Orchestrator.ProcessAsync);
         PosServer = new PosSocketServer(PaymentQueue);
         PosServer.Start();
 
@@ -219,6 +256,15 @@ public partial class App : Application
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
             System.Threading.Tasks.Task.Run(PosClientTestScenarios.RunAll);
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--payment-flow-test")
+        {
+            // 개발/회귀 검증용(P15-10 완료 조건, 최종 산출물 아님): PaymentOrchestrator(P15-6~P15-9)를
+            // FakeReaderEndpoint 등 가짜 부품으로 감싼 별도 인스턴스를 만들어 실장비 없이 15개
+            // 시나리오를 재현한다 — App.Orchestrator(실제 하드웨어에 연결됨)는 건드리지 않는다.
+            // UI는 홈 화면을 그대로 띄워 알림창(PaymentNoticeWindow)이 정상 동작함을 같이 보여준다.
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+            System.Threading.Tasks.Task.Run(PaymentFlowTestScenarios.RunAll);
+        }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--notice-demo")
         {
             // 개발용 결제 알림창 실시간 애니메이션 데모(수동 실행 전용). 예전엔 인자 없는 기본
@@ -243,34 +289,5 @@ public partial class App : Application
         PaymentQueue?.Stop(TimeSpan.FromSeconds(5));
         ReaderConnections?.CloseAll();
         base.OnExit(e);
-    }
-
-    /// <summary>
-    /// Phase 14 스텁 처리 위임(P14-3) — Phase 15에서 <c>PaymentOrchestrator</c>로 교체될 자리다.
-    /// 지금은 "일정 시간 지연 후 고정 응답"만 돌려준다. 금액 필드에 <c>THROW</c>를 넣으면 일부러
-    /// 예외를 던진다 — 워커가 예외에도 죽지 않는지 확인하는 개발용 테스트 경로(P14-3 완료 조건).
-    /// </summary>
-    private static PosPaymentResponse StubPaymentProcessor(PosPaymentRequest request)
-    {
-        FileLogger.Info($"[stub] 결제 처리 시작 txId={request.TransactionId} amount={request.Amount}");
-
-        if (request.Amount == "THROW")
-        {
-            throw new InvalidOperationException("[stub] 의도적으로 던진 테스트 예외(amount=THROW)");
-        }
-
-        Thread.Sleep(1500);
-
-        FileLogger.Info($"[stub] 결제 처리 종료 txId={request.TransactionId}");
-
-        // 개발용 테스트 경로(H-1 재검증, --pos-client-test): 응답 본문을 최대치 근처까지 부풀려,
-        // 응답을 안 읽는 클라이언트를 상대로 실제 소켓 쓰기 블로킹을 유도할 수 있게 한다. 운영
-        // 경로에서는 amount에 이 값이 올 수 없다(POS가 보내는 임시 전문 필드일 뿐).
-        if (request.Amount == "BIGRESPONSE")
-        {
-            return new Protocol.Pos.PosPaymentResponse("00", request.TransactionId, new string('A', 9900));
-        }
-
-        return new Protocol.Pos.PosPaymentResponse("00", request.TransactionId, "OK(STUB)");
     }
 }

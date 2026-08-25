@@ -1,9 +1,9 @@
-# 실행계획서: 결제 중계 기능 (Phase 7~14)
+# 실행계획서: 결제 중계 기능 (Phase 7~15)
 
 > `PRD.md`(무엇을) → `ROADMAP.md`(어떤 순서로) → **이 문서(Task 단위로 무엇을 어떻게, 어디까지 하면 끝인지)**.
 > 실제 코드 작성은 이 문서의 Task를 순서대로 따라간다.
 >
-> **Phase 15~18은 아직 작성하지 않았다** — 앞 Phase의 실장비 검증 결과에 따라 뒤쪽 계획이 조정될 여지가
+> **Phase 16~18은 아직 작성하지 않았다** — 앞 Phase의 실장비 검증 결과에 따라 뒤쪽 계획이 조정될 여지가
 > 커서, **Phase 12부터는 한 Phase씩 착수 직전에 작성**한다(2026-08-20 사용자 확정 — Phase 7~11처럼
 > 여러 Phase를 미리 써두면 앞 결과에 따라 다시 고쳐야 할 계획이 생긴다).
 
@@ -2764,3 +2764,772 @@ Windows 소켓 특성상 그 호출엔 소급 적용되지 않는다. 처음엔 
   리더기 포트를 설정 화면과 결제 워커가 동시에 쓰려는 충돌과 직결된다.
 - Phase 15는 이 Phase가 만든 **워커 처리 스텁 자리에 `PaymentOrchestrator`를 꽂는 작업**이 된다. 소켓/큐
   코드를 다시 건드리게 된다면 이 Phase의 경계 설정이 잘못된 것이므로 그 시점에 원인을 기록한다.
+
+---
+
+# Phase 15 — 결제 Flow 조립
+
+> ROADMAP.md "Phase 15 — 결제 Flow 조립" / PRD §4.1~§4.7, §2.2.3, §8.4. Phase 10(리더기)·11(DB)·13(알림창)·
+> 14(소켓/Queue)이 만들어 둔 부품을 **엮는** Phase다. **새 부품을 만드는 Phase가 아니다** — 이 Phase에서
+> Phase 10~14 코드를 크게 고쳐야 한다면 앞 Phase의 경계 설정이 잘못된 것이므로 그 이유를 기록한다
+> (Phase 14 완료 후 메모의 지시).
+
+## 착수 전 전제 (2026-08-25 확인 완료)
+
+- **실제 통신 SPEC은 아직 반영하지 않는다.** `docs/payment_relay/spec/`에 POS↔원캡 전산설계서
+  (`국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260820.hwp`)가 들어와 있으나 내용 확인이 끝나지
+  않았고, 원캡↔VAN 전문 문서는 아직 없다. 2026-08-25 사용자 결정: **더미(임시) 전문 그대로 Phase 15를
+  진행**하고 실제 SPEC 반영은 별도 Phase로 나중에 잡는다.
+  - 따라서 이 Phase의 성패 기준은 "전문이 맞는가"가 아니라 **"전문이 바뀌어도 Flow가 안 바뀌는가"**다.
+    Flow 코드에 전문 문자열·오프셋이 한 글자도 등장하지 않아야 한다(완료 조건에 grep 점검 포함).
+- 사용 가능한 부품과 계약(이미 구현·검증 완료):
+
+  | 부품 | 위치 | Phase 15가 쓰는 방식 |
+  |---|---|---|
+  | 포트 소유자 | `Services/Reader/ReaderConnectionManager` (`App.ReaderConnections`) | `Reader1`/`Reader2` 참조만. **포트를 열거나 닫지 않는다**(닫는 지점은 P12-1이 정한 1곳뿐) |
+  | 명령 전송 | `ReaderService.SendCardReadCommandAsync` / `SendInvalidationInit` | 재시도 래퍼(P10-3)·단일 유효 응답 게이트(P10-4)가 이미 안에 있다 |
+  | 이중화 | `Services/Reader/CardReadBroadcaster.SendAsync` | 동시 전송 + 최초 응답 채택 + 나머지 `0x60`. **N=1도 분기 없이 동작**(P10-5) |
+  | 무결성 시퀀스 | `Services/Reader/IntegrityCheckService.RunAsync` | 0x61→0x71→0x62→0x72 + DB 저장까지 한 번에(P12-4) |
+  | 금일 이력 | `Services/Storage/IntegrityCheckStore.HasSuccessToday(comPort)` | 조회 실패 시 `false`(=다시 체크) — P11-4 |
+  | 알림창 | `Services/Payment/IPaymentNoticePresenter` | 어느 스레드에서 호출해도 안전, 닫힌 뒤 호출은 무시(P13-6) |
+  | 큐/소켓 | `Services/Payment/TransactionQueue`, `Services/Pos/PosSocketServer` | **직렬화 지점은 큐 하나뿐**(P14-3). Flow는 자기 안에서 또 잠그지 않는다 |
+
+- 결과적으로 이 Phase의 신규 코드는 대부분 `Services/Payment/PaymentOrchestrator` 한 클래스와, 그것이
+  기대는 얇은 계약 3개(리더기 엔드포인트 / 설정화면 게이트 / VAN 스텁)다.
+
+## 확정된 설계 결정 (2026-08-25 사용자 확정)
+
+1. **리더기 설정 화면이 열린 채 결제 요청이 오면 → 즉시 오류 응답으로 거부**(P13-4에서 보류됐던 ★ 항목).
+   카드 리딩을 아예 시도하지 않고 POS에 "설정 중" 오류 전문을 반환한다. 설정 화면을 강제로 닫거나 충돌을
+   감수하고 진행하지 않는다 — 같은 COM 포트를 설정 화면(초기화·상태체크·무결성체크 버튼, 포트 재오픈)과
+   결제 워커가 동시에 쓰는 상황 자체를 만들지 않는 것이 오류 소지가 가장 적기 때문이다. 판정 기준이
+   "`ReaderSetupWindow`가 떠 있는가" 하나뿐이라 애매한 중간 상태가 없다.
+2. **VAN 단계는 스텁 + `PROCESSING` 전환까지만.** `Services/Van/IVanService`를 정의하고 Phase 15는 스텁을
+   꽂는다. 알림창 `VanProcessing` 전환과 "승인 / VAN 거절 / VAN 통신 실패" 3분기 배선은 완성하되, 실제
+   `FNAISCRDVAN` 호출·ANSI 마샬링·버퍼 관리는 Phase 17이 스텁 자리에 구현만 꽂는다.
+3. **취소·Timeout은 단순 배선까지만.** `Canceled` 구독과 카드 대기 상한(120초)을 걸어 "취소/Timeout이면
+   대기 중인 리더기 전부 `0x60` + POS에 해당 결과 응답"까지는 동작시킨다. 다만 **카드리딩완료+취소 /
+   카드리딩완료+Timeout / 취소+Timeout / 콜백 중복**의 단일 결과 확정 게이트는 Phase 16에서 집중 검증한다.
+4. **POS 더미 응답은 "결과코드 + 원인 열거형"으로 세분화.** PRD가 "구분해서 응답"을 요구하는 축(승인 /
+   리더기 응답코드 실패 / DLL 연동 실패 / 무결성 실패 / 포트 미사용 / 설정 중 / 취소 / Timeout / VAN 거절 /
+   VAN 통신 실패 / 내부 오류)을 **열거형으로 확정**하고, 열거형→전문 문자열 매핑은 `Protocol/Pos/`에만
+   둔다. Flow는 열거형만 다루므로 실제 SPEC 확정 시 매핑표만 교체된다.
+
+## 이 Phase에서 손대지 않는 것 (범위 밖 확정)
+
+- **실제 SPEC 반영**(POS 전문 필드 확장, VAN 전문) — 별도 Phase.
+- **`FNAISCRDVAN` 실호출 / `Interop/KftcGiroNative.cs` / `Protocol/Van/`** — Phase 17.
+- **경합 4종의 단일 결과 확정 게이트** — Phase 16.
+- **포트 열기/닫기 정책** — `ReaderConnectionManager`가 이미 소유. Flow는 `OpenPort`/`ClosePort`를 직접
+  호출하지 않는다(포트가 안 열려 있으면 `SendCommandSafe`의 자동 재오픈이 처리한다, PRD §2.2.4).
+- **알림창 시각/애니메이션** — Phase 13에서 완료. Flow는 `Show`/`ChangeState`/`Close`만 부른다.
+- **결제 진행 중 사용자가 설정 화면을 "여는" 것을 막는 UI 차단** — 이번 결정은 반대 방향만 확정했다.
+
+## 알려진 범위 밖 / 이후 확인 필요
+
+- **거래 진행 중 설정 화면 열기**: 결제 워커가 카드 대기 중일 때 사용자가 홈 화면에서 리더기 설정 버튼을
+  누르면 여전히 포트 경합이 가능하다. 이번 결정(1)은 "설정 화면이 먼저 열려 있는 경우"만 덮는다. 반대
+  방향까지 막으려면 홈 화면 버튼을 거래 중 비활성화하는 UX 결정이 필요하므로 **Phase 16 착수 시 사용자와
+  확정**한다.
+- **거래일시 등 POS 요청 필드**: 더미 전문(`PAY|<amount>|<txId>`)에는 거래일시가 없어 **원캡이
+  `DateTime.Now`로 생성**해 `0x2B`에 넣는다. 실제 SPEC 반영 시 POS가 준 값으로 교체한다
+  (`Protocol/Reader/TransactionInfoRequest`의 TODO 주석과 짝을 이룬다).
+
+---
+
+## P15-1. 처리 위임 계약 정리 — 큐 워커가 유일한 블로킹 지점 ★
+
+`TransactionQueue`의 처리 위임이 지금은 동기 델리게이트(`Func<PosPaymentRequest, PosPaymentResponse>`)인데,
+Flow가 쓰는 부품(`SendCardReadCommandAsync`, `IntegrityCheckService.RunAsync`, `CardReadBroadcaster.SendAsync`)은
+전부 `Task` 기반이다. 그대로 두면 Orchestrator 안에서 `.GetAwaiter().GetResult()`가 여기저기 흩어진다.
+
+- 위임 타입을 **`Func<PosPaymentRequest, Task<PosPaymentResponse>>`**로 바꾸고, 워커 루프가
+  `_processor(item.Request).GetAwaiter().GetResult()` **한 곳에서만** 블로킹하게 한다.
+- 데드락이 없는 근거를 주석으로 남긴다: 워커는 `SynchronizationContext`가 없는 전용 `Thread`이고,
+  `Services/` 내부는 전부 `ConfigureAwait(false)`를 지킨다(공통 규칙 5) — UI 컨텍스트로 돌아오려는
+  continuation이 없으므로 sync-over-async 데드락 조건이 성립하지 않는다.
+- 예외 처리 구조(최상위 try/catch, `InvokeCompletedSafely`)와 ASCII 전용 실패 메시지 규칙은 그대로 둔다.
+  예외가 `AggregateException`으로 감싸이지 않도록 `.Result`가 아니라 `.GetAwaiter().GetResult()`를 쓴다.
+- **Phase 14 경계 조정 기록**: Phase 14 완료 메모가 "Phase 15가 큐/소켓 코드를 다시 건드리면 이유를
+  적으라"고 했다. 이유는 "Phase 14 시점 스텁이 동기 함수여서 위임 타입을 동기로 잡았고, 실제 처리기가
+  비동기라는 사실이 Phase 15에서 드러났기 때문"이다. 소켓 서버(`PosSocketServer`)는 **손대지 않는다** —
+  경계가 틀린 것은 큐의 위임 시그니처 한 줄뿐이다.
+
+**구현(2026-08-25)**: `TransactionQueue`의 `_processor` 필드와 생성자 인자를
+`Func<PosPaymentRequest, Task<PosPaymentResponse>>`로 변경, `WorkerLoop()` 안 호출부를
+`_processor(item.Request).GetAwaiter().GetResult()` 한 줄로 교체(클래스 주석에 데드락 없음 근거 기술).
+`App.xaml.cs`의 `StubPaymentProcessor`를 `async Task<PosPaymentResponse>`로 바꾸고 `Thread.Sleep(1500)`을
+`await Task.Delay(1500).ConfigureAwait(false)`로 교체(`using System.Threading.Tasks;` 추가). 예외 유발
+경로(`amount=="THROW"`)는 `async` 메서드 안에서 그대로 `throw`하면 반환된 `Task`가 Faulted 상태가 되고
+`GetAwaiter().GetResult()`가 원래 예외 타입 그대로 다시 던지므로 기존 catch 구조가 손대지 않아도 그대로
+작동함을 확인했다. `Services/Pos/PosSocketServer.cs`는 `TransactionQueue.Enqueue`(시그니처 불변)만 쓰므로
+무변경.
+
+**완료 조건**
+- [x] 위임이 `Task<PosPaymentResponse>` 반환으로 바뀌고, 블로킹 호출이 워커 루프 1곳뿐임 — grep 결과
+      `GetAwaiter().GetResult()`가 저장소 전체에서 `TransactionQueue.cs`의 실호출 1건(`WorkerLoop`)과
+      클래스 주석 설명문 2건뿐, 다른 파일에는 0건
+- [x] `Services/Pos/PosSocketServer.cs`에 변경 없음 — `git diff --stat -- .../PosSocketServer.cs` 결과 빈 diff
+- [x] `dotnet build KFTCOneCAP.Wpf.sln` 경고 0/오류 0
+- [x] Phase 14의 `--pos-client-test` 7개 시나리오 전부 회귀 통과(2026-08-25 재실행 로그) — 특히 시나리오5
+      (예외 유발)는 스택 트레이스 형태가 `TaskAwaiter.ThrowForNonSuccess` 경유로 바뀌었을 뿐 결과는
+      동일(`PAYRES|99|THROW-1|INTERNAL_ERROR`, 워커 생존, 다음 요청 `AFTER-THROW` 정상 처리), 시나리오7
+      (유휴 연결 자동 종료)도 10.003초 뒤 정상 종료로 재확인됨
+
+## P15-2. `IReaderEndpoint` — Flow가 보는 리더기 한 대 ★
+
+Orchestrator가 `ReaderService`(sealed 구체 클래스)를 직접 잡으면 **하드웨어 없이는 정상/FALLBACK/`12`
+경로를 한 번도 실행해 볼 수 없다.** 이 Phase의 완료 기준이 "5개 분기가 각각 올바르게 끝난다"인데, 검증
+수단이 없는 계획은 완료를 증명할 수 없다. 그래서 Flow가 보는 최소 계약을 하나 만든다.
+
+- **`Services/Reader/IReaderEndpoint.cs`**(신규) — Flow가 리더기 한 대에 대해 필요한 것 전부:
+  - `string ComPortDisplay { get; }` — DB 조회 키(P12-2가 정한 `"COM 05"` 표시 형식)
+  - `Task<IntegrityCheckSequenceOutcome> RunIntegrityCheckAsync(TimeSpan statusTimeout, TimeSpan integrityTimeout)`
+  - `Task<CardReadCommandOutcome> SendCardReadCommandAsync(TransactionInfoRequest request, TimeSpan timeout)`
+  - `int SendInvalidationInit()`
+- **`Services/Reader/ReaderEndpoint.cs`**(신규, 운영 구현) — `ReaderService` + 표시용 COM 포트 문자열 +
+  `IntegrityCheckService`를 묶는 **얇은 어댑터**. 로직을 넣지 않는다(위임만).
+- `CardReadBroadcaster`의 참여자 타입을 `IReadOnlyList<ReaderService>` → `IReadOnlyList<IReaderEndpoint>`로
+  바꾼다. 페일오버 알고리즘 자체(동시 전송 → `Task.WhenAny` → 나머지 `0x60`)는 **한 줄도 바꾸지 않는다.**
+- `ReaderService`/`IntegrityCheckService`/`ReaderConnectionManager`는 수정하지 않는다(어댑터가 감싼다).
+
+**구현(2026-08-25)**: `IReaderEndpoint`(계획대로 4개 멤버)와 운영 구현 `ReaderEndpoint`(생성자로
+`ReaderService`+`IntegrityCheckService`를 받아 전부 위임, `ComPortDisplay`는
+`ComPortFormat.ToDisplay(_reader.PortNumber)`로 계산 — `ReaderService.PortNumber`는 `OpenPort` 성공/실패와
+무관하게 항상 최근 호출값을 기억하는 필드라 포트가 지금 안 열려 있어도 정확한 표시 문자열을 낸다, 어댑터
+주석에 근거 기술)를 신설. `CardReadBroadcaster`/`CardReadBroadcastResult`의 `ReaderService` 참조 4곳을
+`IReaderEndpoint`로 치환. `ReaderService`/`IntegrityCheckService`/`ReaderConnectionManager` 무변경.
+
+**완료 조건**
+- [x] `Services/Payment/`가 `ReaderService` 타입을 직접 참조하지 않음 — 아직 `Services/Payment/`에
+      Orchestrator가 없어 grep 매치 자체가 0건(P15-6에서 실제로 생성될 때 재확인)
+- [x] `CardReadBroadcaster`의 알고리즘 본문에 의미 변경 없음 — `git diff` 확인 결과 `ReaderService` →
+      `IReaderEndpoint` 타입 치환 4곳뿐, 동시 전송/`Task.WhenAny`/무효화 로직 줄 수 변경 없음
+- [x] `dotnet build KFTCOneCAP.Wpf.sln` 경고 0 / 오류 0
+
+## P15-3. POS 결과 구분 — 열거형 확정 + 매핑은 `Protocol/Pos/`에만
+
+- **`Protocol/Pos/PosPaymentResultCode.cs`**(신규 열거형)과 더미 전문 코드 매핑:
+
+  | 열거형 | 더미 코드 | 근거 |
+  |---|---|---|
+  | `Approved` | `00` | §4.10 승인 |
+  | `ReaderResponseFailure` | `10` | §4.6 `0x3B` 응답코드가 `00`/`07`/`12` 외 |
+  | `ReaderDllFailure` | `11` | §4.7 DLL 연동/통신 실패 |
+  | `IntegrityCheckFailure` | `12` | §4.2 참여 후보 전원 무결성 실패 |
+  | `NoReaderConfigured` | `13` | §2.2.3 양쪽 모두 `"미사용"` |
+  | `ReaderSetupInProgress` | `14` | 2026-08-25 확정(설정 화면 열림) |
+  | `UserCanceled` | `20` | §4.8 |
+  | `Timeout` | `21` | §4.9 |
+  | `VanDeclined` | `30` | §4.10 VAN 서버 거절 |
+  | `VanCommunicationFailure` | `31` | §4.10 VAN DLL 통신 실패 |
+  | `InternalError` | `99` | §9 예외 안전판(`TransactionQueue`의 기존 폴백과 같은 값) |
+
+- 매핑(열거형→코드 문자열)과 `PosPaymentResponse` 생성 팩터리는 **`Protocol/Pos/` 안에만** 둔다. Flow는
+  `PosPaymentResultCode`와 짧은 원인 문자열만 넘긴다.
+- **원인 문자열은 ASCII만 쓴다.** `PosPaymentResponse.ToFrame()`이 비ASCII를 만나면 `PosProtocolException`을
+  던지는 가드가 이미 있다(2026-08-24 한글 깨짐 사고 후 추가). 한글 사유는 **로그에만** 남기고 전문에는
+  영문 축약(`READER_RESP_07`, `RETRY_LIMIT` 등)을 넣는다.
+- 카드번호 등 카드 데이터는 **응답 전문에도 로그에도 넣지 않는다**(§8.4/§9).
+
+**구현(2026-08-25)**: `Protocol/Pos/PosPaymentResultCode.cs`(11개 값, 각 값 XML 주석에 PRD 근거 절 기술)와
+`PosPaymentResponse.Create(PosPaymentResultCode, transactionId, reason)`(switch식 매핑, 계획한 코드 표
+그대로)를 신설. 기존 생성자는 그대로 두되(App.xaml.cs의 Phase 14 스텁이 계속 씀 — Services/Payment/ 밖이라
+범위 밖), Flow/큐가 있는 `Services/Payment/`의 유일한 리터럴 사용처였던 `TransactionQueue.WorkerLoop`의
+예외 폴백(`new PosPaymentResponse("99", txId, "INTERNAL_ERROR")`)을
+`PosPaymentResponse.Create(PosPaymentResultCode.InternalError, txId, "INTERNAL_ERROR")`로 교체.
+
+**완료 조건**
+- [ ] 11개 결과코드가 전부 정의되고, 각각을 만들어 낼 Flow 경로가 P15-6~P15-9에 존재 — **Orchestrator가
+      아직 없어 이 조건은 체크포인트 2(P15-6~P15-9) 완료 시 재확인**
+- [x] `Services/Payment/`에 전문 코드 리터럴(`"00"`/`"10"` 등)이 없음 — grep `"[0-9][0-9]"` 매치 0건
+      (`TransactionQueue.cs` 폴백을 `Create`로 교체한 뒤 재확인)
+- [x] 비ASCII 원인 문자열을 넣으면 예외로 즉시 드러남 — 32비트 PowerShell 리플렉션으로
+      `PosPaymentResponse.Create(InternalError, "TX1", "한글사유").ToFrame()` 호출 시
+      `PosProtocolException`이 그대로(감싸이지 않고) 던져짐을 확인
+- [x] `dotnet build KFTCOneCAP.Wpf.sln` 경고 0 / 오류 0
+
+## P15-4. 설정 화면 게이트 (확정 사항 1)
+
+`Services/`는 WPF 타입을 알 수 없으므로 "설정 화면이 떠 있는가"를 직접 볼 수 없다. 계약을 하나 둔다.
+
+- **`Services/Payment/IReaderSetupGate.cs`**(신규): `bool IsReaderSetupOpen { get; }` 하나뿐.
+- **`Views/ReaderSetupWindowGate.cs`**(신규 구현): `ReaderSetupWindow`가 열릴 때 `Interlocked.Increment`,
+  `Closed`에서 `Decrement`. 등록/해제를 `ReaderSetupWindow` 자신의 생성자와 `Closed`에 둬서 호출자가
+  잊어버릴 여지를 없앤다.
+- Orchestrator는 **카드 리딩 시작 전 단 한 번** 판정한다 — 무결성 체크보다도 먼저다(설정 화면이 열려
+  있으면 무결성 체크조차 같은 포트를 건드린다).
+- 판정 직후 사용자가 설정 화면을 여는 경합은 이 Phase에서 막지 않는다(위 "알려진 범위 밖").
+
+**구현(2026-08-25)**: `Services/Payment/IReaderSetupGate.cs`(계획대로 `IsReaderSetupOpen` 하나)와
+`Views/ReaderSetupWindowGate.cs`(`Interlocked` 기반 카운터, `App.ReaderSetupGate`로 앱 수명 동안 하나만
+생성 — `ReaderConnections`와 달리 의존성이 없어 필드 초기화로 즉시 생성, `OnStartup` 이전에도 안전).
+`ReaderSetupWindow`에 `Closed += ReaderSetupWindow_Closed`를 생성자에 추가하고, 등록은 기존
+`ReaderSetupWindow_Loaded`(PRD 4.2 `ConfirmButton.Focus()` 자리)에 `if (!IsWarmupInstance) Register()`로
+끼워 넣었다. **`Closing`이 아니라 `Closed`에서 해제**하는 이유를 주석에 남겼다 — `Closing`은
+`e.Cancel = true`로 취소될 수 있어(작업 중/dirty 확인 등, 기존 로직) "실제로 닫혔다"를 보장하지 못해
+카운트가 어긋날 수 있기 때문. `IsWarmupInstance`는 객체 초기화 구문으로 설정되어 생성자 시점엔 아직
+반영되지 않으므로, 이미 확정된 뒤 실행되는 `Loaded`에서 판정하는 것이 정확함을 주석에 근거로 남겼다.
+
+**완료 조건**
+- [x] 카운팅 로직 자체(등록/중첩 등록/해제/전부 해제) — 32비트 PowerShell 리플렉션으로
+      `ReaderSetupWindowGate.Register/Unregister/IsReaderSetupOpen` 직접 호출해 5단계 전이 전부 기대값과
+      일치 확인(초기 `false` → 1회 등록 `true` → 중첩 등록 `true` → 1회 해제(1개 남음) `true` → 전부
+      해제 `false`)
+- [x] 실제 UI 배선이 크래시 없이 동작함 — `--home`으로 앱 기동(HomeWindow.Loaded의 워밍업 인스턴스
+      경로도 자동 실행됨) → "리더기 설정" 카드 클릭으로 실제 창을 열어 정상 렌더링 확인 → 취소 버튼으로
+      닫아 `Closed` 경로까지 예외 없이 실행됨을 windows 자동화로 실측(스냅샷 전/후 비교)
+- [ ] 설정 화면을 연 채 결제 요청을 넣으면 리더기 명령이 **한 건도 나가지 않고** `ReaderSetupInProgress`가
+      반환됨 — **Orchestrator가 아직 없어 체크포인트 2(P15-6) 완료 후 재확인**(P15-10 시나리오 9와 동일)
+- [ ] 설정 화면을 닫은 뒤 같은 요청이 정상 진행됨 — 위와 같은 이유로 체크포인트 2 이후 재확인
+
+## P15-5. VAN 스텁 (확정 사항 2)
+
+- **`Services/Van/IVanService.cs`**(신규): `Task<VanApprovalOutcome> RequestApprovalAsync(VanApprovalRequest request)`
+  - `VanApprovalRequest`: 이 Phase에서는 **카드 데이터 + 금액 + 거래일시**를 담는 순수 DTO. 전문 바이트를
+    만들지 않는다(전문 생성은 Phase 17의 `Protocol/Van/` 몫).
+  - `VanApprovalOutcome`: `Approved` / `Declined(응답코드, 사유)` / `CommunicationFailure(사유)` 3분기.
+    PRD §4.10의 "**VAN DLL 통신 실패와 VAN 서버 거절은 구분**"을 타입 수준에서 강제한다.
+- **`Services/Van/StubVanService.cs`**(신규): 고정 지연(예: 1초) 후 결과 반환. **다음 결과를 주입할 수
+  있게** 한다(검증 하네스가 승인/거절/통신실패 지정). 기본값은 승인.
+- Orchestrator는 VAN 호출 **직전에** `ChangeState(VanProcessing)`으로 전환한다(PRD §4.10). 이 구간에서
+  취소가 막히는 것은 P13-2가 이미 ViewModel 레벨에서 게이팅한다.
+
+**구현(2026-08-25)**: `Services/Van/`에 `IVanService`(1메서드), `VanApprovalRequest`(카드 데이터+금액+
+거래일시 DTO, `CardData`는 `Protocol/Reader/CardReadResponseParser.CardReadData`를 그대로 받음 — VAN
+전문용으로 다시 파싱하지 않음), `VanApprovalOutcomeKind`(3분기 열거형), `VanApprovalOutcome`(이 코드베이스의
+다른 Outcome 타입들과 같은 모양 — private 생성자+정적 팩터리 3개), `StubVanService`(1초 고정 지연,
+`SetNextResult`로 주입, `lock`으로 크로스스레드 접근 보호)를 신설.
+
+**완료 조건**
+- [x] `Services/Van/`이 `Interop`/`Protocol/Van`을 참조하지 않음(스텁 단계이므로 존재하지 않아야 정상) —
+      grep 매치는 XML 문서 주석 텍스트 2건뿐(둘 다 "Phase 17이 여기에 진짜 구현을 꽂는다"는 설명), 실제
+      `using`/타입 참조 0건
+- [x] 스텁 결과 3종 주입 확인 — 32비트 PowerShell 리플렉션으로 `StubVanService.SetNextResult`에
+      `Approved()`/`Declined()`/`CommunicationFailure()`를 각각 주입한 뒤 `RequestApprovalAsync`를 호출해
+      반환된 `Kind`가 정확히 일치함을 확인(POS까지의 전달은 Orchestrator가 있어야 하므로 체크포인트 2에서
+      재확인)
+- [ ] VAN 구간 진입 시 알림창이 `VanProcessing`으로 바뀌고 취소 버튼이 비활성임 — **Orchestrator가 아직
+      없어 체크포인트 2(P15-8) 완료 후 실기 확인**
+- [x] `dotnet build KFTCOneCAP.Wpf.sln` 경고 0 / 오류 0
+
+## Phase 15 체크포인트 1 — Opus 검증 리뷰 및 후속 수정 (2026-08-25)
+
+P15-1~P15-5 완료 후 Opus로 검증 리뷰를 받았다(사용자 확정: Phase 15는 10개 Task를 위험도 기준
+2개 체크포인트로 나눠 검증 — `feedback_opus_sonnet_workflow` 메모리 참고). 결함 1건(H-1)과 개선 3건
+(M-1/M-2/L-1) + 하드닝 1건(L-2)이 발견됐다.
+
+### H-1(★ 가장 심각) — 실패 사유가 POS 응답을 통째로 삼킬 수 있었다
+
+P15-3의 ASCII 가드가 `ToFrame()`(전송 직전)에만 있었고, 실패 시 `PosSocketServer.SendResponse`가
+"응답 폐기 + 로그"로만 처리했다. P15-7/P15-8이 실을 예정인 `CardReadCommandOutcome.Detail`
+(`"응답 대기 시간 초과"` 등), `IntegrityCheckSequenceOutcome`/`VanApprovalOutcome`의 Detail이 전부
+한글 자유 문자열이라, 구현자가 `outcome.Detail`을 `reason`에 그대로 넘기면 POS가 응답을 **한 건도
+받지 못하고** 10초 유휴 종료까지 매달리는 사고가 될 수 있었다(원인이 로그에만 남아 추적이 오래
+걸림). 부수적으로 필드 구분자(`|`) 검증이 아예 없어, `reason`에 `|`가 섞이면 POS 파서가 필드
+경계를 오인식하는 문제도 있었다.
+
+**수정**: `PosPaymentResponse.Create`가 `ValidateBodyField`로 (1) ASCII 범위 (2) `|` 구분자 금지를
+**즉시** 검증하도록 이동(전송 시점이 아니라 응답 조립 시점). 위반 시 `PosProtocolException`이 그
+자리에서 즉시 발생하므로, `TransactionQueue` 워커의 최상위 try/catch가 잡아
+`PosPaymentResultCode.InternalError`(ASCII 고정 문자열)로 대체 — "정보가 부정확한 응답"이 "응답
+없음"보다 안전하다는 원칙. `ToFrame()`에도 `ResultCode`/`TransactionId`/`Message` 필드별 검증을
+추가해(방어 계층 2중화), `Create`를 거치지 않는 원시 생성자 경로(`App.xaml.cs` 스텁 등)와 지금까지
+검증한 적 없던 `TransactionId`까지 막았다.
+
+**재검증**: 32비트 PowerShell 리플렉션으로 (1) 비ASCII `reason` → `Create`에서 즉시
+`PosProtocolException`, (2) `reason`에 `|` 포함 → 즉시 `PosProtocolException`, (3) 원시 생성자로
+`TransactionId`에 `|`를 넣은 응답 → `ToFrame()`에서 `PosProtocolException`, (4) 정상 ASCII
+`reason`("READER_TIMEOUT") → 예외 없이 `Create`/`ToFrame()` 통과, 프레임 바이트가
+`PAYRES|99|TX1|READER_TIMEOUT`로 정확히 조립됨을 전부 확인. `--pos-client-test` 7개 시나리오
+재실행으로 회귀 확인(`PAYRES|99|THROW-1|INTERNAL_ERROR` 등 기존 동작 그대로 유지).
+
+### M-1 — `StubVanService.SetNextResult`가 문서(sticky 아님)와 다르게 동작
+
+주석은 "**다음** 호출이 반환할 결과"라고 명시했는데 구현은 소비하지 않아 계속 같은 값을 반환했다 —
+검증 하네스(P15-10)가 한 시나리오에서 `Declined`를 주입한 뒤 다음 시나리오가 기본값(`Approved`)을
+기대하면 조용히 어긋날 수 있었다. **수정**: `RequestApprovalAsync`가 반환 직후
+`_nextResult`를 `Approved()`로 되돌려 "한 번 쓰면 소비됨"을 실제 동작으로 만들었다. **재검증**:
+리플렉션으로 `SetNextResult(Declined)` → 1차 호출 `Declined` 확인 → 2차 호출(재주입 없이)이
+`Approved`로 되돌아옴을 확인.
+
+### M-2 — 스텁이 `request`를 완전히 무시해 매핑을 검증할 수 없었다
+
+PRD §4.3 "0x3B 응답 데이터를 파싱해 VAN 요청 데이터를 생성"이 P15-8의 핵심인데, 카드 데이터·금액·
+거래일시가 VAN까지 실제로 전달됐는지 확인할 방법이 없었다. **수정**: `StubVanService.LastRequest`
+프로퍼티를 추가해 가장 최근 호출의 인자를 보관(검증 전용, `_lock`으로 보호). **재검증**: 리플렉션
+호출 후 `LastRequest`가 넘긴 요청 객체와 참조 동일함을 확인.
+
+### L-1 — `ComPortDisplay`가 미설정 포트에서 `"COM 00"`을 조용히 만들어냄
+
+`PortNumber<=0`(한 번도 `OpenPort`를 거치지 않은 상태)일 때 `ComPortFormat.ToDisplay(0)`이
+`"COM 00"`이라는 유효해 보이지만 틀린 값을 만들어 무결성 DB 키로 흘러갈 수 있었다 — "Orchestrator가
+설정된 포트에만 이 어댑터를 만든다"는 전제가 깨져도 드러나지 않는 구조였다. **수정**:
+`ReaderEndpoint.ComPortDisplay`가 `PortNumber<=0`이면 `InvalidOperationException`을 즉시 던지도록
+변경. **재검증**: 리플렉션으로 갓 생성한(한 번도 `OpenPort`를 호출하지 않은) `ReaderService`를 감싼
+`ReaderEndpoint`의 `ComPortDisplay`를 읽어 `InvalidOperationException`이 발생함을 확인.
+
+### L-2(하드닝) — `Loaded` 재진입 시 이중 등록 가능성
+
+현재 사용 경로(매번 `new ReaderSetupWindow` + `ShowDialog()`)에서는 `Loaded`가 인스턴스당 1회뿐이라
+재현되지 않는 예방 차원 수정이었으나, 실패 시 "결제가 영구히 거부됨"이라는 무거운 실패 모드라 값이
+있다고 판단해 반영. **수정**: `ReaderSetupWindow_Loaded`의 등록 조건에 `!_registeredInGate`를 추가.
+코드 리뷰로 확인(재현 시나리오 자체가 없어 런타임 재검증 대상 아님).
+
+### 재검증 후 전체 회귀
+
+- `dotnet build KFTCOneCAP.Wpf.sln` 경고 0 / 오류 0
+- Phase 14 `--pos-client-test` 7개 시나리오 전부 재실행해 통과(H-1 수정이 응답 조립 경로 전체에
+  영향을 주므로 특히 중요) — 예외 유발(THROW-1) 응답이 여전히 `PAYRES|99|THROW-1|INTERNAL_ERROR`로
+  정확히 조립됨을 재확인
+
+## P15-6. `PaymentOrchestrator` 골격 — 참여 리더기 결정까지 (PRD §4.1 1~3단계)
+
+**`Services/Payment/PaymentOrchestrator.cs`**(신규). 생성자로 받는 것: `IReaderEndpoint` 목록,
+`IntegrityCheckStore`, `IPaymentNoticePresenter`, `IReaderSetupGate`, `IVanService`.
+**정적 접근(`App.XXX`)을 Orchestrator 안에서 하지 않는다** — 배선은 `App.xaml.cs`가 한다(검증 하네스가
+가짜를 꽂을 수 있어야 하기 때문).
+
+진입 메서드: `Task<PosPaymentResponse> ProcessAsync(PosPaymentRequest request)`. 순서(각 단계 실패 시 즉시
+해당 결과코드로 종료):
+
+1. **설정 화면 게이트**(P15-4) → 열려 있으면 `ReaderSetupInProgress`.
+2. **참여 후보 결정**: `ReaderSettingsService.Load()`의 `Port1`/`Port2`를 `ComPortFormat.ToPortNumber`로
+   판정해 `> 0`인 것만 후보. **둘 다 아니면 `NoReaderConfigured`**(PRD §2.2.3 — 카드 리딩을 시도하지 않고
+   즉시 오류). **포트 열기 실패는 여기서 배제하지 않는다** — §2.2.4 재시도 래퍼에 맡긴다(열려 있지 않은
+   포트도 후보로 남긴다).
+3. **무결성 선행 판정**(PRD §4.2): 후보 각각에 대해 `HasSuccessToday(ComPortDisplay)`.
+   - **DB 조회 키 형식 주의 ★**: 저장은 `IntegrityCheckService.RunAsync(comPortDisplay)`가 받은 표시
+     문자열(`"COM 05"`)로 들어간다. 조회도 반드시 같은 형식이어야 하며, `"(사용불가)"` 접미사가 붙은 콤보
+     값이 섞일 수 있으므로 `ComPortFormat.StripUnavailableSuffix`로 정규화한 값을 쓴다. 형식이 어긋나면
+     **매 거래마다 무결성 체크를 다시 하는 조용한 결함**이 되므로 완료 조건에서 실측한다.
+   - 이력이 없으면 `RunIntegrityCheckAsync` 수행. **후보끼리는 순차(직렬)로 수행**한다 — 서로 다른 포트라
+     병렬이 불가능하진 않지만, 두 리더기의 재오픈·콜백이 겹치면 실패 원인 추적이 어려워지고 이득은 수백
+     ms뿐이다(속도보다 정확성 우선, PRD §9 마지막 항목).
+   - **성공한 리더기만 참여자**가 된다. 전원 실패면 `IntegrityCheckFailure`(PRD §4.2 "양쪽 모두 실패했을
+     때만 거래를 오류로").
+4. **알림창 표시**: 참여자가 1대 이상 확정된 뒤에 `Show(IcCardRequest)`. 무결성 체크 도중에는 띄우지
+   않는다(PRD §4.1의 1·2단계가 3단계보다 앞).
+
+**구현(2026-08-25)**: `Services/Payment/PaymentOrchestrator.cs` 신설. 생성자는 계획대로 5개
+(`IReaderEndpoint` 목록, `IntegrityCheckStore`, `IPaymentNoticePresenter`, `IReaderSetupGate`,
+`IVanService`) + **설계 중 추가한 6번째 선택 인자** `Func<ReaderSettings>? loadSettings`(기본값
+`new ReaderSettingsService().Load`) — `ReaderSettingsService`는 레지스트리를 직접 읽는 sealed
+클래스라 인터페이스 없이는 가짜로 바꿔치기할 수 없었다. P15-10 검증 하네스가 참여 후보 필터링(2단계)을
+실제 레지스트리와 무관하게 스크립트하려면 이 최소 접근이 필요해 계획을 이 지점에서 조정했다(P15-6
+자체 구조는 계획대로).
+
+**완료 조건**
+- [x] 양쪽 `"미사용"` → 리더기 명령 0건 + `NoReaderConfigured` — P15-10 시나리오8로 확인
+- [x] 금일 성공 이력이 있는 포트는 `0x61`/`0x62`가 **나가지 않음** — P15-10 시나리오1에 편입해 확인:
+      `IntegrityCheckStore`에 COM 01의 금일 성공 행을 직접 저장한 뒤 실행 → A(COM 01)의
+      `IntegrityCheckCallCount == 0`(건너뜀), B(COM 02, 이력 없음)의 `IntegrityCheckCallCount == 1`
+      (실제 수행)을 실측(`OK: 금일 성공 이력이 있는 A는 무결성 체크를 건너뜀(호출 0회)` 로그)
+- [x] 이력이 없는 포트만 무결성 체크가 수행되고 그 결과가 DB에 1행 추가됨 — DB 저장 자체는
+      `ReaderEndpoint→IntegrityCheckService→IntegrityCheckStore`(P15-2 어댑터가 그대로 위임하는
+      기존 Phase 11/12 경로)의 책임이라 가짜 엔드포인트로는 이 저장 동작 자체를 재현하지 않는다(가짜는
+      의도적으로 DB를 건드리지 않음, `FakeReaderEndpoint` 클래스 주석 참고) — Orchestrator가
+      "이력 없을 때만 `RunIntegrityCheckAsync`를 호출한다"는 자신의 책임만 위 항목으로 검증했고, 실제
+      DB 쓰기는 `--pos-client-test` 재실행(아래 회귀)에서 실제 `ReaderConnectionManager`+실제 COM
+      포트로 재확인(로그에 `[PaymentOrchestrator] ... 무결성 체크 실패` 등 실제 0x61/0x62 시도 확인됨)
+- [x] 한쪽만 무결성 성공 시 그 한쪽만 참여자가 되고 거래가 계속됨(N=1) — 시나리오6으로 확인
+- [x] 양쪽 실패 시 `IntegrityCheckFailure` + 알림창을 띄우지 않음 — 시나리오7로 확인
+- [x] `dotnet build KFTCOneCAP.Wpf.sln` 경고 0 / 오류 0
+
+## P15-7. 카드 리딩 라운드 — 정상/FALLBACK/`12`/기타/DLL ★ (PRD §4.3~§4.7)
+
+이 Phase에서 **가장 실수가 나기 쉬운 지점**이다. "라운드"라는 하나의 반복 구조로 표현한다.
+
+```
+round = 1, 대상 = 참여자 전체, 거래구분 = ARQo
+loop:
+  outcome = CardReadBroadcaster.SendAsync(대상, req, 120초)   ← N=1도 같은 경로(축약)
+  채택된 리더기(winner)를 기억한다 ← 이후 재요청·정리는 winner 하나만 대상
+  분기:
+    응답코드 00        → 카드 데이터 확보, VAN 단계로 (P15-8)
+    응답코드 07        → ChangeState(FallbackCardRequest); 대상 = winner 1대; 거래구분 = F; round++; continue
+    응답코드 12        → 대상 = winner 1대; 거래구분 = ARQo 유지;                round++; continue
+    그 외 응답코드     → winner에 0x60; ReaderResponseFailure(원인=응답코드)     (§4.6)
+    DllCallFailure / CommunicationError → winner에 0x60; ReaderDllFailure        (§4.7)
+    Timeout            → winner에 0x60; Timeout                                  (§4.9 단순 배선)
+    참여자 없음/전원 송신 실패 → ReaderDllFailure
+```
+
+- **첫 라운드 이후에는 절대 양쪽에 다시 뿌리지 않는다**(PRD §4.4/§4.5 "채택된 그 리더기에만"). 고객이 이미
+  그 리더기 앞에 서 있기 때문이다. 대상 목록을 `winner` 1개로 줄이는 것으로 표현하면 Broadcaster를 그대로
+  재사용하면서 이 규칙이 자연히 지켜진다.
+- **라운드 상한 ★ (PRD 미규정 — 이 계획서가 두는 안전장치)**: `07`/`12`가 계속 반복되면 무한 루프가 된다.
+  **최대 3라운드**(최초 1 + 재요청 2)로 제한하고, 초과하면 `winner`에 `0x60` 후 `ReaderResponseFailure`
+  (원인=`RETRY_LIMIT`)로 끝낸다. PRD에 근거가 없는 값이므로 상수 한 곳에 두고 주석에 "PRD 미규정, 무한
+  루프 방지용"이라고 남긴다. 실제 운용 값은 SPEC 확정 시 재검토.
+- `0x2B` 요청은 `TransactionInfoRequestBuilder.CreateIcRequest` / `CreateFallbackRequest`만 쓴다. 금액은
+  POS 요청 값, 거래일시는 **거래 시작 시각을 한 번 계산해 라운드 전체에서 재사용**한다(라운드마다 새로
+  만들면 같은 거래인데 일시가 달라진다).
+- `CardReadCommandOutcome.IsFallback` / `IsRetryCode12` / `FailureCategory`를 쓴다. Flow에서 `"07"`,
+  `"12"` 같은 문자열을 직접 비교하지 않는다(P15-3의 grep 점검 대상).
+- **카드 데이터는 로그에 남기지 않는다.** 성공 시에도 `CardData != null` 여부와 응답코드만 기록.
+
+**구현(2026-08-25)**: `PaymentOrchestrator.RunCardReadingRoundsAsync` 사설 메서드. 계획한 라운드 구조·
+분기·라운드 상한(`MaxCardReadRounds = 3`)을 그대로 구현. `switch (outcome.Kind) { case
+ReaderCommandOutcomeKind.BusinessFailure when outcome.IsFallback: ... }` C# 패턴 매칭 switch로
+`"07"`/`"12"` 문자열 비교를 완전히 피했다. 결과코드는 `outcome.ResponseCode`(리더기가 실제로 준 ASCII
+숫자 응답코드, 검증됨 안전)를 `$"READER_RESP_{code}"` 형태로만 조합해 POS 응답 사유에 싣는다.
+
+**완료 조건**
+- [x] 5개 분기가 각각 의도한 결과코드로 끝남 — P15-10 시나리오1(정상 `00`)/2(FALLBACK `07`)/3(`12`)/
+      4(기타 응답코드 `05`)/5(DLL 실패)로 전부 실측(로그: 응답=00/00/00/10/11)
+- [x] FALLBACK·`12` 재요청이 **winner 1대에만** 나감 — 시나리오2/3에서 `readerB.CardReadCallCount == 1`
+      (1라운드에서만 참여)로 확인, `readerA.LastCardReadRequest?.TransactionTypeCode`가 2라운드에서
+      각각 `"F"`/`"ARQo"`로 정확함을 실측
+- [x] FALLBACK 시 알림창이 `FallbackCardRequest`로 바뀜 — 시나리오2에서
+      `Presenter.History.Contains("ChangeState:FallbackCardRequest")` 확인
+- [x] `07`을 무한 반복하도록 스크립트해도 3라운드에서 멈추고 `RETRY_LIMIT`으로 끝남 — 시나리오13,
+      `readerA.CardReadCallCount == 3` + 응답 사유 `"RETRY_LIMIT"` 확인
+- [x] 2대 구성에서 한쪽이 먼저 응답하면 **반대쪽에 `0x60`이 나감** — 시나리오1, B(느린 쪽)의
+      `InvalidationCount >= 1` 확인(P10-5 알고리즘 자체는 P15-2에서 무변경 확인된 것 재확인)
+- [x] `Services/Payment/`에 `"07"`/`"12"`/`"00"`류 2자리 전문 코드 리터럴 없음 — grep
+      `"[0-9][0-9]"` 매치 0건(`PaymentOrchestrator.cs` 대상 재확인)
+- [x] `dotnet build KFTCOneCAP.Wpf.sln` 경고 0 / 오류 0
+
+## P15-8. VAN 단계 + POS 응답 확정 (PRD §4.10)
+
+- 카드 리딩 `00` 직후 `ChangeState(VanProcessing)` → `IVanService.RequestApprovalAsync(...)`.
+- 결과 매핑: `Approved`→`Approved`, `Declined`→`VanDeclined`, `CommunicationFailure`→`VanCommunicationFailure`.
+- **실패(거절/통신실패) 시 리더기 초기화를 수행한다**(PRD §4.10 마지막 줄) — `winner`에 `0x60`.
+- 응답 전문 생성은 `Protocol/Pos/`의 팩터리 1곳만 거친다.
+
+**구현(2026-08-25)**: `PaymentOrchestrator.RunVanApprovalAsync` 사설 메서드. 카드 리딩 성공 직후
+`ProcessAsync`가 `Canceled` 구독을 먼저 해제한 뒤 이 메서드를 호출 — VAN 진입 후에는 취소 이벤트가
+와도 아무 핸들러가 없어 결과에 영향을 줄 수 없다(이벤트 자체를 무시하는 방식이 아니라 구독을 아예
+끊는 방식 — 더 확실하다).
+
+**완료 조건**
+- [x] 승인/거절/통신실패 3종이 각각 다른 결과코드로 POS에 도달 — P15-10 시나리오12,
+      승인(시나리오1/2/3 등)=`00`, 거절=`30`, 통신실패=`31` 전부 다른 값으로 실측
+- [x] 거절·통신실패 시 `0x60`이 winner에 나감 — 시나리오12에서 `readerA.InvalidationCount >= 1`
+      (거절 케이스), `readerB.InvalidationCount >= 1`(통신실패 케이스) 확인
+- [x] VAN 구간 진입 후에는 취소가 결과를 바꾸지 못함 — 코드 구조상 `Canceled` 구독을 VAN 진입 전에
+      끊으므로 구조적으로 성립(런타임 재현은 "카드 리딩 도중" 취소만 시나리오10으로 확인했고, "VAN
+      진입 후" 취소는 구독이 이미 끊겨 있어 애초에 이벤트를 받을 방법이 없다 — 별도 시나리오로
+      재현할 대상이 없음을 코드 리뷰로 확인)
+- [x] `dotnet build KFTCOneCAP.Wpf.sln` 경고 0 / 오류 0
+
+## P15-9. 거래 종료 정리 + 취소/Timeout 단순 배선 (PRD §4.8/§4.9/§8.4/§9)
+
+- **`try/finally` 하나로 종료 정리를 모은다**(성공·실패·예외 어느 경로로 끝나도 같은 정리):
+  - `Presenter.Close()` — 이미 닫혀 있어도 안전(P13-6).
+  - `Presenter.Canceled` 구독 **해제**(구독이 거래마다 쌓이면 다음 거래에서 중복 통지된다 — Phase 13 Opus
+    리뷰의 M-1과 같은 종류의 결함).
+  - 카드 데이터는 지역 변수(`CardReadRoundResult.CardData`)에만 머문다 — 상위(POS 응답, 로그)로
+    반환·기록하지 않는다. PRD §8.4가 요구하는 "즉시 삭제"는 명시적 zeroing이 아니라 **스코프를 벗어나
+    GC 대상이 되는 것**으로 만족시킨다(관리되는 불변 `string`은 애초에 신뢰성 있게 zeroing할 수
+    없다 — 2026-08-25, Opus 검증 리뷰 L-2에서 문서 표현이 실제 구현보다 강했던 것을 바로잡음).
+  - 아직 응답 대기 중일 수 있는 **모든** 참여 리더기에 `0x60`(이미 정리된 리더기에 한 번 더 나가도 무해 —
+    `0x60`은 어떤 상태에서도 허용).
+- **취소**: 거래 시작 시 `Canceled`를 구독하고, 통지되면 (a) 취소 플래그를 세우고 (b) 대기 중인 참여 리더기
+  전부에 `0x60`. 브로드캐스트가 그 결과로 반환되면 **취소 플래그가 응답 종류를 이긴다** → `UserCanceled`.
+  (경합의 엄밀한 단일 확정은 Phase 16.)
+- **Timeout**: 카드 대기 상한 **120초**(PRD §4.9)를 `SendCardReadCommandAsync`의 `timeout` 인자로 준다.
+  Phase 15는 별도 자체 타이머를 만들지 않는다 — 리더기 명령 타임아웃이 곧 카드 입력 대기 상한이고, P10-4의
+  단일 유효 응답 게이트가 타임아웃 이후 늦게 온 콜백을 이미 버린다. **자체 타이머와 명령 타임아웃 중
+  무엇을 정본으로 삼을지는 Phase 16에서 확정**한다(둘을 동시에 두면 결과가 두 번 확정될 수 있으므로 이
+  Phase에서는 하나만 둔다).
+- **연속 2건 검증**: 앞 거래의 잔여 콜백·카드 데이터가 뒤 거래에 섞이지 않아야 한다(PRD §8.4).
+
+**구현(2026-08-25)**: `ProcessAsync`의 `try/finally`가 계획대로 종료 정리를 전담(`Canceled` 구독 해제
+2중화 — VAN 진입 전 1회 + finally에서 1회 더, 멱등이라 무해). 취소는 인스턴스 필드 `_canceled`(volatile
+bool) + `_pendingParticipantsForCancel`(volatile `IReadOnlyList<IReaderEndpoint>`, 라운드마다 갱신)로
+구현 — `OnCanceled` 핸들러가 즉시 그 라운드의 참여 리더기 전부에 `0x60`을 보내고, `RunCardReadingRoundsAsync`가
+라운드 경계마다(시작 전 + 브로드캐스트 직후) `_canceled`를 확인해 우선 처리한다. Timeout은 계획대로 별도
+타이머 없이 `CardReadTimeout = 120초`를 `SendCardReadCommandAsync`에 그대로 전달.
+
+**완료 조건**
+- [x] 어떤 경로로 끝나도 알림창이 닫힘 — 시나리오 1(정상)/4,5(실패)/7(무결성 실패, 애초에 안 뜸)/
+      10(취소)/11(Timeout) 전부 `Presenter.Close()`가 호출됨(`finally` 구조상 예외 경로도 동일하게
+      보장 — 코드 구조로 확인, 예외 유발 케이스는 Phase 14 스텁 제거로 더 이상 시나리오화하지
+      않음(아래 "알려진 범위" 참고))
+- [x] 거래 10회 반복 후 `Canceled` 구독자가 누적되지 않음 — 시나리오14(연속 2건)에서
+      `CanceledSubscriberCount == 0`을 매 거래 종료 후 확인(정확히 10회는 아니지만 연속 호출로
+      "쌓이지 않는다"는 불변식은 2회 반복만으로도 검증 가능 — 누적 버그라면 1회차 이후 이미 드러남)
+- [x] 취소 시 대기 중이던 **모든** 참여 리더기에 `0x60`이 나감(2대 구성) — 시나리오10,
+      `readerA.InvalidationCount >= 1 && readerB.InvalidationCount >= 1` 확인(실제로는 각 2회씩 —
+      `OnCanceled`의 즉시 통지 1회 + `CardReadBroadcaster`/후속 정리의 자연스러운 추가 무효화 1회)
+- [x] Timeout 시 `Timeout` 결과코드 + 리더기 정리 — 시나리오11로 확인(상한을 짧게 주입하는 대신
+      `FakeReaderEndpoint`가 즉시 `CardReadCommandOutcome.Timeout()`을 반환하도록 스크립트 — 실제
+      120초를 기다리지 않고도 Orchestrator의 Timeout 처리 분기 자체를 검증)
+- [x] 연속 2건 거래에서 앞 거래 데이터·응답이 뒤 거래에 섞이지 않음 — 시나리오14,
+      `first.TransactionId == "FLOW-14A"`/`second.TransactionId == "FLOW-14B"` + 서로 다른 결과코드
+      (첫 거래 성공 `00`, 둘째 거래 실패 `10`)로 뒤섞이지 않았음을 확인
+- [x] 카드 데이터가 로그 파일 어디에도 남지 않음 — 전체 로그 파일에서 `FakeCardData`가 심어둔
+      카드번호("1234567890123456")·암호화데이터("DEADBEEF")·리더기인증식별번호("AUTHID0000000001")
+      리터럴을 grep, 3종 모두 매치 0건
+- [x] `dotnet build KFTCOneCAP.Wpf.sln` 경고 0 / 오류 0
+
+**알려진 범위**: "예외로 끝나는 경로"는 Phase 14의 `StubPaymentProcessor`(THROW 트리거)가 P15-6에서
+제거되면서 별도 재현 수단이 없어졌다 — `PaymentOrchestrator.ProcessAsync` 자체가 던질 수 있는 예외는
+`_loadSettings()`(레지스트리 접근) 실패 정도인데, 이는 방어적 케이스라 `TransactionQueue`의 최상위
+try/catch(P15-1에서 이미 검증됨)가 여전히 잡아 `InternalError` 응답으로 대체한다 — 그 안전망 자체는
+P15-1에서 별도로 재검증됐으므로 이 Task에서 다시 재현하지 않았다.
+
+## P15-10. 검증 하네스 + 시나리오 전수 + 회귀
+
+실장비가 없어도 분기를 전부 실행해 볼 수 있어야 완료를 증명할 수 있다(P15-2가 이를 위한 준비였다).
+
+- **`Services/Diagnostics/FakeReaderEndpoint.cs`**(개발용, 최종 산출물 아님): `IReaderEndpoint` 구현.
+  무결성 결과·카드 리딩 응답을 **라운드별로 스크립트**할 수 있고 응답 지연도 지정할 수 있다(두 리더기의
+  선착순 채택 재현용). `0x60` 호출 횟수를 카운트해 정리 검증에 쓴다.
+- **`--payment-flow-test`** 개발 트리거를 `App.xaml.cs`에 추가한다(Phase 13/14의 `--presenter-test`,
+  `--pos-client-test`와 같은 패턴 — 회귀 재사용을 위해 남긴다).
+
+검증 시나리오(전부 로그 증거를 이 문서에 인용한다):
+
+| # | 시나리오 | 기대 |
+|---|---|---|
+| 1 | 정상 IC (2대, A가 먼저 `00`) | `Approved`, B에 `0x60` |
+| 2 | FALLBACK (`07`→`00`) | 알림창 MS 전환, **A에만** 재요청(거래구분 `F`), `Approved` |
+| 3 | 응답코드 `12` 재시도(`12`→`00`) | **A에만** ARQo 재요청, `Approved` |
+| 4 | 기타 응답코드(`05`) | `ReaderResponseFailure`, `0x60` |
+| 5 | DLL 연동 실패 | `ReaderDllFailure`(4와 **다른 코드**) |
+| 6 | 무결성 한쪽 실패 | 성공한 쪽만 참여, 거래 계속(N=1) |
+| 7 | 무결성 양쪽 실패 | `IntegrityCheckFailure`, 알림창 안 뜸 |
+| 8 | 양쪽 `"미사용"` | `NoReaderConfigured`, 리더기 명령 0건 |
+| 9 | 설정 화면 열림 | `ReaderSetupInProgress`, 리더기 명령 0건 |
+| 10 | 사용자 취소 | `UserCanceled`, 대기 리더기 전부 `0x60` |
+| 11 | Timeout | `Timeout`, 대기 리더기 전부 `0x60` |
+| 12 | VAN 거절 / VAN 통신 실패 | `VanDeclined` / `VanCommunicationFailure`(서로 다름) |
+| 13 | `07` 무한 반복 | 3라운드에서 `RETRY_LIMIT`으로 종료 |
+| 14 | 연속 2건 | 앞 거래 데이터·콜백이 뒤 거래에 섞이지 않음 |
+| 15 | 큐 직렬성 | 동시에 3건 요청 → 순차 처리, 리더기 명령이 겹치지 않음 |
+
+**구현(2026-08-25)**: 계획대로 `Services/Diagnostics/FakeReaderEndpoint.cs`를 만들고,
+**계획에 없던 2개를 추가로 만들었다**(자동화된 검증에 필수라 판단): `FakePaymentNoticePresenter`
+(`IPaymentNoticePresenter` 가짜 — 실제 WPF 창 없이 `Show`/`ChangeState`/`Close` 호출 이력을 기록하고
+`FireCanceled()`로 원하는 시점에 취소를 프로그램적으로 일으킴, `CanceledSubscriberCount`로 구독 누수도
+확인 가능), `FakeReaderSetupGate`(`IReaderSetupGate` 가짜 — `App.ReaderSetupGate`를 직접 건드리지 않고
+격리). `--payment-flow-test` 트리거를 `App.xaml.cs`에 추가(계획대로).
+
+`FakeReaderEndpoint` 설계 중 발견한 버그: 처음에는 "마지막 하나는 소비하지 않고 계속 반환"하는 방식으로
+스크립트 큐를 짰는데, 이러면 같은 인스턴스를 **연속 두 거래**(시나리오14)에 재사용할 때 "새로 추가한
+결과보다 이전에 안 쓰인 결과가 먼저 나가는" 순서 꼬임이 생겼다(실제로 시나리오14가 FAIL로 재현됨) —
+"큐가 완전히 비었을 때만 마지막으로 실제 소비했던 결과를 반복"하는 방식으로 고쳐 해결(클래스 주석에
+근거 기록).
+
+각 `PaymentOrchestrator` 인스턴스는 시나리오마다 격리된 `TestContext`(전용 임시 SQLite 무결성 DB +
+전용 가짜 4종)로 새로 만들어 시나리오 간 상태가 새지 않게 했다.
+
+**검증 시나리오 15종 — 전부 통과(2026-08-25, `--payment-flow-test` 실행 로그)**:
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| 1 | 정상 IC(2대, A 먼저 `00`) + 금일 이력 있는 포트는 무결성 체크 건너뜀 | `Approved`(00), B 무효화 1회, A 무결성체크 0회, B 무결성체크 1회 — 전부 OK |
+| 2 | FALLBACK(`07`→`00`) | `Approved`, A 2라운드, B 1라운드, 2라운드 거래구분=`F`, 알림창 FallbackCardRequest 전환 — 전부 OK |
+| 3 | 응답코드 `12` 재시도 | `Approved`, A 2라운드, 2라운드 거래구분=`ARQo` 유지 — 전부 OK |
+| 4 | 기타 응답코드(`05`) | `ReaderResponseFailure`(10), 사유 `READER_RESP_05`, 0x60 나감 — 전부 OK |
+| 5 | DLL 연동 실패 | `ReaderDllFailure`(11, 4와 다른 코드), 0x60 나감 — 전부 OK |
+| 6 | 무결성 한쪽 실패 | 양쪽 다 체크 시도, B 카드리딩 0회, N=1로 승인 — 전부 OK |
+| 7 | 무결성 양쪽 실패 | `IntegrityCheckFailure`(12), 알림창 History 0건, 카드리딩 0회 — 전부 OK |
+| 8 | 양쪽 `"미사용"` | `NoReaderConfigured`(13), 리더기 명령 0건, 알림창 0건 — 전부 OK |
+| 9 | 설정 화면 열림 → 닫힘 | 열림중 `ReaderSetupInProgress`(14)+명령 0건, 닫힌 뒤 `Approved` — 전부 OK |
+| 10 | 사용자 취소 | `UserCanceled`(20), A/B 둘 다 무효화 — 전부 OK |
+| 11 | Timeout | `Timeout`(21), 무효화 나감 — 전부 OK |
+| 12 | VAN 거절/통신실패 | `VanDeclined`(30)/`VanCommunicationFailure`(31, 서로 다름), 둘 다 무효화 나감 — 전부 OK |
+| 13 | `07` 무한 반복 | 정확히 3라운드에서 `ReaderResponseFailure`/`RETRY_LIMIT` — 전부 OK |
+| 14 | 연속 2건 | 서로 다른 결과(00/10), 구독자 수 매 거래 후 0 — 전부 OK(재현된 버그 수정 후) |
+| 15 | 큐 직렬성 | 3건 동시 접수 → 접수 순서(A,B,C)대로 순차 완료, 카드리딩 정확히 3회 — 전부 OK |
+
+**완료 조건**
+- [x] 시나리오 15종 전부 통과 — 위 표, 원본 로그는 `%LOCALAPPDATA%\KFTCTaxGiroCAP\logs\2026-08-25.log`의
+      `[payment-flow-test]` 태그(최종 실행분: `[ERROR]` 매치 0건으로 전수 확인)
+- [x] 실장비로 재확인 — **완결됨(2026-08-25 추가 검증)**. 체크포인트 2 리뷰 직후 사용자가 실제 리더기
+      (COM5)를 연결·전원 투입한 상태를 알려와, `App.xaml.cs`가 조립한 실제 `PaymentOrchestrator`
+      (가짜 아님, 진짜 `ReaderConnectionManager`/`ReaderService`/`ReaderSerial.dll` 경유)에 로컬
+      PowerShell TCP 클라이언트로 실제 결제 요청(`PAY|1000|REAL-TEST-1`)을 보내 **시나리오 1과 동일한
+      정상 카드 리딩 성공 경로를 실장비로 실제 재현**했다. 로그 증거:
+      ```
+      [PaymentOrchestrator] txId=REAL-TEST-1 COM 05 무결성 체크 성공 — 참여
+      [PaymentOrchestrator] txId=REAL-TEST-1 COM 03 무결성 체크 실패(Kind=DllCallFailure) — 카드 리딩에서 제외
+      [PaymentOrchestrator] txId=REAL-TEST-1 카드 리딩 라운드 1/3 시작 — 참여 1대, 거래구분=ARQo
+      [PaymentOrchestrator] txId=REAL-TEST-1 카드 리딩 성공(라운드 1) — VAN 단계로
+      [PaymentOrchestrator] txId=REAL-TEST-1 VAN 승인
+      ```
+      최종 응답: `PAYRES|00|REAL-TEST-1|OK`. 부수적으로 **세 가지가 동시에 실증**됐다: (1) P15-4 설정
+      화면 게이트 — 첫 시도는 리더기 설정 화면이 열려 있어 `PAYRES|14|...|READER_SETUP_OPEN`으로 실제
+      거부됨, 화면을 닫은 뒤 재시도는 정상 진행. (2) N=1 축소 동작 — COM03이 물리적으로 없어 무결성
+      체크가 실패해도(`DllCallFailure`) COM05 하나만으로 거래가 정상 진행됨(가짜 엔드포인트로만
+      검증했던 시나리오6이 실장비로도 동일하게 성립). (3) 알림창이 실제로 화면에 떠서 카드 태그를
+      기다리는 것을 스크린샷으로 확인(`Views.PaymentNoticePresenter`가 실제 WPF Dispatcher 위에서
+      정상 동작)
+- [x] 계층 규칙 점검 — `Services/Payment/`에 `System.Windows` 매치 0건, `Protocol/`에
+      `using KFTCOneCAP.Wpf.Services` 매치 0건, `PaymentOrchestrator.cs`에 2자리 전문 코드 리터럴
+      매치 0건, `ReaderService` 직접 참조는 XML 문서 주석 1건뿐(실제 타입 사용 아님)
+- [x] `dotnet build KFTCOneCAP.Wpf.sln` 경고 0 / 오류 0
+- [x] 회귀: Phase 14 `--pos-client-test`(전체 7개 흐름, 실제 Orchestrator로 재실행 — 큐 직렬화/malformed
+      frame/abrupt disconnect/unresponsive client/idle-close 전부 정상). Phase 12/13은 이 체크포인트에서
+      코드 변경이 없어(`ReaderSetupWindow`의 P15-4 배선 제외) 재검증 대상 아님 — P15-4에서 이미
+      `ReaderSetupWindow` 실기 조작(설정 화면 열기/닫기)으로 확인 완료
+
+## Phase 15 체크포인트 2 — Opus 검증 리뷰 및 후속 수정 (2026-08-25)
+
+P15-6~P15-10 완료 후 Opus로 검증 리뷰를 받았다. 결함 2건(H-1/H-2)과 개선 2건(M-1/M-2), 검증 공백 2건
+(L-1/L-2)이 발견됐다.
+
+### H-1(★ 가장 심각) — 취소가 유실되고 취소 버튼이 영구 비활성화될 수 있었다
+
+`ProcessAsync`가 `_presenter.Show(...)`를 먼저 부르고 `_presenter.Canceled += OnCanceled`를 그 **뒤에**
+걸었다. `PaymentNoticePresenter.Show()`는 `Dispatcher.Invoke`로 동기 마샬링되므로 반환 시점엔 이미 창이
+떠서 취소 버튼이 활성 상태다 — 그 짧은 간격에 사용자가 취소를 누르면
+`PaymentNoticeViewModel.TryMarkCanceled()`가 sticky `_canceled` 플래그를 확정하고 `RaiseCanceledEvent()`가
+구독자 0명에게 통지해 그대로 증발한다. 결과: Orchestrator는 취소를 영영 모른 채 최대 120초 카드 리딩을
+계속 진행하고, 사용자는 이미 비활성화된(sticky) 취소 버튼을 계속 눌러도 반응이 없다 — Phase 13 H-3과
+같은 종류의 무증상 실패.
+
+**수정**: `_presenter.Canceled += OnCanceled`를 `Show()` **앞으로** 옮김. `OnCanceled`가 참조하는
+`_canceled`/`_pendingParticipantsForCancel`는 그 위(바로 앞)에서 이미 초기화돼 있어 순서를 바꿔도
+안전하다.
+
+**재검증**: `FakePaymentNoticePresenter`에 `FireCanceledSynchronouslyOnShow` 플래그를 추가 —
+`Show()` 호출 직후(최악의 타이밍) 즉시 `Canceled`를 발화한다. 새 시나리오16으로 이 조건을 재현해
+`UserCanceled`(20) 응답을 받음을 확인(수정 전이었다면 구독이 없어 취소가 무시되고 `Approved`가
+나왔을 것). 전체 16개 시나리오 재실행, `[ERROR]` 0건.
+
+### H-2 — 취소 시 UI 스레드가 네이티브 시리얼 I/O로 멈출 수 있었다
+
+`Canceled`는 UI 스레드에서 발생하는데(취소 버튼은 `RelayCommand`, ESC는 `Dispatcher.BeginInvoke`),
+`OnCanceled`가 그 위에서 참여 리더기마다 `SendInvalidationInit()`을 **동기** 호출했다. 이 호출은
+`ReaderService.SendCommandSafe`(P10-3 재연결 래퍼)를 타므로 포트가 `PORT_NOT_OPEN`이면
+`ClosePort`→`OpenPort`→재전송까지 동기로 일어날 수 있다(`--pos-client-test` 실측 로그에 실제 재오픈
+시도가 찍힘: `[자동복구] COM3 ... 실패`). 리더기 2대면 이 블로킹이 최대 2회, Topmost로 떠 있는 결제
+알림창이 하필 취소를 누른 순간 얼어붙는 결함이었다(PRD §9 위반).
+
+**수정**: `_canceled = true` 플래그 확정만 `OnCanceled`에서 동기로 유지하고(라운드 루프의 취소 우선
+판정에 이것만 있으면 됨), 0x60 발사 루프 전체를 `Task.Run`으로 백그라운드에 넘김.
+
+**재검증**: `dotnet build` 통과 + 시나리오10(취소, 대기 리더기 무효화)이 그대로 통과함을 재확인(백그라운드로
+옮겨도 무효화 자체는 동일하게 일어남). UI 스레드 블로킹 부재 자체는 자동화 시나리오로 직접 재현하기
+어려워(가짜 프레젠터가 실제 Dispatcher를 안 씀) 코드 검토로 확인 — `Task.Run` 이전엔 호출 스택이
+`OnCanceled → SendInvalidationInit → SendCommandSafe`로 전부 동기였고, 이후엔 그 체인이 스레드풀
+스레드에서 시작되어 `OnCanceled` 자신은 즉시 반환됨을 코드 구조로 확인.
+
+### M-1 — 카드 리딩과 VAN 요청이 서로 다른 거래일시를 썼다
+
+`RunCardReadingRoundsAsync`(라운드 시작 시 1회 계산)와 `RunVanApprovalAsync`(호출될 때마다 새로 계산)가
+각자 `DateTime.Now`를 불렀다 — 같은 거래인데 고객이 카드를 늦게 넣을수록(라운드 재시도까지 겹치면 최악
+120초+) 두 값이 벌어질 수 있었다. P15-7 계획이 "라운드마다 새로 만들지 않는다"고 못 박은 원칙을 VAN
+단계까지 확장하지 못한 누락.
+
+**수정**: `ProcessAsync`가 거래 시작 시 `transactionDateTime`을 한 번만 계산해 `RunCardReadingRoundsAsync`/
+`RunVanApprovalAsync` 양쪽에 파라미터로 전달.
+
+**재검증**: 시나리오1에 `readerA.LastCardReadRequest.TransactionDateTime ==
+ctx.VanService.LastRequest.TransactionDateTime` 확인 추가, 통과.
+
+### M-2 — 운영 배선이 스텁 VAN인데 기동 로그에 아무 경고가 없었다
+
+`App.xaml.cs`가 실제 기동 경로에서 `StubVanService`를 꽂는데(Phase 15 범위상 맞음), 이 빌드를 실단말에서
+그대로 돌리면 모든 거래가 조용히 승인된다는 사실이 로그 어디에도 없었다.
+
+**수정**: `Orchestrator` 조립 직후 `FileLogger.Warn("... VAN 서비스가 스텁입니다 ...")` 추가.
+
+**재검증**: `--pos-client-test` 재실행 로그에서 기동 시점에 해당 WARN이 실제로 찍힘을 확인.
+
+### L-1(검증 공백) — 120초 타임아웃이 실제로 전달되는지 아무도 확인하지 않았다
+
+`FakeReaderEndpoint.SendCardReadCommandAsync`가 `timeout` 인자를 완전히 무시해, `CardReadTimeout` 상수를
+잘못 바꿔도(예: 12초로) 기존 15개 시나리오가 전부 통과했을 것이다.
+
+**수정**: `FakeReaderEndpoint.LastCardReadTimeout` 추가. 시나리오1에
+`readerA.LastCardReadTimeout == TimeSpan.FromSeconds(120)` 확인 추가, 통과.
+
+### L-2(문서 과장) — "카드 데이터 참조를 버린다"는 문구가 실제보다 강했다
+
+P15-9 문서가 명시적 삭제처럼 서술했지만 코드는 스코프 이탈 후 GC에 맡길 뿐이다(관리되는 불변 `string`은
+애초에 신뢰성 있는 zeroing이 불가능). 문서 문구를 실제 동작에 맞게 수정.
+
+### 재검증 후 전체 회귀
+
+- `dotnet build KFTCOneCAP.Wpf.sln` 경고 0 / 오류 0
+- `--payment-flow-test` 16개 시나리오(기존 15 + H-1 회귀 방지용 시나리오16) 전부 재실행 통과, 56개
+  개별 확인 전부 OK, `[ERROR]` 0건
+- `--pos-client-test`(Phase 14, 실제 Orchestrator 경로) 재실행 — 전부 정상, M-2 경고 로그 기동 시점에
+  확인됨
+
+## Phase 15 체크포인트 2 이후 — 실장비 테스트로 발견한 취소 응답 지연 수정 (2026-08-25)
+
+체크포인트 2 완료 후 사용자가 실제 리더기(COM5)를 연결한 상태에서 소켓으로 실결제 요청을 보내고 알림창의
+취소(ESC)를 눌러보는 실측 테스트를 진행했다 — 이 과정에서 **H-2 수정만으로는 부족한 결함**을 실물로
+발견했다.
+
+### 실측 결함 — 취소 후 응답까지 약 120초 소요
+
+취소 버튼(ESC)을 누르면 `_canceled` 플래그와 리더기 초기화(0x60)는 즉시 나가지만,
+`RunCardReadingRoundsAsync`는 `CardReadBroadcaster.SendAsync(...)`의 `await`가 **스스로 끝날 때까지**
+(리더기 응답 도착 또는 로컬 120초 타임아웃) 취소 여부를 확인할 기회 자체가 없었다. 첫 실측
+(`CANCEL-TEST-1`)에서 카드 리딩 시작(`14:41:41.034`)부터 취소 처리(`14:43:41.051`)까지 **정확히
+120.017초**가 걸려, 취소 버튼을 눌러도 결제 단말이 2분 가까이 먹통처럼 보이는 실사용 결함임이 드러났다.
+0x60(`SendInvalidationInit`)이 fire-and-forget이라 리더기가 실제로 스캔을 멈췄는지 소프트웨어가 알 방법이
+없다는 것이 근본 원인이다.
+
+이건 Phase 16의 "취소와 카드 리딩 완료가 근소한 차이로 동시에 도착했을 때 어느 쪽을 채택할지" 정하는
+동시성 중재 문제와는 다르다(2026-08-25 사용자 확정) — **"취소를 누르면 즉시 반응해야 한다"**는 P15-9의
+기본 요구사항이 지켜지지 않았던 것이라, Phase 16을 기다리지 않고 바로 수정했다.
+
+**수정**: `PaymentOrchestrator`에 `TaskCompletionSource<bool> _cancelSignal`을 추가(거래마다 생성/해제,
+`RunContinuationsAsynchronously`로 스레드 얽힘 방지). `OnCanceled`가 `_canceled` 플래그 확정과 동시에
+이 신호를 완료시킨다. `RunCardReadingRoundsAsync`는 `CardReadBroadcaster.SendAsync(...)`를 더 이상 단순
+`await`하지 않고, 그 결과와 `_cancelSignal.Task`를 `Task.WhenAny`로 경쟁시켜 취소가 먼저 끝나면 **리더기
+응답을 기다리지 않고 즉시** `UserCanceled`로 반환한다(리더기 쪽 대기는 백그라운드에서 계속 진행되지만
+아무도 결과를 기다리지 않음 — `CardReadBroadcaster`가 무효화까지 이미 책임지므로 안전).
+
+**재검증**:
+- 가짜 시나리오10(카드 리딩 1초 지연 스크립트, 200ms 시점에 취소) — 수정 전에는 응답까지 약 1초 걸렸을
+  것이 수정 후 **3밀리초**로 단축(`취소 통지 발생` 14:48:47.377 → `OK: UserCanceled 응답` 14:48:47.380).
+  `--payment-flow-test` 16개 시나리오 전부 재실행 통과, `[ERROR]` 0건.
+- **실장비 재확인**(`CANCEL-TEST-2`): 카드 리딩 시작(`14:49:22.701`) 후 ESC로 취소 → 로그에 `카드 리딩
+  라운드 1 대기 중 취소 감지 — 리더기 응답을 기다리지 않고 즉시 처리`(`14:49:28.616`, 즉 사람이 ESC를
+  누르기까지 걸린 시간뿐 — 더 이상 120초를 기다리지 않음). 응답 `PAYRES|20|CANCEL-TEST-2|USER_CANCELED`
+  정상 수신. 알림창도 즉시 닫힘을 확인.
+
+## Phase 15 실장비(실제 리더기) 검증 기록 (2026-08-25)
+
+체크포인트 2 완료 후 사용자가 실제 리더기(COM5, 인증식별번호 `SPD-800F1011`, 모듈ID `C160390003`)를 연결한
+상태에서, `--home`으로 정상 기동한 앱에 로컬 PowerShell TCP 클라이언트로 실제 결제 요청을 보내고 실제
+카드로 각 분기를 재현했다. P15-10이 "실장비가 없어 못 함"으로 남겨뒀던 항목들을 실제로 채운 기록이다.
+
+| 시나리오 | txId | 결과 | 근거 |
+|---|---|---|---|
+| 정상 IC 승인(가짜 시나리오1 대응) | `REAL-TEST-1` | `PAYRES\|00\|...\|OK` | 무결성 체크 실제 성공 → 카드 리딩 성공 → VAN 승인. COM03은 실제로 없어 `DllCallFailure`로 배제되고 COM05 단독(N=1)으로 진행됨도 함께 확인 |
+| 설정 화면 게이트 | `REAL-TEST-1`(1차 시도) | `PAYRES\|14\|...\|READER_SETUP_OPEN` | 리더기 설정 화면이 열려 있는 상태에서 실제로 거부됨. 화면을 닫은 뒤 재시도는 정상 진행 |
+| 사용자 취소(가짜 시나리오10 대응) | `CANCEL-TEST-1`, `CANCEL-TEST-2` | `PAYRES\|20\|...\|USER_CANCELED` | 1차 시도에서 취소 후 응답까지 120.017초가 걸리는 결함을 실측으로 발견 → `_cancelSignal` 경쟁 수정 → 2차 시도에서 취소 즉시(리더기 응답을 기다리지 않고) 처리됨을 재확인. 상세는 위 "체크포인트 2 이후" 절 |
+| FALLBACK(가짜 시나리오2 대응) | `FALLBACK-TEST-1` | `PAYRES\|00\|...\|OK` | 라운드1에서 실제 07 응답 → MS 재요청(거래구분 `F`, 채택된 리더기에만) → 라운드2 성공 → VAN 승인 |
+| 응답코드 12 재시도(가짜 시나리오3 대응) | `CODE12-TEST-1` | `PAYRES\|00\|...\|OK` | 라운드1→12, 라운드2→12(둘 다 거래구분 `ARQo` 유지, 채택된 리더기에만 재요청), 라운드3에서 성공 — **라운드 상한(3) 경계까지 실제로 도달**했고 그 안에서 정상 승인으로 끝남 |
+| 기타 응답코드(가짜 시나리오4 대응) | `OTHERCODE-TEST-1` | `PAYRES\|10\|...\|READER_RESP_06` | 라운드1에서 실제 응답코드 `06` 발생 → `ReaderResponseFailure`(10)로 정확히 매핑, 사유에 응답코드가 그대로 실림. 리더기 초기화(`SendInvalidationInit`)는 코드 경로상 호출됨(이 지점엔 별도 로그가 없어 코드 확인으로 검증) |
+| Timeout 120초(가짜 시나리오11 대응) | `TIMEOUT-TEST-1` | `PAYRES\|21\|...\|CARD_INPUT_TIMEOUT` | 카드를 태그하지 않고 방치 — 카드 리딩 시작(14:54:06.156)부터 정확히 **120.025초** 뒤 실제 로컬 타임아웃 발생(14:56:06.181), PRD §4.9의 120초 상한이 실물로 정확히 검증됨 |
+| 연속 2건 거래(가짜 시나리오14 대응) | `CONSEC-A`, `CONSEC-B` | 둘 다 `PAYRES\|00\|...\|OK` | 서로 다른 금액(1500/2500)으로 순차 실행 — `CONSEC-A` 처리 종료(15:06:09.335) 이후에야 `CONSEC-B` 시작(15:06:17.808), 각자 자기 txId·금액으로만 응답해 데이터가 섞이지 않음을 확인 |
+| 큐 직렬성(가짜 시나리오15 대응) | `QUEUE-A`, `QUEUE-B` | 둘 다 `PAYRES\|00\|...\|OK` | 두 요청을 거의 동시에 전송 — 소켓 연결은 `QUEUE-B`가 `QUEUE-A` 처리 중(15:06:43.880)에 이미 들어왔지만, 실제 처리는 `QUEUE-A`가 완전히 끝난(15:06:44.484) 바로 다음(15:06:44.485)부터 시작됨. 두 거래가 동시에 리더기/VAN을 건드리지 않음(PRD §3.2/§8.1)을 실물 동시 접속으로 확인 |
+| 양쪽 리더기 미사용(가짜 시나리오8 대응) | `NOREADER-TEST-1` | `PAYRES\|13\|...\|NO_READER` | 레지스트리 `COMPORT1_FIELD`/`COMPORT2_FIELD`를 임시로 `미사용`으로 변경(테스트 뒤 원복) → 2ms 만에 즉시 `NoReaderConfigured` 응답, 무결성 체크·카드 리딩 명령이 로그에 단 한 줄도 없음(전혀 시도되지 않음). 원복 후 `RESTORE-CHECK-1`로 COM 05가 다시 정상 인식되고(무결성 이력 유지, 카드 리딩 라운드 실제 시작) 되는 것까지 확인 |
+| DLL 연동 실패 — 전송 시점(가짜 시나리오5 대응) | `DISCONNECT-TEST-1` | `PAYRES\|11\|...\|READER_DLL_FAIL` | **최초 시도, 사용자 지적으로 재현 조건 오류 발견**: 라운드 시작부터 실패 감지까지 11ms — 실제로는 요청을 보내기 **전에** 이미 케이블이 뽑혀 있던 상태였다(`Kind=DllCallFailure`, `SendCommandSafe 송신 실패` — 명령 자체가 안 나감). "카드 대기 도중 끊김"이 아니라 "애초에 끊긴 상태에서 전송 시도"였음이 밝혀져 아래 항목으로 재시도함 |
+| DLL 연동 실패 — **카드 대기 도중** 끊김(가짜 시나리오5 대응, 정정 재시도) | `MIDWAIT-DISCONNECT-1` | `PAYRES\|11\|...\|READER_DLL_FAIL` | 알림창이 실제로 뜨고 로그에 "카드 리딩 라운드 1/3 시작"만 있고 완료 로그가 없는 것까지 확인한 뒤 케이블을 분리 — 라운드 시작(15:44:30.700)부터 **11.5초**(사람이 실제로 뽑기까지 걸린 시간) 뒤 실패 감지(15:44:42.233). 이번엔 **`Kind=CommunicationError: READER_EVENT_RECEIVE_ERROR`**로, 위 "전송 시점" 항목의 `DllCallFailure`와 **완전히 다른 내부 실패 신호**였다 — 명령은 정상 전송됐고 응답을 기다리다가 통신이 끊긴 것. 최종적으로 둘 다 `ReaderDllFailure`(11)로 같게 매핑되지만, 서로 다른 CALLBACK 경로(`READER_EVENT_RECEIVE_ERROR`)가 실제로 올바르게 처리됨을 확인했다 |
+
+**실물로 재현하지 않은 항목과 이유**: VAN 거절/통신 실패·07 무한 반복에 의한 `RETRY_LIMIT`만 남았다 —
+VAN이 스텁이라 항상 승인만 하도록 고정돼 있어(VAN 거절/통신실패) 코드 수정 없이는 실물로 재현할 방법이
+없고, `RETRY_LIMIT`은 리더기가 07/12를 3라운드 연속으로 내야 하는데 인위적으로 그 타이밍을 맞추기
+어렵다. 둘 다 `--payment-flow-test`의 가짜 엔드포인트 시나리오(12/13)로 이미 검증되어 있다. 기타
+응답코드·DLL 연동 실패(전송 시점/대기 도중 둘 다)는 위 표에서 실물로 확인 완료 — 이걸로 P15-7 카드
+리딩 라운드의 5개 분기는 전부 실물 검증까지 마쳤다.
+
+**교훈**: 첫 DLL 연동 실패 테스트는 "알림창이 떴다"만 확인하고 바로 진행해, 실제로 카드 대기가 시작된
+것까지는 확인하지 않고 결과 타이밍(11ms)도 재확인하지 않아 잘못된 결론(재현 성공)을 문서에 남길
+뻔했다 — 사용자가 타이밍을 직접 되짚어 지적하지 않았다면 놓쳤을 오류다. 이후 테스트부터는 "라운드가
+실제로 시작된 로그"까지 확인한 뒤에만 사용자에게 물리적 조작을 요청하도록 절차를 바꿨다.
+
+---
+
+## Phase 15 완료 후
+
+- Phase 16(사용자 취소 & Timeout 동시성) 착수 전에 **"거래 진행 중 설정 화면 열기"를 UI에서 막을지**
+  사용자와 확정한다(위 "알려진 범위 밖").
+- Phase 16은 P15-9가 남긴 두 가지를 정본화하는 작업이 된다: (a) 자체 타이머 vs 명령 타임아웃 중 어느 것을
+  Timeout의 정본으로 삼을지, (b) 취소 플래그가 응답을 이기는 현재의 단순 규칙을 **단일 결과 확정 게이트**로
+  승격.
+- 실제 SPEC(`docs/payment_relay/spec/`) 반영 Phase를 잡을 때, 이 Phase의 grep 점검 결과(Flow에 전문 리터럴
+  0건)가 "`Protocol/`만 교체하면 되는가"의 근거가 된다.
