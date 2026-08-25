@@ -7,70 +7,40 @@
              Width="340" Height="226.67"
              d:DesignHeight="226.67" d:DesignWidth="340">
     <!--
-        거래중 애니메이션 (docs/payment_relay/images/_preview_crop/거래중 애니메이션.png 완벽 구현):
-          1. 원형 진행광 (Main): 바닥 원 테두리(타원)의 20~25% 구간을 밝은 파란빛으로 강조하여 시계방향으로 회전
-          2. 슬롯 내부 빛 흐름 (Sub): IC 슬롯 안쪽에서 하늘색 하이라이트가 좌 -> 우로 부드럽게 이동
-          3. 은은한 펄스 (Sub): 전면 로고 및 하단 베이스가 은은하게 밝아졌다 어두워짐
+        거래중 애니메이션 (docs/payment_relay/images/_preview_crop/거래중 애니메이션.png 참고):
+          2. 슬롯 내부 빛 흐름 (Sub): IC/MS 슬롯 홈 안쪽에서 하늘색 하이라이트가 좌상 -> 우하로
+             부드럽게 이동. VanProcessing 직전 카드 종류(IC 삽입 vs MS 스와이프)에 따라 둘 중 하나만
+             재생된다(PaymentNoticeWindow가 직전 상태를 기억해 Play(isMs)로 전달).
+
+        2026-08-24 자산 분리(원판 circle.png / 몸통 reader_kftc.png)에 따라 "1. 원형 진행광"과
+        "하단 베이스 펄스"는 <see cref="PaymentProcessingRing"/>로 옮겼다(원판 위·몸통 아래 z-order에
+        고정되어야 하므로). 이 컨트롤은 몸통 "표면"에 있어야 하는 효과(슬롯 빛 흐름)만 남는다 —
+        PaymentNoticeWindow.xaml에서 몸통(ReaderImage)보다 위 레이어(OverlayHost)에 배치된다.
+
+        2026-08-24 6차 수정: "3. 은은한 펄스"(로고 펄스, LogoPulseGlow/LogoCoreGlow)는 사용자
+        피드백("이상해 보인다")에 따라 완전히 제거했다.
+
+        2026-08-24 7차 수정(사용자 피드백 "IC칩쪽에 벗어나 있다"): reader_kftc.png를 Bitmap으로 다시
+        열어 alpha가 아니라 실제 렌더링된 진한 파란 홈 색상(R<B-80, B>180)을 마스크로 잡아 연결영역을
+        재실측했다 — 기존 bbox 기반 추정(약 (537,253)-(983,505))은 근사치였고, 실제로는 IC 슬롯이
+        (543,207)-(949,447)px 연결영역, 주축 각도 30.14도, 채널 폭(중앙 구간) 약 34.8px였다. 기존
+        Ellipse.Height=14는 340x226.67 스케일 변환 시 채널 폭(약 7.7px)의 거의 2배라 홈 밖으로
+        삐져나와 보였다 — Height를 8로 줄여 채널 폭 안에 갇히도록 정정했다.
+        같은 방식으로 MS(마그네틱) 슬롯 앞쪽 대각선 구간(리더기 뒤쪽 모서리에서 꺾이기 전 부분,
+        연결영역 (585,98)-(1000,329)px 중 y<330 구간만)도 실측했다 — 주축 각도 29.86도, 채널 폭 약
+        33.7px로 IC와 거의 동일한 형태다. SlotFlowMs를 IC와 같은 스타일로 추가했다.
     -->
     <Canvas IsHitTestVisible="False" Width="340" Height="226.67" ClipToBounds="False">
 
-        <!-- ===== 3. 하단 베이스 은은한 백라이트 펄스 ===== -->
-        <Path x:Name="BasePulseGlow"
-              Data="M 22,137 A 148,40 0 1 0 318,137 A 148,40 0 1 0 22,137"
-              Stroke="#3B82F6" StrokeThickness="6" Opacity="0.15">
-            <Path.Effect>
-                <BlurEffect Radius="12"/>
-            </Path.Effect>
-        </Path>
-
-        <!-- ===== 1. 원형 진행광 (Main) ===== -->
-        <!-- 타원 궤적 베이스 은은한 트랙 (전면 반원 림) -->
-        <Path Data="M 22,137 A 148,40 0 0 0 318,137"
-              Stroke="#3B82F6" StrokeThickness="3.5" Opacity="0.35"/>
-
-        <!-- 글로우 효과를 입힌 회전 진행광 아크 (전면 트랙을 따라 자연스러운 회전광 연출)
-             2026-08-24 수정: 이전엔 타원 전체(360도, M...A...A로 만든 닫힌 경로)를 따라 돌리고
-             RectangleGeometry로 아래쪽만 클립했는데, 사각형 클립이 타원의 곡선 경계와 맞지 않아
-             빛이 원판(타원) 밖으로 삐져나오거나 몸통 위에 그대로 비치는 문제가 있었다. 그래서 경로
-             자체를 처음부터 "보이는 앞쪽 반원"(위의 기본 트랙과 동일한 Data)만으로 한정해 클립 없이도
-             항상 타원 테두리 위에만 있도록 정정했다 — 열린 반원 경로라 계속 같은 방향으로 돌 수 없으므로
-             (한쪽 끝에 닿으면 튀어야 함) 왕복(AutoReverse)으로 바꿨다(코드비하인드 Play() 참고). -->
-        <Path x:Name="OrbitGlowArc"
-              Data="M 22,137 A 148,40 0 0 0 318,137"
-              Stroke="#60A5FA" StrokeThickness="7"
-              StrokeDashArray="80 1000" StrokeDashCap="Round"
-              Opacity="0.85">
-            <Path.Effect>
-                <BlurEffect Radius="8"/>
-            </Path.Effect>
-        </Path>
-
-        <!-- 선명한 코어 회전 진행광 아크 (위와 같은 이유로 반원 경로로 정정) -->
-        <Path x:Name="OrbitCoreArc"
-              Data="M 22,137 A 148,40 0 0 0 318,137"
-              Stroke="#E0F2FE" StrokeThickness="3.5"
-              StrokeDashArray="55 1000" StrokeDashCap="Round"
-              Opacity="0.95"/>
-
-        <!-- 진행광 선두(Head) 하이라이트 발광체 점 -->
-        <Ellipse x:Name="OrbitHeadLight" Width="14" Height="14"
-                 Fill="#FFFFFF" Opacity="0.95"
-                 Canvas.Left="0" Canvas.Top="0">
-            <Ellipse.Clip>
-                <RectangleGeometry Rect="-20,0,50,50"/>
-            </Ellipse.Clip>
-            <Ellipse.Effect>
-                <BlurEffect Radius="4"/>
-            </Ellipse.Effect>
-        </Ellipse>
-
-        <!-- ===== 2. 슬롯 내부 빛 흐름 ===== -->
-        <!-- 슬롯 이동 영역 (X:120,Y:60 -> X:200,Y:98 대각선) -->
-        <Ellipse x:Name="SlotFlow" Width="40" Height="14" Canvas.Left="120" Canvas.Top="60"
+        <!-- ===== 2a. IC 슬롯 내부 빛 흐름 =====
+             reader_kftc.png 실측(진한 파란 홈 색상 연결영역, 1536x1024 기준 (543,207)-(949,447)px,
+             주축 p0(546.86,213.79)->p1(942.73,443.63), 폭 약 34.8px)을 340x226.67로 스케일
+             변환(계수 0.221354): 시작점 (121.05,47.32) -> 끝점 (208.66,98.19), 각도 30.14도. -->
+        <Ellipse x:Name="SlotFlow" Width="36" Height="8" Canvas.Left="103.05" Canvas.Top="43.32"
                  Opacity="0" RenderTransformOrigin="0.5,0.5">
             <Ellipse.RenderTransform>
                 <TransformGroup>
-                    <RotateTransform Angle="26"/>
+                    <RotateTransform Angle="30.14"/>
                     <TranslateTransform x:Name="SlotFlowTranslate" X="0" Y="0"/>
                 </TransformGroup>
             </Ellipse.RenderTransform>
@@ -82,23 +52,32 @@
                 </RadialGradientBrush>
             </Ellipse.Fill>
             <Ellipse.Effect>
-                <BlurEffect Radius="4"/>
+                <BlurEffect Radius="3"/>
             </Ellipse.Effect>
         </Ellipse>
 
-        <!-- ===== 3. 은은한 펄스 (로고 영역) ===== -->
-        <Ellipse x:Name="LogoPulseGlow" Width="30" Height="30" Canvas.Left="130" Canvas.Top="105"
-                 Fill="#38BDF8" Opacity="0.2">
+        <!-- ===== 2b. MS 슬롯 내부 빛 흐름 =====
+             reader_kftc.png 실측(같은 마스크, y<330 구간만 = 리더기 뒤쪽 모서리로 꺾이기 전 앞쪽
+             대각선 구간, (585,98)-(1000,329)px, 주축 p0(585.66,108.08)->p1(992.69,341.74), 폭 약
+             33.7px)을 같은 스케일로 변환: 시작점 (129.63,23.92) -> 끝점 (219.72,75.65), 각도 29.86도.
+             VanProcessing 진입 직전이 FallbackCardRequest(MS)였을 때만 재생된다. -->
+        <Ellipse x:Name="SlotFlowMs" Width="36" Height="8" Canvas.Left="111.63" Canvas.Top="19.92"
+                 Opacity="0" RenderTransformOrigin="0.5,0.5">
+            <Ellipse.RenderTransform>
+                <TransformGroup>
+                    <RotateTransform Angle="29.86"/>
+                    <TranslateTransform x:Name="SlotFlowMsTranslate" X="0" Y="0"/>
+                </TransformGroup>
+            </Ellipse.RenderTransform>
+            <Ellipse.Fill>
+                <RadialGradientBrush>
+                    <GradientStop Color="#FFFFFF" Offset="0"/>
+                    <GradientStop Color="#8038BDF8" Offset="0.5"/>
+                    <GradientStop Color="#0038BDF8" Offset="1"/>
+                </RadialGradientBrush>
+            </Ellipse.Fill>
             <Ellipse.Effect>
-                <BlurEffect Radius="10"/>
-            </Ellipse.Effect>
-        </Ellipse>
-
-        <!-- 로고 중심 코어 스파크 -->
-        <Ellipse x:Name="LogoCoreGlow" Width="12" Height="12" Canvas.Left="139" Canvas.Top="114"
-                 Fill="#FFFFFF" Opacity="0.4">
-            <Ellipse.Effect>
-                <BlurEffect Radius="4"/>
+                <BlurEffect Radius="3"/>
             </Ellipse.Effect>
         </Ellipse>
 

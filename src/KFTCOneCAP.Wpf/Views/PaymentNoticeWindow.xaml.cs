@@ -38,9 +38,18 @@ public partial class PaymentNoticeWindow : Window
     // 리더기 안쪽까지 계속 들어갔다 나왔다 했던 것이다. IC와 완전히 같은 구조(바깥 1점 → 슬롯 앞에서
     // 정지 → 유지 → 순간 리셋)로 PlayMsCardAnimation을 다시 짜고, "바깥" 오프셋 하나만 남겼다
     // (화살표 반대 방향 = 리더기에서 먼 방향, 즉 오른쪽 아래로 화살표 각도만큼).
+    //
+    // 2026-08-24 4차 수정(사용자 실측 피드백 #2): 위 정지 위치는 예전 reader.png(몸통+원판 합성, MS
+    // 슬롯이 x=1080 부근의 수직 통로) 기준이었다. 새 reader_kftc.png(몸통만 분리)를 Bitmap으로 다시
+    // 실측하니(alpha/색상 스캔), MS 슬롯 통로는 원본 1536x1024 기준으로 대략 (960,300)에서 대각선으로
+    // 꺾여 내려와 (1130,420)~(1135,610) 구간이 수직 통로 본체이고, 바닥 출구(카드가 실제로 빠져나오는
+    // 입구)는 약 (1135,610)이다 — 즉 예전 채널(고정 x=1080, y=330~600)보다 오른쪽 아래로 이동했다.
+    // 창 좌표 변환(스케일 340/1536≈0.221354, ReaderLeft/Top 오프셋 적용) 결과 새 출구 중심은 약
+    // (456,395)이며, 예전 채널 중심(444,363) 대비 (+12,+11) 이동한 값이므로 카드 정지 위치도 동일하게
+    // 오른쪽 아래로 이동시켰다.
     private const double CardMsDisplayWidth = 145;
-    private const double CardMsRestLeft = 440;
-    private const double CardMsRestTop = 290;
+    private const double CardMsRestLeft = 452;
+    private const double CardMsRestTop = 301;
     private const double CardMsSlideFromX = 80;
     private const double CardMsSlideFromY = 49;
 
@@ -58,6 +67,10 @@ public partial class PaymentNoticeWindow : Window
     private EventHandler? _dispatcherShutdownHandler;
     private bool _isFirstRender = true;
     private bool _isTextAFront = true;
+
+    // VanProcessing은 IC 삽입 후에도 MS 스와이프 후에도 공통으로 진입하는 상태라, 슬롯 빛 흐름은
+    // IC/MS 중 어느 쪽 채널을 보여줄지 직전 카드 상태로 판단해야 한다. 기본값은 IC(가장 흔한 경로).
+    private PaymentNoticeState _lastCardState = PaymentNoticeState.IcCardRequest;
 
     public PaymentNoticeWindow() : this(new PaymentNoticeViewModel())
     {
@@ -90,6 +103,7 @@ public partial class PaymentNoticeWindow : Window
 
         SuppressHomeWindowForeground();
 
+        PlateImage.Source = PaymentNoticeBackgroundSource.PlateSource;
         ReaderImage.Source = PaymentNoticeBackgroundSource.ReaderSource;
 
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
@@ -243,6 +257,10 @@ public partial class PaymentNoticeWindow : Window
             CardImage.Opacity = 0;
             StopCard();
             ProcessingIndicator.Stop();
+            ProcessingRing.Stop();
+            ProcessingRing.Visibility = Visibility.Collapsed;
+            SignalWaveIndicator.Stop();
+            SignalWaveIndicator.Visibility = Visibility.Collapsed;
             ArrowImage.Visibility = Visibility.Collapsed;
 
             ConfigureOverlay(state);
@@ -272,6 +290,10 @@ public partial class PaymentNoticeWindow : Window
         FadeElement(OverlayHost, 0, CrossfadeSeconds, () =>
         {
             ProcessingIndicator.Stop();
+            ProcessingRing.Stop();
+            ProcessingRing.Visibility = Visibility.Collapsed;
+            SignalWaveIndicator.Stop();
+            SignalWaveIndicator.Visibility = Visibility.Collapsed;
             ConfigureOverlay(state);
             FadeElement(OverlayHost, 1, FadeInSeconds);
         });
@@ -286,6 +308,12 @@ public partial class PaymentNoticeWindow : Window
     private void ConfigureCard(PaymentNoticeState state)
     {
         StopCard();
+
+        if (state != PaymentNoticeState.VanProcessing)
+        {
+            // ApplyState에서 슬롯 빛 흐름(IC/MS)을 결정할 때 참고할 "직전 카드 상태"를 기록한다.
+            _lastCardState = state;
+        }
 
         if (state == PaymentNoticeState.VanProcessing)
         {
@@ -341,12 +369,24 @@ public partial class PaymentNoticeWindow : Window
 
             Canvas.SetLeft(OverlayHost, ReaderLeft);
             Canvas.SetTop(OverlayHost, ReaderTop);
-            ProcessingIndicator.Play();
+            ProcessingIndicator.Play(isMs: _lastCardState == PaymentNoticeState.FallbackCardRequest);
+
+            // 진행광 링(원판 위·몸통 아래 고정 레이어)은 OverlayHost 소속이 아니므로 별도로 켠다.
+            ProcessingRing.Visibility = Visibility.Visible;
+            ProcessingRing.Play();
+
+            // 신호 웨이브 인디케이터(리더기 위쪽 공중, OverlayHost 소속 아님)도 별도로 켠다.
+            SignalWaveIndicator.Visibility = Visibility.Visible;
+            SignalWaveIndicator.Play();
             return;
         }
 
         ProcessingIndicator.Visibility = Visibility.Collapsed;
         ProcessingIndicator.Stop();
+        ProcessingRing.Stop();
+        ProcessingRing.Visibility = Visibility.Collapsed;
+        SignalWaveIndicator.Stop();
+        SignalWaveIndicator.Visibility = Visibility.Collapsed;
         ArrowImage.Visibility = Visibility.Visible;
 
         var arrowSource = PaymentNoticeBackgroundSource.GetArrowSource(state);
@@ -447,6 +487,8 @@ public partial class PaymentNoticeWindow : Window
     {
         StopCard();
         ProcessingIndicator.Stop();
+        ProcessingRing.Stop();
+        SignalWaveIndicator.Stop();
         ((Storyboard)ArrowImage.Resources["ArrowBounceDownStoryboard"]).Stop(ArrowImage);
         ((Storyboard)ArrowImage.Resources["ArrowBounceLeftStoryboard"]).Stop(ArrowImage);
         _viewModel.PropertyChanged -= ViewModel_PropertyChanged;

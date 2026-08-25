@@ -52,6 +52,8 @@
       (BG_IMG_IC/MS/PROCESSING.png)은 더 이상 쓰지 않는다. LOCK/QR은 배치하지 않는다(범위 밖).
     -->
     <Resource Include="Assets\Images\PaymentNotice\reader.png" />
+    <Resource Include="Assets\Images\PaymentNotice\reader_kftc.png" />
+    <Resource Include="Assets\Images\PaymentNotice\circle.png" />
     <Resource Include="Assets\Images\PaymentNotice\arrow_ic.png" />
     <Resource Include="Assets\Images\PaymentNotice\arrow_ms.png" />
     <Resource Include="Assets\Images\PaymentNotice\ic_card.png" />

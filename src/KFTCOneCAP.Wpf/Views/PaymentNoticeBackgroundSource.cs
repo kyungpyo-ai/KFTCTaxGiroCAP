@@ -39,7 +39,14 @@ internal static class PaymentNoticeBackgroundSource
     /// </summary>
     public const double RotatedArrowIcAngleForFallback = 90;
 
-    private static readonly BitmapImage ReaderBitmap = Load("Assets/Images/PaymentNotice/reader.png");
+    // 2026-08-24 자산 교체: 리더기 몸통(reader_kftc.png)과 바닥 원판(circle.png)을 분리된 레이어로
+    // 받았다 — 이전 reader.png(몸통+원판+그림자 한 장 합성)는 진행광 오버레이를 몸통보다 항상 위
+    // z-order에 그릴 수밖에 없어 "몸통 뒤로 지나가는 진행광"을 표현할 수 없었다(반원 클리핑 편법으로
+    // 버텼음). 분리 후에는 Canvas 순서를 원판 → 진행광 링 → 몸통으로 쌓아 몸통 뒤쪽 절반이 자동으로
+    // 가려지도록 한다(PaymentNoticeWindow.xaml 참고). 두 이미지 모두 1536x1024 동일 캔버스에 그려져
+    // 있어(사용자 확인 완료) 같은 Canvas.Left/Top/Width/Height 박스에 그대로 겹쳐 쓸 수 있다.
+    private static readonly BitmapImage ReaderBitmap = Load("Assets/Images/PaymentNotice/reader_kftc.png");
+    private static readonly BitmapImage PlateBitmapValue = Load("Assets/Images/PaymentNotice/circle.png");
     private static readonly BitmapImage ArrowIcBitmap = Load("Assets/Images/PaymentNotice/arrow_ic.png");
     private static readonly BitmapImage ArrowMsBitmap = Load("Assets/Images/PaymentNotice/arrow_ms.png");
 
@@ -57,10 +64,18 @@ internal static class PaymentNoticeBackgroundSource
     /// </summary>
     public static BitmapImage ReaderSource => ReaderBitmap;
 
+    /// <summary>
+    /// 바닥 원판 이미지(2026-08-24 추가) — 리더기 몸통과 분리된 레이어. IC/FALLBACK/PROCESSING 3개
+    /// 상태 모두 동일(교체 없음). <see cref="ReaderSource"/>와 같은 Canvas 박스에 그려지며, 두 이미지
+    /// 사이에 진행광 링을 끼워 넣어야 하므로(z-order: 원판 → 링 → 몸통) 별도로 노출한다.
+    /// </summary>
+    public static BitmapImage PlateSource => PlateBitmapValue;
+
     /// <summary>앱 기동 시 호출해 정적 생성자(이미지 디코드)를 미리 끝내 둔다. 부작용 없음(idempotent).</summary>
     public static void WarmUp()
     {
         _ = ReaderBitmap;
+        _ = PlateBitmapValue;
         _ = ArrowIcBitmap;
         _ = ArrowMsBitmap;
         _ = IcCardBitmap;

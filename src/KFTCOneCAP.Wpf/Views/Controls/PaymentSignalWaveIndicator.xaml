@@ -1,0 +1,67 @@
+<UserControl x:Class="KFTCOneCAP.Wpf.Views.Controls.PaymentSignalWaveIndicator"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             Width="300" Height="70"
+             d:DesignHeight="70" d:DesignWidth="300">
+    <!--
+        2026-08-24 신설: 리더기(ReaderImage) "위쪽" 공중에 배치되는 신호 웨이브 인디케이터
+        (docs/payment_relay/images/_preview_crop/ChatGPT Image 2026년 8월 24일 오후 05_07_45.png의
+        "4. 거래중 - 신호 웨이브" 안 채택). 펄스 효과 제거(PaymentProcessingIndicator) 이후 대체할
+        "거래중" 표현으로, 좌우 대칭 점(안테나/스피커) + 동심 반원 호(신호가 퍼져나가는 모양) +
+        중앙 파형(zigzag)으로 구성한다. 순수 벡터(Path/Polyline/Ellipse)로만 그려 이미지 자산의
+        픽셀 정합 문제에서 자유롭다 — 새 이미지 파일을 추가하지 않는다.
+
+        좌표계(300x70, 중심 y=35):
+          - 좌측 점(안테나) 중심 (12,35), 우측 점 중심 (288,35) — 좌우 대칭.
+          - 좌측 반원 호 3겹은 좌측 점을 중심으로 반지름 8/16/24, "오른쪽으로 볼록"(열림은 왼쪽,
+            점 쪽) 하게 그려 신호가 오른쪽(파형 방향)으로 퍼져나가는 모양을 표현한다.
+          - 우측 반원 호 3겹은 우측 점을 중심으로 동일 반지름, 좌우 대칭으로 "왼쪽으로 볼록"하게
+            그린다.
+          - 중앙 파형은 두 신호가 만나는 지점을 표현하는 간단한 zigzag Polyline이다.
+        색상은 기존 팔레트(PaymentProcessingRing/PaymentProcessingIndicator에서 이미 쓰는 파란 계열
+        #3B82F6/#60A5FA/#93C5FD/#E0F2FE)로 통일했다.
+    -->
+    <Canvas IsHitTestVisible="False" Width="300" Height="70" ClipToBounds="False">
+
+        <!-- ===== 좌측: 안테나 점 + 동심 반원 호 3겹(오른쪽으로 볼록, 신호가 파형 쪽으로 퍼짐) ===== -->
+        <Ellipse Canvas.Left="9" Canvas.Top="32" Width="6" Height="6" Fill="#60A5FA"/>
+
+        <Path x:Name="LeftArc1" Data="M 12,27 A 8,8 0 0 1 12,43"
+              Stroke="#E0F2FE" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+              Opacity="0"/>
+        <Path x:Name="LeftArc2" Data="M 12,19 A 16,16 0 0 1 12,51"
+              Stroke="#60A5FA" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+              Opacity="0"/>
+        <Path x:Name="LeftArc3" Data="M 12,11 A 24,24 0 0 1 12,59"
+              Stroke="#3B82F6" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+              Opacity="0"/>
+
+        <!-- ===== 우측: 안테나 점 + 동심 반원 호 3겹(왼쪽으로 볼록, 좌측과 좌우 대칭) ===== -->
+        <Ellipse Canvas.Left="285" Canvas.Top="32" Width="6" Height="6" Fill="#60A5FA"/>
+
+        <Path x:Name="RightArc1" Data="M 288,27 A 8,8 0 0 0 288,43"
+              Stroke="#E0F2FE" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+              Opacity="0"/>
+        <Path x:Name="RightArc2" Data="M 288,19 A 16,16 0 0 0 288,51"
+              Stroke="#60A5FA" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+              Opacity="0"/>
+        <Path x:Name="RightArc3" Data="M 288,11 A 24,24 0 0 0 288,59"
+              Stroke="#3B82F6" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+              Opacity="0"/>
+
+        <!-- ===== 중앙: 신호가 오가는 지점을 표현하는 간단한 파형(zigzag) ===== -->
+        <Polyline x:Name="Waveform"
+                  Points="106,35 124,35 132,19 140,51 148,21 156,35 194,35"
+                  Stroke="#3B82F6" StrokeThickness="2"
+                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                  Opacity="0.85" RenderTransformOrigin="0.5,0.5">
+            <Polyline.RenderTransform>
+                <ScaleTransform x:Name="WaveformScale" ScaleX="1" ScaleY="1"/>
+            </Polyline.RenderTransform>
+        </Polyline>
+
+    </Canvas>
+</UserControl>

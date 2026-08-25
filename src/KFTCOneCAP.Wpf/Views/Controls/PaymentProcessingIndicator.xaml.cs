@@ -2,38 +2,44 @@ using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Shapes;
+using System.Windows.Media.Animation;
 
 namespace KFTCOneCAP.Wpf.Views.Controls;
 
 /// <summary>
-/// 결제 알림창(<see cref="PaymentNoticeWindow"/>) VanProcessing 상태의 애니메이션 오버레이:
-/// 1. 원형 진행광: 바닥 타원 둘레를 따라 24% 길이의 네온 진행광 아크와 헤드 라이트가 시계 방향으로 회전.
-/// 2. 슬롯 내부 빛 흐름: IC 슬롯을 따라 하늘색 하이라이트가 좌상단 -> 우하단으로 부드럽게 흐름.
-/// 3. 은은한 펄스: 로고와 바닥 테두리가 주기적으로 밝아졌다 어두워짐.
+/// 결제 알림창(<see cref="PaymentNoticeWindow"/>) VanProcessing 상태에서 리더기 몸통 "표면"에
+/// 있어야 하는 효과를 담당한다: 슬롯 내부 빛 흐름 — IC 슬롯 또는 MS 슬롯 채널을 따라 하늘색
+/// 하이라이트가 좌상단 -> 우하단으로 부드럽게 흐름. VanProcessing 직전 카드 종류(IC 삽입 vs MS
+/// 스와이프)에 따라 둘 중 하나만 재생한다(<see cref="Play(bool)"/> 파라미터).
+///
+/// "원형 진행광"(바닥 원판 테두리를 도는 링)은 2026-08-24 자산 분리(원판 circle.png / 몸통
+/// reader_kftc.png)에 따라 <see cref="PaymentProcessingRing"/>로 옮겼다 — 그 링은 원판 위·몸통
+/// 아래 z-order에 고정돼야 하는 반면, 이 컨트롤의 효과는 몸통 표면 위(몸통보다 위 레이어)에
+/// 있어야 하므로 같은 컨트롤에 둘 수 없다.
+///
+/// 2026-08-24 6차 수정: 로고 펄스(LogoPulseGlow/LogoCoreGlow)는 사용자 피드백("이상해 보인다")에
+/// 따라 완전히 제거했다.
+///
+/// 2026-08-24 7차 수정: 사용자 피드백("IC칩쪽에 벗어나 있다")에 따라 reader_kftc.png를 재실측해
+/// IC 슬롯 흐름 위치/크기를 정정하고, MS 슬롯용 흐름(SlotFlowMs)을 추가했다 — 둘 다 항상 같이 도는
+/// 게 아니라 VanProcessing 진입 직전 카드 종류에 맞는 하나만 재생된다.
 /// </summary>
 public partial class PaymentProcessingIndicator : UserControl
 {
-    private const double OrbitCycleSeconds = 1.6;
     private const double SlotFlowSeconds = 1.4;
-    private const double PulseSeconds = 1.2;
 
-    // 바닥 타원 파라미터 (reader.png 실측 원판 좌표: center(170, 137), rx=148, ry=40)
-    private const double EllipseCenterX = 170;
-    private const double EllipseCenterY = 137;
-    private const double EllipseRadiusX = 148;
-    private const double EllipseRadiusY = 40;
+    // IC 슬롯 빛 흐름 이동 거리 — reader_kftc.png 실측(진한 파란 홈 색상 연결영역, 1536x1024 기준
+    // (543,207)-(949,447)px, 주축 p0(546.86,213.79)->p1(942.73,443.63))을 340x226.67 캔버스로
+    // 스케일 변환(계수 0.221354)한 시작점(121.05,47.32) -> 끝점(208.66,98.19) 차이.
+    private const double IcDeltaX = 87.61;
+    private const double IcDeltaY = 50.87;
 
-    // 2026-08-24 수정: 타원 뒤쪽 절반(180~360도)은 리더기 몸통에 가려져야 하는데 이 오버레이가
-    // 몸통보다 위 레이어라 그대로 비쳐 보이는 문제가 있어, 보이는 앞쪽 반원(0~180도)만 오간다
-    // (XAML의 OrbitGlowArc/OrbitCoreArc Data를 반원 경로로 바꾼 것과 같은 이유). 반원 길이(원주의
-    // 절반, Ramanujan 근사) ≈ 320.
-    private const double OrbitHalfArcLength = 320;
-
-    // 슬롯 빛 흐름 이동 거리 (X: 120 -> 195, Y: 60 -> 96)
-    private const double SlotDeltaX = 75;
-    private const double SlotDeltaY = 36;
+    // MS 슬롯 빛 흐름 이동 거리 — 같은 마스크의 y<330 구간(앞쪽 대각선, 리더기 뒤쪽 모서리로
+    // 꺾이기 전) 실측 (585,98)-(1000,329)px, 주축 p0(585.66,108.08)->p1(992.69,341.74)을 같은
+    // 스케일로 변환한 시작점(129.63,23.92) -> 끝점(219.72,75.65) 차이.
+    private const double MsDeltaX = 90.09;
+    private const double MsDeltaY = 51.73;
 
     private bool _isPlaying;
 
@@ -42,8 +48,11 @@ public partial class PaymentProcessingIndicator : UserControl
         InitializeComponent();
     }
 
-    /// <summary>3개 효과(원형 진행광/슬롯 빛 흐름/펄스)를 동시에 무한 재생한다.</summary>
-    public void Play()
+    /// <summary>
+    /// 슬롯 내부 빛 흐름을 무한 재생한다. <paramref name="isMs"/>가 true면 MS 슬롯 흐름을,
+    /// false면 IC 슬롯 흐름을 재생하고 반대쪽은 끈 상태로 둔다(둘 다 동시에 돌지 않는다).
+    /// </summary>
+    public void Play(bool isMs)
     {
         if (_isPlaying)
         {
@@ -51,60 +60,30 @@ public partial class PaymentProcessingIndicator : UserControl
         }
         _isPlaying = true;
 
-        // 1-1. 바닥 타원 진행광 아크 이동 (StrokeDashOffset) — 경로 자체가 이제 보이는 반원뿐이라
-        // (열린 경로) 한 방향으로 계속 스크롤하면 끝에서 툭 끊기므로 왕복(AutoReverse)한다.
-        var dashAnim = new DoubleAnimation(0, -OrbitHalfArcLength, TimeSpan.FromSeconds(OrbitCycleSeconds))
+        if (isMs)
         {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-        };
-        OrbitGlowArc.BeginAnimation(Shape.StrokeDashOffsetProperty, dashAnim);
-        OrbitCoreArc.BeginAnimation(Shape.StrokeDashOffsetProperty, dashAnim);
-
-        // 1-2. 진행광 선두 헤드라이트 점(OrbitHeadLight) — 같은 이유로 보이는 반원(0~180도)만 왕복.
-        var xFrames = new DoubleAnimationUsingKeyFrames
-        {
-            Duration = TimeSpan.FromSeconds(OrbitCycleSeconds),
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-        };
-        var yFrames = new DoubleAnimationUsingKeyFrames
-        {
-            Duration = TimeSpan.FromSeconds(OrbitCycleSeconds),
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-        };
-
-        const int numKeyFrames = 24;
-        for (int i = 0; i <= numKeyFrames; i++)
-        {
-            double progress = (double)i / numKeyFrames;
-            double angleDeg = 180.0 * progress;
-            double rad = angleDeg * Math.PI / 180.0;
-
-            double x = EllipseCenterX + EllipseRadiusX * Math.Cos(rad) - (OrbitHeadLight.Width / 2);
-            double y = EllipseCenterY + EllipseRadiusY * Math.Sin(rad) - (OrbitHeadLight.Height / 2);
-
-            var keyTime = KeyTime.FromPercent(progress);
-            xFrames.KeyFrames.Add(new LinearDoubleKeyFrame(x, keyTime));
-            yFrames.KeyFrames.Add(new LinearDoubleKeyFrame(y, keyTime));
+            PlaySlot(SlotFlowMs, SlotFlowMsTranslate, MsDeltaX, MsDeltaY);
         }
-        OrbitHeadLight.BeginAnimation(Canvas.LeftProperty, xFrames);
-        OrbitHeadLight.BeginAnimation(Canvas.TopProperty, yFrames);
+        else
+        {
+            PlaySlot(SlotFlow, SlotFlowTranslate, IcDeltaX, IcDeltaY);
+        }
+    }
 
-        // 2. 슬롯 내부 빛 흐름
-        var xSlot = new DoubleAnimation(0, SlotDeltaX, TimeSpan.FromSeconds(SlotFlowSeconds))
+    private static void PlaySlot(Ellipse ellipse, TranslateTransform translate, double deltaX, double deltaY)
+    {
+        var xSlot = new DoubleAnimation(0, deltaX, TimeSpan.FromSeconds(SlotFlowSeconds))
         {
             RepeatBehavior = RepeatBehavior.Forever,
             EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
         };
-        var ySlot = new DoubleAnimation(0, SlotDeltaY, TimeSpan.FromSeconds(SlotFlowSeconds))
+        var ySlot = new DoubleAnimation(0, deltaY, TimeSpan.FromSeconds(SlotFlowSeconds))
         {
             RepeatBehavior = RepeatBehavior.Forever,
             EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
         };
-        SlotFlowTranslate.BeginAnimation(TranslateTransform.XProperty, xSlot);
-        SlotFlowTranslate.BeginAnimation(TranslateTransform.YProperty, ySlot);
+        translate.BeginAnimation(TranslateTransform.XProperty, xSlot);
+        translate.BeginAnimation(TranslateTransform.YProperty, ySlot);
 
         var slotOpacity = new DoubleAnimationUsingKeyFrames
         {
@@ -115,49 +94,19 @@ public partial class PaymentProcessingIndicator : UserControl
         slotOpacity.KeyFrames.Add(new LinearDoubleKeyFrame(0.9, KeyTime.FromPercent(0.2)));
         slotOpacity.KeyFrames.Add(new LinearDoubleKeyFrame(0.9, KeyTime.FromPercent(0.75)));
         slotOpacity.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1.0)));
-        SlotFlow.BeginAnimation(UIElement.OpacityProperty, slotOpacity);
-
-        // 3. 로고 & 하단 베이스 은은한 펄스
-        var basePulse = new DoubleAnimation(0.1, 0.45, TimeSpan.FromSeconds(PulseSeconds))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
-        };
-        BasePulseGlow.BeginAnimation(UIElement.OpacityProperty, basePulse);
-
-        var logoPulse = new DoubleAnimation(0.15, 0.55, TimeSpan.FromSeconds(PulseSeconds))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
-        };
-        LogoPulseGlow.BeginAnimation(UIElement.OpacityProperty, logoPulse);
-
-        var corePulse = new DoubleAnimation(0.3, 0.9, TimeSpan.FromSeconds(PulseSeconds))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
-        };
-        LogoCoreGlow.BeginAnimation(UIElement.OpacityProperty, corePulse);
+        ellipse.BeginAnimation(UIElement.OpacityProperty, slotOpacity);
     }
 
-    /// <summary>애니메이션을 정지하고 리소스를 해제한다.</summary>
+    /// <summary>애니메이션을 정지하고 리소스를 해제한다(IC/MS 양쪽 모두).</summary>
     public void Stop()
     {
         _isPlaying = false;
-        OrbitGlowArc.BeginAnimation(Shape.StrokeDashOffsetProperty, null);
-        OrbitCoreArc.BeginAnimation(Shape.StrokeDashOffsetProperty, null);
-        OrbitHeadLight.BeginAnimation(Canvas.LeftProperty, null);
-        OrbitHeadLight.BeginAnimation(Canvas.TopProperty, null);
         SlotFlowTranslate.BeginAnimation(TranslateTransform.XProperty, null);
         SlotFlowTranslate.BeginAnimation(TranslateTransform.YProperty, null);
         SlotFlow.BeginAnimation(UIElement.OpacityProperty, null);
-        BasePulseGlow.BeginAnimation(UIElement.OpacityProperty, null);
-        LogoPulseGlow.BeginAnimation(UIElement.OpacityProperty, null);
-        LogoCoreGlow.BeginAnimation(UIElement.OpacityProperty, null);
+
+        SlotFlowMsTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+        SlotFlowMsTranslate.BeginAnimation(TranslateTransform.YProperty, null);
+        SlotFlowMs.BeginAnimation(UIElement.OpacityProperty, null);
     }
 }
-
-
