@@ -39,6 +39,14 @@ internal sealed class TransactionQueue
     private readonly Func<PosPaymentRequest, Task<PosPaymentResponse>> _processor;
     private readonly Thread _workerThread;
 
+    /// <summary>지금 워커가 거래를 처리 중인가(Phase 16, P16-5) — <c>HomeWindow</c>가 "거래 진행 중
+    /// 리더기 설정 화면 열기"를 막는 판정 기준으로 쓰는 **유일한** 읽기 전용 신호다. 새 잠금 장치를
+    /// 만들지 않는다(P14-3 "직렬화 지점은 이 클래스 하나뿐" 규칙 — 이 필드는 그 직렬화 상태를
+    /// 노출만 할 뿐 별도로 무언가를 잠그지 않는다).</summary>
+    internal bool IsProcessing => _isProcessing;
+
+    private volatile bool _isProcessing;
+
     internal TransactionQueue(Func<PosPaymentRequest, Task<PosPaymentResponse>> processor)
     {
         _processor = processor;
@@ -72,6 +80,7 @@ internal sealed class TransactionQueue
         foreach (TransactionWorkItem item in _queue.GetConsumingEnumerable())
         {
             string txId = item.Request.TransactionId;
+            _isProcessing = true;
             try
             {
                 FileLogger.Info($"[TransactionQueue] 처리 시작 txId={txId}");
@@ -88,6 +97,10 @@ internal sealed class TransactionQueue
                 // 결과코드 리터럴을 직접 쓰지 않고 PosPaymentResponse.Create를 거친다(P15-3 — Flow/큐
                 // 어디에도 전문 코드 문자열이 등장하지 않아야 한다).
                 InvokeCompletedSafely(item, PosPaymentResponse.Create(PosPaymentResultCode.InternalError, txId, "INTERNAL_ERROR"));
+            }
+            finally
+            {
+                _isProcessing = false;
             }
         }
     }

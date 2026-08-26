@@ -17,11 +17,16 @@ namespace KFTCOneCAP.Wpf.Services.Payment;
 /// 조립하는 자리. Phase 10(리더기)·11(DB)·13(알림창)·14(소켓/Queue)이 만든 부품을 **엮기만** 한다 —
 /// 이 클래스 자체는 전문 바이트를 다루지 않고(계층 규칙), 새 리더기/DB/VAN 로직을 만들지 않는다.
 ///
+/// Phase 16(P16-1~P16-3)에서 취소/Timeout 경합을 <see cref="TransactionOutcomeGate"/> 하나로 확정하는
+/// 구조로 갈아끼웠다 — Phase 15가 남긴 세 갈래 판정(플래그/TCS/방어적 재확인)을 이 게이트가 대체한다.
+///
 /// <see cref="TransactionQueue"/>가 이 클래스의 <see cref="ProcessAsync"/>를 처리 위임으로 받는다
 /// (P15-1이 위임을 <c>Task</c> 반환으로 바꿔 둔 자리). 큐가 워커 스레드 하나로 거래를 직렬화하므로,
-/// 이 클래스의 인스턴스 필드(<see cref="_canceled"/>/<see cref="_pendingParticipantsForCancel"/>)는
-/// 한 번에 한 거래에서만 쓰인다는 전제로 설계됐다 — 매 <see cref="ProcessAsync"/> 호출 시작/종료마다
-/// 초기화·정리된다.
+/// **이 클래스는 거래 사이에 어떤 가변 상태도 인스턴스 필드로 들고 있지 않다**(2026-08-25, Phase 16
+/// 체크포인트 리뷰 H-1 수정). 거래 1건 동안만 살아 있어야 하는 것(결과 확정 게이트, 데드라인, 취소 시
+/// 정리할 리더기 목록)은 전부 <see cref="ProcessAsync"/>의 지역 변수 + <see cref="TransactionScope"/>에
+/// 담아 클로저로 넘긴다. 이유는 <see cref="TransactionScope"/> 문서 참고 — 인스턴스 필드로 두면 앞
+/// 거래의 뒤늦은 콜백이 **다음 거래의** 상태를 읽어 엉뚱한 리더기를 초기화하는 사고가 가능했다.
 ///
 /// **생성자 인자 중 <see cref="_readerEndpoints"/>는 순서가 의미를 가진다** — 인덱스 0은 리더기1/
 /// <c>ReaderSettings.Port1</c>, 인덱스 1은 리더기2/<c>ReaderSettings.Port2</c>에 대응한다(App.xaml.cs가
@@ -33,10 +38,25 @@ namespace KFTCOneCAP.Wpf.Services.Payment;
 /// </summary>
 internal sealed class PaymentOrchestrator
 {
-    // PRD §4.9는 카드 입력 대기 상한을 120초로 규정한다. Phase 15는 별도 자체 타이머를 두지 않고
-    // 이 값을 SendCardReadCommandAsync의 timeout 인자로 그대로 준다 — 리더기 명령 타임아웃이 곧
-    // 카드 입력 대기 상한이 되게 한다(development_plan.md P15-9, Phase 16이 이 설계를 재검토한다).
-    private static readonly TimeSpan CardReadTimeout = TimeSpan.FromSeconds(120);
+    // PRD §4.9(2026-08-25 갱신) — 카드 입력 대기의 시작 데드라인 기본값. 거래 단위로 딱 하나만
+    // 존재하고(Services/Payment/PaymentDeadline), 라운드마다 새로 주지 않는다(development_plan.md
+    // Phase 16 착수 전 전제 — 라운드마다 리셋하면 FALLBACK·재요청이 겹칠 때 최악 360초까지
+    // 늘어난다). 검증 하네스(P16-6)가 실제 120초를 기다리지 않고 데드라인 만료 경로를 검증할 수
+    // 있도록 생성자에서 <see cref="_initialCardReadDeadline"/>으로 주입 가능하다(운영 코드는 항상
+    // 기본값을 쓴다 — _loadSettings와 같은 이유의 최소 테스트 접점).
+    private static readonly TimeSpan DefaultInitialCardReadDeadline = TimeSpan.FromSeconds(120);
+
+    // PRD §4.9(2026-08-25 갱신) — 새 사용자 입력 단계가 시작될 때마다 데드라인을 이만큼 연장한다.
+    // 지금은 FALLBACK(07)/재요청(12) 두 경우에서만 쓰이지만, 이름과 위치를 "카드 재요청 전용"이
+    // 아니라 "사용자 입력 단계 일반"으로 잡아 뒀다 — 추후 서명·PIN 입력 단계가 생기면 그 진입점에서
+    // 같은 상수를 그대로 재사용한다(development_plan.md P16-2).
+    private static readonly TimeSpan UserInputStepExtension = TimeSpan.FromSeconds(30);
+
+    // 리더기 명령 타임아웃에 남은 데드라인을 그대로 넘기되, 0에 가까운 값을 주지 않기 위한 하한이다
+    // (development_plan.md P16-2 "하한 클램프를 둔다"). 실제 만료 판정은 PaymentDeadline이 독립적으로
+    // 내리므로(MonitorDeadlineAsync), 이 하한은 리더기 계층 호출 자체가 무의미한 0초로 나가지 않게
+    // 막는 안전장치일 뿐이다.
+    private static readonly TimeSpan MinimumCommandTimeout = TimeSpan.FromSeconds(1);
 
     // ReaderSetupViewModel의 명령 타임아웃(CommandTimeout)과 동일한 값을 쓴다 — 같은 0x61/0x62
     // 시퀀스를 화면과 결제 Flow가 공유하므로(IntegrityCheckService), 타임아웃 감각도 통일한다.
@@ -67,32 +87,7 @@ internal sealed class PaymentOrchestrator
     private readonly IPaymentNoticePresenter _presenter;
     private readonly IReaderSetupGate _readerSetupGate;
     private readonly IVanService _vanService;
-
-    /// <summary>현재 처리 중인 거래가 취소됐는지. UI 스레드(<see cref="OnCanceled"/>)와 결제 워커
-    /// 스레드 양쪽에서 접근하므로 <c>volatile</c>로 가시성을 보장한다.</summary>
-    private volatile bool _canceled;
-
-    /// <summary>취소 통지가 오면 즉시 초기화(0x60)를 보낼 대상 — "지금 이 라운드가 응답을 기다리고
-    /// 있는 참여 리더기 목록"을 라운드마다 갱신한다(PRD §4.8 "아직 응답 대기 중인 모든 리더기에
-    /// 초기화 요청"). <see cref="OnCanceled"/>가 다른 스레드에서 읽으므로 <c>volatile</c>.</summary>
-    private volatile IReadOnlyList<IReaderEndpoint> _pendingParticipantsForCancel = Array.Empty<IReaderEndpoint>();
-
-    /// <summary>
-    /// (2026-08-25, 실장비 테스트로 발견) 카드 리딩 대기(<see cref="CardReadBroadcaster.SendAsync"/>)와
-    /// 취소를 <c>Task.WhenAny</c>로 경쟁시키는 신호. 이게 없으면 취소 버튼을 눌러도 <see
-    /// cref="_canceled"/> 플래그만 세워질 뿐, 라운드 루프는 진행 중이던 <c>await</c>가 스스로
-    /// 끝날 때까지(카드 태그 또는 120초 로컬 타임아웃) 그 사실을 알아채지 못한다 — 실측 결과
-    /// 취소 버튼을 누른 뒤 실제로 응답이 나가기까지 약 120초가 걸렸다(0x60은 fire-and-forget이라
-    /// 진행 중인 0x2B 대기 자체를 끊지 못하기 때문, 클래스 주석 참고). 취소가 이 신호를 즉시
-    /// 완료시키면 라운드 루프가 리더기 응답을 더 기다리지 않고 그 자리에서 바로 반환할 수 있다
-    /// (리더기 쪽 실제 응답/타임아웃은 백그라운드에서 계속 진행되지만 결과를 아무도 기다리지
-    /// 않는다 — <see cref="CardReadBroadcaster"/>가 무효화까지 이미 책임지므로 안전).
-    ///
-    /// **Phase 16과의 경계**: 이건 "취소 버튼을 누르면 즉시 반응해야 한다"는 P15-9의 기본 요구사항이지,
-    /// 취소와 카드 리딩 성공이 사실상 동시에 도착했을 때 어느 쪽을 채택할지 정하는 동시성 중재
-    /// (Phase 16 몫)와는 다르다 — 2026-08-25 사용자 확정.
-    /// </summary>
-    private TaskCompletionSource<bool>? _cancelSignal;
+    private readonly TimeSpan _initialCardReadDeadline;
 
     internal PaymentOrchestrator(
         IReadOnlyList<IReaderEndpoint> readerEndpoints,
@@ -100,7 +95,8 @@ internal sealed class PaymentOrchestrator
         IPaymentNoticePresenter presenter,
         IReaderSetupGate readerSetupGate,
         IVanService vanService,
-        Func<ReaderSettings>? loadSettings = null)
+        Func<ReaderSettings>? loadSettings = null,
+        TimeSpan? initialCardReadDeadline = null)
     {
         _readerEndpoints = readerEndpoints;
         // 기본값은 실제 레지스트리(ReaderSettingsService.Load)를 읽는다. 검증 하네스(P15-10)가
@@ -113,6 +109,9 @@ internal sealed class PaymentOrchestrator
         _presenter = presenter;
         _readerSetupGate = readerSetupGate;
         _vanService = vanService;
+        // 운영 코드는 항상 기본값(120초)을 쓴다 — 검증 하네스(P16-6)만 이 값을 짧게 주입해 데드라인
+        // 만료 경로를 실제 120초를 기다리지 않고 검증한다.
+        _initialCardReadDeadline = initialCardReadDeadline ?? DefaultInitialCardReadDeadline;
     }
 
     /// <summary>PRD §4.1의 처리 순서를 그대로 따른다. 각 단계 실패 시 즉시 해당 결과코드로 종료한다.
@@ -184,12 +183,16 @@ internal sealed class PaymentOrchestrator
         }
 
         // ===== PRD §4.1 3단계 이후 — 알림창 표시 + 카드 리딩(§4.3~§4.7) + VAN(§4.10) =====
-        _canceled = false;
-        _pendingParticipantsForCancel = Array.Empty<IReaderEndpoint>();
-        // RunContinuationsAsynchronously: OnCanceled(UI 스레드)가 TrySetResult를 호출할 때, 이 Task를
-        // 기다리던 워커 스레드 쪽 continuation이 UI 스레드에서 그대로 인라인 실행되는 것을 막는다
-        // (P15-10 검증 하네스에서 겪은 것과 같은 종류의 스레드 얽힘을 피한다).
-        _cancelSignal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // 이 거래 동안만 살아 있는 상태를 전부 여기 모은다 — 인스턴스 필드를 쓰지 않는 이유는
+        // TransactionScope 문서 참고(H-1 수정).
+        var scope = new TransactionScope(txId);
+        using var deadline = new PaymentDeadline(_initialCardReadDeadline);
+
+        // 감시는 백그라운드에서 — 만료되면 게이트를 Timeout으로 확정 시도할 뿐 예외를 던지지 않으므로
+        // 결과를 기다리지 않아도 안전하다(관찰되지 않는 예외가 없음). 거래가 정상 종료돼 위 using이
+        // deadline을 Dispose하면 이 Task는 확정을 시도하지 않고 조용히 끝난다
+        // (PaymentDeadline.WaitForExpiryAsync가 "실제 만료"와 "Dispose"를 구분해 돌려준다).
+        _ = MonitorDeadlineAsync(deadline, scope);
 
         // 같은 거래는 카드 리딩(0x2B)과 VAN 요청 양쪽에 같은 거래 일시를 써야 한다(2026-08-25, Opus
         // 검증 리뷰 M-1 수정) — 예전엔 VAN 단계에서 DateTime.Now를 다시 계산해, 고객이 카드를 늦게
@@ -198,26 +201,38 @@ internal sealed class PaymentOrchestrator
         // 새로 만들지 않는다"는 원칙을 VAN까지 확장).
         string transactionDateTime = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
 
+        EventHandler onCanceled = (_, _) => OnCanceled(scope);
+
         try
         {
-            // (2026-08-25, Opus 검증 리뷰 H-1 수정) 구독을 Show()보다 먼저 건다 — Show()는
-            // Dispatcher.Invoke로 동기 마샬링되므로 반환 시점엔 이미 창이 떠 있고 취소 버튼이
-            // 활성 상태다. 구독이 그 뒤에 있으면, Show() 반환 직후 그 짧은 창 사이에 취소가
-            // 들어올 때 PaymentNoticeViewModel의 sticky _canceled 플래그만 확정되고
-            // Canceled 이벤트는 구독자 0명에게 통지돼 사라진다 — 취소 버튼은 이미 비활성인데
-            // Orchestrator는 취소를 영원히 모른 채 카드 리딩을 계속 진행하는 결함이었다(Phase 13
-            // H-3과 같은 종류의 무증상 실패).
-            _presenter.Canceled += OnCanceled;
+            // 구독을 Show()보다 먼저 건다(Opus 검증 리뷰 H-1) — Show()는 Dispatcher.Invoke로 동기
+            // 마샬링되므로 반환 시점엔 이미 창이 떠 있고 취소 버튼이 활성 상태다. 구독이 그 뒤에
+            // 있으면, Show() 반환 직후 그 짧은 창 사이에 취소가 들어올 때 취소 이벤트가 구독자
+            // 0명에게 통지돼 사라진다.
+            _presenter.Canceled += onCanceled;
             _presenter.Show(PaymentNoticeState.IcCardRequest);
 
-            CardReadRoundResult roundResult = await RunCardReadingRoundsAsync(participants, request, transactionDateTime, txId).ConfigureAwait(false);
+            CardReadRoundResult roundResult = await RunCardReadingRoundsAsync(participants, request, transactionDateTime, deadline, scope).ConfigureAwait(false);
             if (roundResult.EarlyResponse != null)
                 return roundResult.EarlyResponse;
 
-            // VAN 구간부터는 취소가 결과를 바꾸지 않는다(PRD §4.8 — VAN 요청이 나간 뒤 취소를 받으면
-            // 승인/취소 응답이 실제 승인 여부와 불일치할 수 있다). 카드 리딩까지 취소되지 않았다는
-            // 뜻이므로(취소됐다면 위에서 EarlyResponse로 이미 반환됨) 여기서 구독만 끊는다.
-            _presenter.Canceled -= OnCanceled;
+            // 카드 리딩 성공 — VAN 진입 직전에 이 거래를 FlowResult로 확정한다(P16-1). 여기서
+            // 실패하면(취소/Timeout이 카드 리딩 성공과 근소한 차이로 먼저 확정된 것) VAN에 들어가지
+            // 않고 그 사유로 응답한다(PRD §4.8 — VAN 요청이 나간 뒤 취소를 받으면 승인/취소 응답이
+            // 실제 승인 여부와 불일치할 수 있다). 이것이 "선착순" 규칙이 VAN 경계에서도 정확히
+            // 지켜지는 지점이다(2026-08-25 사용자 확정).
+            if (!scope.Gate.TryClaim(TransactionOutcomeReason.FlowResult))
+            {
+                TransactionOutcomeReason reason = scope.Gate.ClaimedReason!.Value;
+                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 성공했으나 VAN 진입 전 이미 확정됨({reason}) — VAN 미진입");
+                roundResult.Winner?.SendInvalidationInit();
+                return BuildInterruptResponse(reason, txId);
+            }
+
+            // VAN 구간부터는 취소가 결과를 바꾸지 않는다 — 위에서 이미 FlowResult로 확정했으므로
+            // onCanceled가 이후에 불려도 TryClaim이 실패해 조용히 무시된다(방어 심층화). 여기서는
+            // 구독만 끊는다.
+            _presenter.Canceled -= onCanceled;
 
             return await RunVanApprovalAsync(roundResult, request, transactionDateTime, txId).ConfigureAwait(false);
         }
@@ -225,79 +240,94 @@ internal sealed class PaymentOrchestrator
         {
             // 정상/조기 반환 어느 경로든 안전하게 정리한다 — 이미 위에서 구독 해제했어도 -=는
             // 멱등이라 무해하다(P13 Opus 리뷰 M-1과 같은 종류의 비대칭을 여기서 만들지 않는다).
-            _presenter.Canceled -= OnCanceled;
+            _presenter.Canceled -= onCanceled;
             _presenter.Close();
-            _canceled = false;
-            _pendingParticipantsForCancel = Array.Empty<IReaderEndpoint>();
-            _cancelSignal = null;
+
+            // (2026-08-25, Phase 16 체크포인트 리뷰 H-1) 게이트를 봉인한다. 정상 경로에서는 이미
+            // 누군가 확정했으므로 이 TryClaim은 반드시 실패하고 아무 일도 일어나지 않는다. 성공하는
+            // 경우는 단 하나 — **아무도 결과를 확정하지 못한 채 예외로 빠져나가는 경로**다(알림창
+            // Show 실패, VAN 스텁/실구현의 예기치 못한 예외 등. 이때 POS 응답은 TransactionQueue의
+            // catch가 InternalError로 만든다). 그 경우엔 대기 중이던 리더기가 카드를 계속 기다리는
+            // 상태로 남으므로 여기서 정리해 준다.
+            //
+            // 봉인 자체가 중요한 이유: 이게 없으면 이 거래의 데드라인 감시/취소 통지가 **거래가 끝난
+            // 뒤에** 게이트를 확정하는 데 성공할 수 있고, 그 시점엔 이미 다음 거래가 진행 중일 수
+            // 있다. 정리 대상을 TransactionScope에 담아 거래별로 격리한 것과 이 봉인이 짝을 이뤄,
+            // 앞 거래의 뒤늦은 콜백이 다음 거래에 영향을 주는 경로를 구조적으로 없앤다.
+            if (scope.Gate.TryClaim(TransactionOutcomeReason.FlowResult))
+            {
+                FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 결과가 확정되지 않은 채 거래가 종료됨(예외 경로로 추정) — 대기 중이던 리더기를 정리한다");
+                FireInterruptCleanup(TransactionOutcomeReason.FlowResult, scope);
+            }
+
+            // deadline은 위 using이 이 블록이 끝나는 시점에 Dispose한다(P16-4 리소스 해제 목록) —
+            // MonitorDeadlineAsync의 재확인 루프가 그 즉시 끝난다.
         }
     }
 
     /// <summary>
     /// PRD §4.3~§4.7 카드 리딩 라운드. 참여자 전체 → (07/12면) 채택된 리더기 1대만으로 좁혀가며
-    /// 반복한다. 매 라운드 경계에서 <see cref="_canceled"/>를 확인하고, 브로드캐스트 대기 중에는
-    /// <see cref="_cancelSignal"/>과 경쟁시켜 취소가 오면 리더기 응답/로컬 타임아웃을 기다리지 않고
-    /// 즉시 <see cref="PosPaymentResultCode.UserCanceled"/>로 중단한다(development_plan.md P15-9
-    /// "취소 플래그가 응답 종류를 이긴다" + 2026-08-25 실장비 테스트로 발견한 응답 지연 수정).
-    /// 리더기 하드웨어 자체는 0x60을 받아도 실제로 스캔을 멈추는지 이 앱이 확인할 방법이 없다
-    /// (<see cref="ReaderService.SendInvalidationInit"/> 문서 참고: 0x60은 fire-and-forget이라 응답을
-    /// 기다리지 않는다) — 그래도 소프트웨어 쪽 대기는 <see cref="_cancelSignal"/> 덕분에 즉시
-    /// 끝난다. "취소와 카드 리딩 성공이 근소한 차이로 동시에 도착했을 때 어느 쪽이 최종 결과인가"를
-    /// 엄밀하게 중재하는 것은 여전히 Phase 16의 몫이다(2026-08-25 사용자 확정 — 이 수정은 그것과
-    /// 다른, "취소를 누르면 즉시 반응해야 한다"는 기본 요구사항).
+    /// 반복한다. 매 라운드 경계와 브로드캐스트 대기 중에 <see cref="TransactionOutcomeGate.Interrupted"/>
+    /// (취소 또는 Timeout이 확정되면 완료됨)를 리더기 응답 대기와 경쟁시켜, 먼저 확정된 쪽이 즉시
+    /// 이긴다(선착순, 2026-08-25 사용자 확정 — Phase 15의 "취소 플래그가 응답을 이긴다"는 임시 규칙을
+    /// 대체). 게이트가 취소/Timeout으로 확정되는 순간 그 확정 경로(<see cref="OnCanceled"/> 또는 <see
+    /// cref="MonitorDeadlineAsync"/>)가 이미 대기 중인 참여 리더기 전부에 0x60을 쏘므로, 이 메서드는
+    /// 리더기 응답을 더 기다리지 않고 즉시 반환하기만 하면 된다.
     /// </summary>
     private async Task<CardReadRoundResult> RunCardReadingRoundsAsync(
-        IReadOnlyList<IReaderEndpoint> participants, PosPaymentRequest request, string transactionDateTime, string txId)
+        IReadOnlyList<IReaderEndpoint> participants, PosPaymentRequest request, string transactionDateTime,
+        PaymentDeadline deadline, TransactionScope scope)
     {
+        string txId = scope.TransactionId;
+        TransactionOutcomeGate gate = scope.Gate;
         IReadOnlyList<IReaderEndpoint> roundParticipants = participants;
         string transactionTypeCode = TransactionInfoRequestBuilder.TransactionTypeIc;
 
         for (int round = 1; round <= MaxCardReadRounds; round++)
         {
-            if (_canceled)
+            if (gate.ClaimedReason is { } claimedBeforeRound)
             {
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round} 시작 전 취소 감지 — 중단");
-                return CardReadRoundResult.Early(PosPaymentResponse.Create(PosPaymentResultCode.UserCanceled, txId, "USER_CANCELED"));
+                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round} 시작 전 이미 확정됨({claimedBeforeRound}) — 중단");
+                return CardReadRoundResult.Early(BuildInterruptResponse(claimedBeforeRound, txId));
             }
 
             TransactionInfoRequest infoRequest = transactionTypeCode == TransactionInfoRequestBuilder.TransactionTypeIc
                 ? TransactionInfoRequestBuilder.CreateIcRequest(transactionDateTime, request.Amount, AidIndexDefault, Message1, Message2, Message3, Message4, PinBlockInputRequiredDefault)
                 : TransactionInfoRequestBuilder.CreateFallbackRequest(transactionDateTime, request.Amount, AidIndexDefault, Message1, Message2, Message3, Message4, PinBlockInputRequiredDefault);
 
-            _pendingParticipantsForCancel = roundParticipants;
-            FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round}/{MaxCardReadRounds} 시작 — 참여 {roundParticipants.Count}대, 거래구분={transactionTypeCode}");
+            scope.PendingParticipants = roundParticipants;
 
-            // (2026-08-25, 실장비 테스트로 발견) 리더기 응답을 그냥 기다리기만 하면 취소가 즉시
-            // 반영되지 않는다 — 0x60은 fire-and-forget이라 이미 시작된 0x2B 대기 자체를 끊지
-            // 못하므로, 이 await만으로는 취소 버튼을 눌러도 리더기 응답/로컬 타임아웃(최대 120초)이
-            // 실제로 끝날 때까지 알아채지 못한다(실측: 취소 후 응답까지 약 120초 소요). 취소 신호를
-            // 함께 경쟁시켜 먼저 끝나는 쪽을 즉시 채택한다.
-            Task<CardReadBroadcastResult> broadcastTask = CardReadBroadcaster.SendAsync(roundParticipants, infoRequest, CardReadTimeout);
-            Task cancelTask = _cancelSignal!.Task;
-            Task firstCompleted = await Task.WhenAny(broadcastTask, cancelTask).ConfigureAwait(false);
+            // 리더기 명령 타임아웃 = 남은 거래 데드라인(하한 클램프, P16-2). 거래 Timeout의 정본은
+            // PaymentDeadline/MonitorDeadlineAsync이지 이 타임아웃이 아니다 — 이 값은 리더기 계층이
+            // 하드웨어 무응답에서 스스로를 회수하기 위한 값일 뿐이다(클래스 상단 주석).
+            TimeSpan roundTimeout = ClampCommandTimeout(deadline.Remaining);
+            FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round}/{MaxCardReadRounds} 시작 — 참여 {roundParticipants.Count}대, 거래구분={transactionTypeCode}, 남은데드라인={roundTimeout.TotalSeconds:F1}s");
 
-            if (firstCompleted == cancelTask)
+            Task<CardReadBroadcastResult> broadcastTask = CardReadBroadcaster.SendAsync(roundParticipants, infoRequest, roundTimeout);
+            Task interruptTask = gate.Interrupted;
+            Task firstCompleted = await Task.WhenAny(broadcastTask, interruptTask).ConfigureAwait(false);
+
+            if (firstCompleted == interruptTask)
             {
                 // 리더기 응답을 더 기다리지 않고 즉시 반환한다 — broadcastTask는 백그라운드에서
-                // 계속 진행되지만(리더기가 실제로 응답하거나 로컬 타임아웃이 날 때까지) 그 결과를
-                // 아무도 기다리지 않는다. 이 라운드의 참여 리더기에는 OnCanceled가 이미 0x60을
-                // 보냈으므로(_pendingParticipantsForCancel) 정리 자체는 그대로 이뤄진다.
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round} 대기 중 취소 감지 — 리더기 응답을 기다리지 않고 즉시 처리");
-                return CardReadRoundResult.Early(PosPaymentResponse.Create(PosPaymentResultCode.UserCanceled, txId, "USER_CANCELED"));
+                // 계속 진행되지만(리더기가 실제로 응답하거나 로컬 타임아웃이 날 때까지) 아무도 그
+                // 결과를 기다리지 않는다. 정리(0x60)는 게이트를 확정시킨 그 경로가 이미 수행했다.
+                TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
+                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round} 대기 중 확정됨({reason}) — 리더기 응답을 기다리지 않고 즉시 처리");
+                return CardReadRoundResult.Early(BuildInterruptResponse(reason, txId));
             }
 
             CardReadBroadcastResult broadcast = await broadcastTask.ConfigureAwait(false);
 
-            if (_canceled)
-            {
-                // 위 경쟁에서 broadcastTask가 근소하게 먼저 끝난 경우를 위한 방어적 재확인.
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round} 완료 시점에 취소 감지 — 우선 처리");
-                broadcast.Winner?.SendInvalidationInit();
-                return CardReadRoundResult.Early(PosPaymentResponse.Create(PosPaymentResultCode.UserCanceled, txId, "USER_CANCELED"));
-            }
-
             if (!broadcast.HasWinner)
             {
+                if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
+                {
+                    TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
+                    FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round} 완료 시점에 이미 확정됨({reason}) — 우선 처리");
+                    return CardReadRoundResult.Early(BuildInterruptResponse(reason, txId));
+                }
+
                 FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round} — 참여 리더기 전원 송신 실패(또는 참여자 없음)");
                 return CardReadRoundResult.Early(PosPaymentResponse.Create(PosPaymentResultCode.ReaderDllFailure, txId, "READER_SEND_FAIL"));
             }
@@ -312,41 +342,89 @@ internal sealed class PaymentOrchestrator
                     {
                         // 이론상 응답코드 00이면 CardData도 채워진다(CardReadResponseParser 계약) —
                         // 방어적으로만 대비한다. 카드 데이터 없이 VAN에 진입해서는 안 된다.
+                        if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
+                        {
+                            TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
+                            winner.SendInvalidationInit();
+                            return CardReadRoundResult.Early(BuildInterruptResponse(reason, txId));
+                        }
+
                         FileLogger.Error($"[PaymentOrchestrator] txId={txId} 응답코드 00인데 CardData가 없음 — 방어적으로 실패 처리");
                         winner.SendInvalidationInit();
                         return CardReadRoundResult.Early(PosPaymentResponse.Create(PosPaymentResultCode.ReaderDllFailure, txId, "READER_NO_CARD_DATA"));
                     }
 
+                    // 아직 거래를 확정하지 않는다 — VAN 진입 여부는 ProcessAsync가 VAN 진입 직전에
+                    // 다시 gate.TryClaim(FlowResult)를 시도해 결정한다(카드 리딩 성공과 VAN 진입
+                    // 사이에도 취소/Timeout이 끼어들 수 있기 때문 — development_plan.md P16-6
+                    // 시나리오 17/18).
                     FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 성공(라운드 {round}) — VAN 단계로");
                     return CardReadRoundResult.Success(winner, outcome.CardData);
 
                 case ReaderCommandOutcomeKind.BusinessFailure when outcome.IsFallback:
-                    FileLogger.Info($"[PaymentOrchestrator] txId={txId} FALLBACK(07) — MS 재요청(채택된 그 리더기에만, 거래구분 F)");
+                    deadline.Extend(UserInputStepExtension);
+                    FileLogger.Info($"[PaymentOrchestrator] txId={txId} FALLBACK(07) — MS 재요청(채택된 그 리더기에만, 거래구분 F), 데드라인 {UserInputStepExtension.TotalSeconds:F0}초 연장");
                     _presenter.ChangeState(PaymentNoticeState.FallbackCardRequest);
                     roundParticipants = new[] { winner };
                     transactionTypeCode = TransactionInfoRequestBuilder.TransactionTypeFallback;
                     continue;
 
                 case ReaderCommandOutcomeKind.BusinessFailure when outcome.IsRetryCode12:
-                    FileLogger.Info($"[PaymentOrchestrator] txId={txId} 응답코드 12 — 재요청(채택된 그 리더기에만, 거래구분 유지)");
+                    deadline.Extend(UserInputStepExtension);
+                    FileLogger.Info($"[PaymentOrchestrator] txId={txId} 응답코드 12 — 재요청(채택된 그 리더기에만, 거래구분 유지), 데드라인 {UserInputStepExtension.TotalSeconds:F0}초 연장");
                     roundParticipants = new[] { winner };
                     continue;
 
                 case ReaderCommandOutcomeKind.BusinessFailure:
+                    if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
+                    {
+                        TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
+                        winner.SendInvalidationInit();
+                        return CardReadRoundResult.Early(BuildInterruptResponse(reason, txId));
+                    }
+
                     FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 카드 리딩 실패 — 응답코드={outcome.ResponseCode}");
                     winner.SendInvalidationInit();
                     return CardReadRoundResult.Early(PosPaymentResponse.Create(PosPaymentResultCode.ReaderResponseFailure, txId, $"READER_RESP_{outcome.ResponseCode}"));
 
                 case ReaderCommandOutcomeKind.Timeout:
-                    FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 카드 입력 대기 시간 초과(120초)");
+                    // 리더기 계층의 로컬 명령 타임아웃 — roundTimeout이 deadline.Remaining에서 그대로
+                    // 파생되므로, 실제로는 이것과 MonitorDeadlineAsync의 거래 Timeout 확정이 거의
+                    // 동시에 일어나는 경우가 대부분이다(클래스 상단 주석 "리더기 명령 타임아웃 =
+                    // 안전장치" 참고). 어느 쪽이 근소하게 먼저 TryClaim에 성공하든 결과 코드는
+                    // 동일(Timeout)하므로 사용자에게 보이는 차이는 없다 — 게이트가 이중 확정만
+                    // 막아 주면 된다.
+                    if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
+                    {
+                        TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
+                        winner.SendInvalidationInit();
+                        return CardReadRoundResult.Early(BuildInterruptResponse(reason, txId));
+                    }
+
+                    FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 리더기 명령 타임아웃(라운드 {round})");
                     winner.SendInvalidationInit();
                     return CardReadRoundResult.Early(PosPaymentResponse.Create(PosPaymentResultCode.Timeout, txId, "CARD_INPUT_TIMEOUT"));
 
                 default: // DllCallFailure, CommunicationError
+                    if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
+                    {
+                        TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
+                        winner.SendInvalidationInit();
+                        return CardReadRoundResult.Early(BuildInterruptResponse(reason, txId));
+                    }
+
                     FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 카드 리딩 DLL 연동 실패(Kind={outcome.Kind}): {outcome.Detail}");
                     winner.SendInvalidationInit();
                     return CardReadRoundResult.Early(PosPaymentResponse.Create(PosPaymentResultCode.ReaderDllFailure, txId, "READER_DLL_FAIL"));
             }
+        }
+
+        if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
+        {
+            TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
+            foreach (IReaderEndpoint p in roundParticipants)
+                p.SendInvalidationInit();
+            return CardReadRoundResult.Early(BuildInterruptResponse(reason, txId));
         }
 
         FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 카드 리딩 재요청 상한({MaxCardReadRounds}) 초과");
@@ -355,9 +433,10 @@ internal sealed class PaymentOrchestrator
         return CardReadRoundResult.Early(PosPaymentResponse.Create(PosPaymentResultCode.ReaderResponseFailure, txId, "RETRY_LIMIT"));
     }
 
-    /// <summary>PRD §4.10 — VAN 승인 요청. 이 메서드가 불릴 때는 이미 취소 구독이 해제된 뒤다
-    /// (<see cref="ProcessAsync"/> 참고) — VAN 요청이 나간 뒤 취소를 받아들이면 "VAN은 승인했는데
-    /// POS에는 취소로 응답"하는 불일치가 생기기 때문이다.</summary>
+    /// <summary>PRD §4.10 — VAN 승인 요청. 이 메서드가 불릴 때는 이미 거래가 <see
+    /// cref="TransactionOutcomeReason.FlowResult"/>로 확정되고 취소 구독이 해제된 뒤다(<see
+    /// cref="ProcessAsync"/> 참고) — VAN 요청이 나간 뒤 취소를 받아들이면 "VAN은 승인했는데 POS에는
+    /// 취소로 응답"하는 불일치가 생기기 때문이다.</summary>
     private async Task<PosPaymentResponse> RunVanApprovalAsync(CardReadRoundResult roundResult, PosPaymentRequest request, string transactionDateTime, string txId)
     {
         _presenter.ChangeState(PaymentNoticeState.VanProcessing);
@@ -386,31 +465,62 @@ internal sealed class PaymentOrchestrator
     }
 
     /// <summary>취소 알림 — <see cref="IPaymentNoticePresenter.Canceled"/>는 UI 스레드에서 발생한다
-    /// (P13-6, 취소 버튼은 <c>RelayCommand</c>·ESC는 <c>Dispatcher.BeginInvoke</c> 경유). PRD §4.8
-    /// "아직 응답 대기 중인 모든 리더기에 초기화 요청"을 수행하지만, <see cref="_canceled"/> 플래그
-    /// 확정만 이 자리에서 동기로 하고 실제 0x60 발사는 <see cref="Task.Run(Action)"/>으로 넘긴다.
+    /// (P13-6, 취소 버튼은 <c>RelayCommand</c>·ESC는 <c>Dispatcher.BeginInvoke</c> 경유). 게이트
+    /// 확정만 이 자리에서 동기로 하고, 실제 0x60 발사는 <see cref="FireInterruptCleanup"/>이
+    /// <c>Task.Run</c>으로 넘긴다(Opus 검증 리뷰 H-2 — 리더기 I/O를 UI 스레드에서 돌리면 고객이
+    /// Topmost 알림창에서 취소를 누른 순간 창이 얼어붙는다).
     ///
-    /// (2026-08-25, Opus 검증 리뷰 H-2 수정) 예전엔 0x60 발사 루프까지 이 핸들러 안에서 동기로
-    /// 돌았다 — <see cref="IReaderEndpoint.SendInvalidationInit"/>는 <c>ReaderService.SendCommandSafe</c>
-    /// (P10-3 재연결 래퍼)를 타므로, 포트가 <c>PORT_NOT_OPEN</c>이면 <c>ClosePort</c>→<c>OpenPort</c>→
-    /// 재전송까지 동기로 일어날 수 있다(`--pos-client-test` 실측: `[자동복구] COM3 ... 실패` 같은
-    /// 재오픈 시도가 실제로 발생함). 이 전부가 UI 스레드에서 벌어지면, 고객이 Topmost 알림창에서
-    /// 취소를 누른 바로 그 순간 창이 얼어붙는다(PRD §9 "앱이 멈추지 않아야" 위반). 플래그 확정만
-    /// 여기서 동기로 끝내면 라운드 루프의 취소 우선순위 판정(<see cref="_canceled"/> 검사)은 그대로
-    /// 정확하고, 리더기 I/O만 백그라운드로 옮겨 UI 스레드를 막지 않는다.
-    /// </summary>
-    private void OnCanceled(object? sender, EventArgs e)
+    /// <paramref name="scope"/>는 <see cref="ProcessAsync"/>가 지역 변수로 캡처해 넘긴다(2026-08-25,
+    /// H-1 수정) — 예전엔 인스턴스 필드로 읽었는데, 이 메서드가 실행되는 시점엔 이미 다음 거래가
+    /// 시작해 그 필드를 덮어썼을 수 있어 **엉뚱한 거래의 리더기를 초기화**할 위험이 있었다.</summary>
+    private void OnCanceled(TransactionScope scope)
     {
-        _canceled = true;
-        // RunCardReadingRoundsAsync가 이 신호를 CardReadBroadcaster 대기와 경쟁시킨다 — 이걸 완료시켜야
-        // 취소가 리더기 응답/로컬 타임아웃을 기다리지 않고 즉시 반영된다(2026-08-25 실장비 테스트로
-        // 발견: 이게 없으면 취소 후 실제 응답까지 최대 120초가 걸렸다). TrySetResult를 쓰는 이유는
-        // ESC 연타 등으로 이 핸들러가 이론상 두 번 불려도(구독은 거래당 한 번뿐이라 실제로는 안
-        // 일어나지만) 이미 완료된 TCS에 다시 설정하면 예외가 나기 때문이다.
-        _cancelSignal?.TrySetResult(true);
+        if (scope.Gate.TryClaim(TransactionOutcomeReason.UserCanceled))
+        {
+            FileLogger.Info($"[PaymentOrchestrator] txId={scope.TransactionId} 사용자 취소 통지 수신 — 거래 확정(UserCanceled)");
+            FireInterruptCleanup(TransactionOutcomeReason.UserCanceled, scope);
+        }
+        else
+        {
+            // 취소 연타/ESC+버튼 동시 입력이 이 핸들러를 두 번 부르거나, 취소보다 먼저 Timeout/정상
+            // 흐름이 확정된 경우다 — 둘 다 정상 상황이며 조용히 무시한다(선착순 규칙).
+            FileLogger.Info($"[PaymentOrchestrator] txId={scope.TransactionId} 사용자 취소 통지 수신 — 이미 다른 사유({scope.Gate.ClaimedReason})로 확정되어 무시");
+        }
+    }
 
-        IReadOnlyList<IReaderEndpoint> pending = _pendingParticipantsForCancel;
-        FileLogger.Info($"[PaymentOrchestrator] 사용자 취소 통지 수신 — 대기 중인 참여 리더기 {pending.Count}대에 초기화(0x60) 전송 예약(백그라운드)");
+    /// <summary>거래 데드라인(PRD §4.9)을 감시한다. **실제로 만료됐을 때만** 게이트를 <see
+    /// cref="TransactionOutcomeReason.Timeout"/>으로 확정 시도한다 — 거래가 정상 종료돼 <see
+    /// cref="PaymentDeadline"/>이 <c>Dispose</c>된 경우엔 확정을 시도조차 하지 않는다(2026-08-25,
+    /// Phase 16 체크포인트 리뷰 M-2: 예전엔 두 경우가 같은 신호로 합쳐져 있어 "정상 종료했는데
+    /// Timeout 확정을 시도한다"는, 의도와 다른 코드가 됐다. 게이트가 이미 확정돼 있어 결과적으로는
+    /// 무해했지만, P16-1이 "확정을 시도하는 지점을 전부 나열한다"고 정한 이상 정상 경로가 그 목록에
+    /// 섞여서는 안 된다).</summary>
+    private async Task MonitorDeadlineAsync(PaymentDeadline deadline, TransactionScope scope)
+    {
+        bool actuallyExpired = await deadline.WaitForExpiryAsync().ConfigureAwait(false);
+        if (!actuallyExpired)
+        {
+            return;
+        }
+
+        if (scope.Gate.TryClaim(TransactionOutcomeReason.Timeout))
+        {
+            FileLogger.Warn($"[PaymentOrchestrator] txId={scope.TransactionId} 거래 데드라인 만료 — 거래 확정(Timeout)");
+            FireInterruptCleanup(TransactionOutcomeReason.Timeout, scope);
+        }
+    }
+
+    /// <summary>취소/Timeout 정리 경로를 하나로 통일한다(development_plan.md P16-3 — "코드도 하나여야
+    /// 한다"). 대기 중인 참여 리더기 전부에 0x60을 백그라운드에서 발사한다. UI 스레드를 막지 않기
+    /// 위해 <c>Task.Run</c>으로 넘긴다(Opus 검증 리뷰 H-2와 같은 이유 — Timeout 확정은 원래도 UI
+    /// 스레드가 아니지만, 경로를 하나로 합쳐 둔 덕분에 자연히 같은 처리를 받는다).
+    ///
+    /// 정리 대상을 <paramref name="scope"/>에서 읽는 것이 핵심이다 — 인스턴스 필드에서 읽으면 앞
+    /// 거래의 뒤늦은 확정이 다음 거래의 리더기를 초기화할 수 있다(H-1).</summary>
+    private static void FireInterruptCleanup(TransactionOutcomeReason reason, TransactionScope scope)
+    {
+        IReadOnlyList<IReaderEndpoint> pending = scope.PendingParticipants;
+        FileLogger.Info($"[PaymentOrchestrator] txId={scope.TransactionId} {reason} 확정 — 대기 중인 참여 리더기 {pending.Count}대에 초기화(0x60) 전송 예약(백그라운드)");
 
         Task.Run(() =>
         {
@@ -422,10 +532,58 @@ internal sealed class PaymentOrchestrator
                 }
                 catch (Exception ex)
                 {
-                    FileLogger.Warn($"[PaymentOrchestrator] 취소 처리 중 리더기 초기화 실패(무시하고 계속): {ex.Message}");
+                    FileLogger.Warn($"[PaymentOrchestrator] {reason} 처리 중 리더기 초기화 실패(무시하고 계속): {ex.Message}");
                 }
             }
         });
+    }
+
+    /// <summary>취소/Timeout으로 확정된 거래의 POS 응답을 만든다. <see
+    /// cref="TransactionOutcomeReason.FlowResult"/>는 이 메서드가 다루지 않는다 — 정상 흐름은 이미
+    /// 자기 자신의 결과 코드를 알고 있으므로 이 매핑이 필요 없다.</summary>
+    private static PosPaymentResponse BuildInterruptResponse(TransactionOutcomeReason reason, string txId) => reason switch
+    {
+        TransactionOutcomeReason.UserCanceled => PosPaymentResponse.Create(PosPaymentResultCode.UserCanceled, txId, "USER_CANCELED"),
+        TransactionOutcomeReason.Timeout => PosPaymentResponse.Create(PosPaymentResultCode.Timeout, txId, "CARD_INPUT_TIMEOUT"),
+        _ => throw new InvalidOperationException($"FlowResult은 인터럽트 응답을 만들지 않는다: {reason}"),
+    };
+
+    private static TimeSpan ClampCommandTimeout(TimeSpan remaining) =>
+        remaining < MinimumCommandTimeout ? MinimumCommandTimeout : remaining;
+
+    /// <summary>
+    /// 거래 1건 동안만 존재하는 상태 묶음(2026-08-25, Phase 16 체크포인트 리뷰 H-1). 결과 확정
+    /// 게이트와 "취소/Timeout 시 초기화할 리더기 목록"을 함께 들고 다닌다.
+    ///
+    /// **왜 인스턴스 필드가 아니라 이 객체인가**: 취소 통지(<see cref="OnCanceled"/>)와 데드라인 감시
+    /// (<see cref="MonitorDeadlineAsync"/>)는 결제 워커가 아닌 다른 스레드에서, 그것도 <see
+    /// cref="ProcessAsync"/>가 이미 반환한 **뒤에** 실행될 수 있다. 이 상태를 인스턴스 필드에 두면 그
+    /// 뒤늦은 콜백이 **다음 거래의** 목록을 읽어, 지금 카드를 기다리는 리더기에 0x60을 쏴 멀쩡한
+    /// 거래를 깨뜨릴 수 있었다(큐가 거래를 직렬화해도 이 경로는 막히지 않는다 — 직렬화되는 것은
+    /// <see cref="ProcessAsync"/> 본문이지 그것이 남긴 콜백이 아니기 때문이다). 거래마다 새 객체를
+    /// 만들어 클로저로 넘기면 앞 거래의 콜백은 앞 거래의 목록만 볼 수 있다.
+    /// </summary>
+    private sealed class TransactionScope
+    {
+        private volatile IReadOnlyList<IReaderEndpoint> _pendingParticipants = Array.Empty<IReaderEndpoint>();
+
+        internal TransactionScope(string transactionId)
+        {
+            TransactionId = transactionId;
+        }
+
+        internal string TransactionId { get; }
+
+        internal TransactionOutcomeGate Gate { get; } = new();
+
+        /// <summary>지금 이 라운드가 응답을 기다리고 있는 참여 리더기 — 라운드마다 갱신한다
+        /// (PRD §4.8/§4.9 "아직 응답 대기 중인 모든 리더기에 초기화 요청"). 결제 워커가 쓰고
+        /// 취소/데드라인 스레드가 읽으므로 <c>volatile</c>.</summary>
+        internal IReadOnlyList<IReaderEndpoint> PendingParticipants
+        {
+            get => _pendingParticipants;
+            set => _pendingParticipants = value;
+        }
     }
 
     /// <summary>카드 리딩 라운드의 결과 — <see cref="EarlyResponse"/>가 있으면 즉시 반환할 최종 응답

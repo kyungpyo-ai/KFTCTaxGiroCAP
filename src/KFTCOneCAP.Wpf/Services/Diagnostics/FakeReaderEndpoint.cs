@@ -59,6 +59,14 @@ internal sealed class FakeReaderEndpoint : IReaderEndpoint
     /// 대조할 수 있게 한다.</summary>
     internal TimeSpan LastCardReadTimeout { get; private set; }
 
+    /// <summary>라운드마다 전달된 <c>timeout</c> 인자를 순서대로 모두 기록한다(2026-08-25, Phase 16
+    /// 체크포인트 리뷰 L-2). Phase 16부터 이 값은 거래 데드라인의 남은 시간에서 파생되므로
+    /// (<c>PaymentOrchestrator.ClampCommandTimeout(deadline.Remaining)</c>), 라운드별 값을 비교하면
+    /// <b>데드라인이 실제로 몇 초 연장됐는지</b>를 외부에서 정밀하게 계산해 낼 수 있다 —
+    /// <see cref="LastCardReadTimeout"/> 하나만으로는 "연장이 일어났다"까지만 알 수 있고 "정확히
+    /// +30초인지"는 확인할 수 없었다.</summary>
+    internal List<TimeSpan> CardReadTimeouts { get; } = new();
+
     /// <summary>기본값은 성공(0x71/0x72 둘 다 "00") — 대부분의 시나리오가 무결성은 그냥 통과시키고
     /// 카드 리딩 분기에 집중하고 싶어할 것이므로.</summary>
     internal IntegrityCheckSequenceOutcome IntegrityOutcome { get; set; } =
@@ -98,6 +106,7 @@ internal sealed class FakeReaderEndpoint : IReaderEndpoint
         lock (_lock)
         {
             CardReadCallCount++;
+            CardReadTimeouts.Add(timeout);
             if (_scriptedCardReadOutcomes.Count > 0)
             {
                 (outcome, delay) = _scriptedCardReadOutcomes.Dequeue();

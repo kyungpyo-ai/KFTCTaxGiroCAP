@@ -100,8 +100,31 @@ public partial class HomeWindow : Window
     /// </summary>
     private void OnNotImplementedCardRequested(object? sender, string cardName) => ShowNotImplementedCard(cardName);
 
+    /// <summary>
+    /// Phase 16(docs/payment_relay/development_plan.md P16-5) — 거래가 진행 중이면 리더기 설정 화면을
+    /// 열지 않는다. P15-4가 만든 반대 방향 게이트(설정 화면이 열려 있으면 결제 거부)와 짝을 이뤄
+    /// 같은 COM 포트를 설정 화면과 결제 워커가 동시에 쓰는 상황을 양방향 모두 막는다(PRD §6). 판정
+    /// 기준은 <see cref="App.PaymentQueue"/>의 <c>IsProcessing</c> 하나뿐 — 새 잠금 장치를 만들지
+    /// 않는다(<c>TransactionQueue</c>가 이미 유일한 직렬화 지점, P14-3).
+    ///
+    /// **안내 없이 조용히 무시한다**(2026-08-26, 실기 확인 후 사용자 확정) — 처음엔 안내
+    /// <c>MessageBox</c>를 띄웠는데, 실기로 확인해 보니 결제 알림창이 <c>Topmost</c>라 그 뒤에 가려져
+    /// 사용자가 알림 자체를 볼 수 없었다(알림창을 닫아야만 뒤에 있던 메시지박스가 보임 — 실사용에서는
+    /// 무의미한 안내였다). 결제 알림창이 이미 화면 최상단에 떠서 "지금 결제 중"임을 스스로 보여주므로
+    /// 별도 안내가 없어도 사용자가 혼란스럽지 않다는 것이 사용자 판단이었다 — 안내를 Topmost로 만들어
+    /// 결제 화면 위에 끼어들게 하는 대안은 "결제가 먼저"라는 원칙에 어긋나 채택하지 않았다.
+    ///
+    /// 이 검사와 실제 <c>ShowDialog()</c> 사이에 거래가 막 시작되는 경합은 완전히 막을 수 없고 막을
+    /// 필요도 없다 — 반대 방향 게이트(P15-4)가 "설정 화면이 열려 있으면 결제 거부"로 그 틈을 받아
+    /// 낸다. 두 게이트가 서로의 빈틈을 덮는 구조다.
+    /// </summary>
     private void OpenReaderSetup()
     {
+        if (App.PaymentQueue?.IsProcessing == true)
+        {
+            return;
+        }
+
         var dialog = new ReaderSetupWindow { Owner = this };
         dialog.ShowDialog();
     }

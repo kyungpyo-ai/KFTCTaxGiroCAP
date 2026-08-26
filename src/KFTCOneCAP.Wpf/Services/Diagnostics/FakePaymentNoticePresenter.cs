@@ -47,12 +47,22 @@ internal sealed class FakePaymentNoticePresenter : IPaymentNoticePresenter
             FireCanceled();
     }
 
+    /// <summary>(2026-08-25, Phase 16 체크포인트 리뷰 H-1 회귀 방지용) <see cref="ChangeState"/>가
+    /// 예외를 던지게 한다 — "거래가 결과를 확정하지 못한 채 예외로 빠져나가는" 경로를 결정론적으로
+    /// 재현하는 수단이다. 실제 구현에서도 <c>Dispatcher.Invoke</c>가 종료 중인 디스패처에서 예외를
+    /// 던질 수 있고, Phase 17의 VAN 실호출도 예외를 던질 수 있다. 그 경로에서 대기 중이던 리더기가
+    /// 정리되는지(그리고 그 정리가 <b>다음 거래</b>의 리더기를 건드리지 않는지)를 검증한다.</summary>
+    internal bool ThrowOnChangeState { get; set; }
+
     public void ChangeState(PaymentNoticeState state)
     {
         lock (_lock)
         {
             History.Add($"ChangeState:{state}");
         }
+
+        if (ThrowOnChangeState)
+            throw new InvalidOperationException("FakePaymentNoticePresenter: ChangeState 예외(테스트용)");
     }
 
     public void Close()

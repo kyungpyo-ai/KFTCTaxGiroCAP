@@ -417,17 +417,15 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
     /// (WPF 바인딩용 모델) 변환은 ViewModel 책임이다(Storage가 표시 모델을 반환하던 계층 위반을
     /// Phase 11 리뷰에서 고치면서 이 책임이 여기로 넘어왔다).
     ///
-    /// ResultCode는 <c>entry.ResponseCode ?? "ERR"</c>로 채운다 — <see cref="IntegrityCheckRow.IsOk"/>가
-    /// "00" 완전 일치로만 성공을 판정하므로, 저장된 <see cref="IntegrityCheckHistoryEntry.IsSuccess"/>
-    /// (업무 최종 판정)와 항상 일치하게 된다: 성공 건은 항상 ResponseCode="00"이고, 실패 건은
-    /// 응답코드가 있어도("00"이 아닌 값) 없어도(null → "ERR") 어차피 "00"과 다르므로 화면에서
-    /// "오류"로 표시된다 — 응답코드 없이 실패한 건(DLL 연동 실패)도 빠짐없이 오류로 보인다.
+    /// <c>entry.ResponseCode</c>를 가공하지 않고 그대로 넘긴다(2026-08-26, PRD_WPF.md 4.6 갱신) —
+    /// null(리더기가 응답 자체를 못 준 경우)과 "00"이 아닌 실제 응답코드(리더기가 응답했지만 업무
+    /// 오류)를 <see cref="IntegrityCheckRow.ResultText"/>가 "통신실패"/"오류"로 구분해서 보여준다.
+    /// 예전엔 null을 "ERR" 리터럴로 뭉개서 두 원인이 화면에서 똑같이 "오류"로만 보였다.
     /// </summary>
     private static IntegrityCheckRow ToRow(IntegrityCheckHistoryEntry entry)
     {
         string checkTime = entry.CheckedAt.ToString("yyyyMMddHHmmss");
-        string resultCode = entry.ResponseCode ?? "ERR";
-        return new IntegrityCheckRow(checkTime, entry.ComPort, resultCode, entry.ModuleId ?? "-", entry.ReaderAuthId ?? "-", entry.PosId);
+        return new IntegrityCheckRow(checkTime, entry.ComPort, entry.ResponseCode, entry.ModuleId ?? "-", entry.ReaderAuthId ?? "-", entry.PosId);
     }
 
     // ===================== 로드 / 저장 / dirty-check (PRD 4.12/4.13, 5장) =====================
