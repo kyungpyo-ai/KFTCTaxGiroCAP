@@ -2,3 +2,7 @@ bin/
 obj/
 .vs/
 *.user
+
+# Phase 13 이미지 자산 작업의 중간 산출물(크롭 실험/생성 원본) — 완성본은
+# src/KFTCOneCAP.Wpf/Assets/Images/PaymentNotice/에 이미 커밋돼 있다.
+docs/payment_relay/images/_preview_crop/
