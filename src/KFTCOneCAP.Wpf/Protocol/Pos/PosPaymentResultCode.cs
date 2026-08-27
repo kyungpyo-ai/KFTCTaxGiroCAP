@@ -3,12 +3,15 @@ namespace KFTCOneCAP.Wpf.Protocol.Pos;
 /// <summary>
 /// Phase 15(docs/payment_relay/development_plan.md P15-3) — 결제 Flow(<c>Services/Payment/
 /// PaymentOrchestrator</c>)가 POS에 반환하는 결과 종류. PRD가 "구분해서 응답"을 요구하는 축(§4.2,
-/// §4.6, §4.7, §4.8, §4.9, §4.10, §2.2.3, §6)을 열거형으로 확정한 것이며, 값 하나하나는 실제 SPEC이
-/// 확정되지 않은 지금도 바뀌지 않는다 — 바뀌는 것은 <see cref="PosPaymentResponse.Create"/>가 이 값을
-/// 실제 전문 코드 문자열로 바꾸는 매핑 하나뿐이다(SPEC 확정 시 그 매핑표만 교체).
+/// §4.6, §4.7, §4.8, §4.9, §4.10, §2.2.3, §6)을 열거형으로 확정한 것이다.
 ///
-/// Flow(<c>Services/Payment/</c>)는 이 열거형만 다루고 전문 코드 문자열("00", "10" 등)을 직접
-/// 리터럴로 쓰지 않는다 — grep으로 점검 가능해야 한다(P15-3 완료 조건).
+/// **P15-3의 예상대로 SPEC 확정(Phase 17) 이후에도 이 열거형 자체는 그대로 살아남았고, 바뀐 것은
+/// 전문 코드 문자열로 바꾸는 매핑 하나뿐이다** — 그 매핑은 이제
+/// <c>Services/Payment/PosResultCodeMapper</c>에 있다(P17-4에서 <c>Protocol/Pos</c>가 리더기 DLL 오류
+/// 종류를 알아서는 안 된다는 계층 규칙 때문에 옮겼다).
+///
+/// Flow(<c>Services/Payment/</c>)는 이 열거형만 다루고 전문 코드 문자열("E01", "R20" 등)을 직접
+/// 리터럴로 쓰지 않는다 — grep으로 점검 가능해야 한다(P15-3/P17-4 완료 조건).
 /// </summary>
 internal enum PosPaymentResultCode
 {

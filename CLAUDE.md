@@ -41,6 +41,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `.claude/agents/csharp-wpf-developer.md` — 이 프로젝트의 WPF 개발 전담 에이전트. UX/UI(XAML)와 비즈니스 로직(ViewModel/서비스)을 통합해서 다룬다. `mcp__windows__*` 도구(스크린샷/클릭/스냅샷 등)를 갖추고 있어 빌드 후 실제 화면을 캡처해 원본과 대조하는 검증까지 책임진다 — 코드 작성만 하고 검증을 생략하지 않는다.
 - `.claude/agents/reader-pinpad-spec-expert.md` — 리더기/핀패드 SPEC 원문 및 `ReaderSerial.dll` API 계약 확인 전담(아래 "리더기 연동 DLL" 절 참고).
 - `.claude/agents/reader-dll-integration-developer.md` — `ReaderSerial.dll` P/Invoke 연동 개발 전담(아래 "리더기 연동 DLL" 절 참고).
+- `.claude/agents/pos-onecap-spec-expert.md` — POS ↔ KFTCOneCAP 간 전문(telegram) SPEC 확인 전담. 근거 문서는
+  `docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260826.pdf`(hwp 원본은 DRM
+  배포용 문서 래퍼라 열 수 없음, PDF가 유일하게 파싱 가능) — 501008(국고 상세 고지내역 조회), 800000(카드
+  정보 조회), 902614(국고 신용카드 승인요청) 3종 전문의 필드/POSITION/길이, kiosk가 채우는 필드와 원캡이
+  카드리딩으로 채워야 하는 필드(800000은 #14 BIN 1개, 902614는 #43/#44/#45/#46/#48/#50/#53 7개)의 구분,
+  응답코드를 담당한다. 전문 필드를 코드에 하드코딩하기 전에 반드시 이 에이전트로 확인한다 — SPEC 표를
+  눈으로 훑으면 SET 장소 열을 착각하기 쉽다(실제로 최초 정리 때 #48을 kiosk로 잘못 읽은 전례가 있다).
 
 ## 리더기 연동 DLL (2차 개발, 준비 단계)
 

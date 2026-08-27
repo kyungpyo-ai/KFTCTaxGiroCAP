@@ -28,9 +28,10 @@ namespace KFTCOneCAP.Wpf.Services.Pos;
 ///   기다린 뒤, 같은 스레드에서 다음 <c>Read</c> 직전에 타임아웃을 건다 — 별도 타이머나 소켓을
 ///   강제로 닫는 우회가 필요 없다. 자세한 이유는 <see cref="HandleConnection"/> 주석 참고).
 /// - **계층 규칙**: 이 클래스는 WPF 타입(Dispatcher/Window)을 알지 못하고, 프레임 바이트 오프셋도
-///   직접 다루지 않는다 — 전부 <see cref="PosMessageFramer"/>/<see cref="PosPaymentRequest"/>
-///   (<c>Protocol/Pos/</c>)에 위임한다. STX/길이 필드 같은 프레이밍 내부 구현은 이 클래스에 드러나지
-///   않는다(P14-1).
+///   직접 다루지 않는다 — 전부 <see cref="PosMessageFramer"/>/<see cref="PosRequestTelegram"/>
+///   (<c>Protocol/Pos/</c>)에 위임한다. STX/길이 필드·SPEC 필드 오프셋 같은 내부 구현은 이 클래스에
+///   드러나지 않는다(P14-1, Phase 17에서 실제 SPEC 전문으로 교체돼도 이 규칙 덕분에 이 파일은 타입
+///   이름만 바뀌었다 — P17-5).
 /// </summary>
 internal sealed class PosSocketServer
 {
@@ -256,22 +257,39 @@ internal sealed class PosSocketServer
     private static bool IsReadTimeout(IOException ex) =>
         ex.InnerException is SocketException se && se.SocketErrorCode == SocketError.TimedOut;
 
-    /// <summary>파싱에 성공해 큐에 넣었으면 true(호출자가 <paramref name="responseSent"/>를 기다려야 함), 형식 오류로 그 프레임만 버렸으면 false.</summary>
+    /// <summary>
+    /// 파싱에 성공해 큐에 넣었거나, 실패 응답을 즉시 써 보냈으면 true(호출자가
+    /// <paramref name="responseSent"/>를 기다려야 함). 응답조차 만들 수 없는 형식 오류(전문 종류를
+    /// 식별할 최소 16바이트에도 못 미침, P17-3)로 그 프레임만 버렸으면 false.
+    /// </summary>
     private bool HandleFrame(byte[] frame, NetworkStream stream, object writeLock, string remote, ManualResetEventSlim responseSent)
     {
-        PosPaymentRequest request;
+        PosRequestParseOutcome outcome;
         try
         {
-            request = PosPaymentRequest.Parse(frame);
+            outcome = PosRequestTelegram.Parse(frame);
         }
         catch (PosProtocolException ex)
         {
             // 프레임 경계는 이미 지켜졌으므로(형식 오류와 다름) 이 프레임만 버리고 연결은 유지한다.
+            // #4(거래 구분 코드)조차 읽을 수 없을 만큼 짧은 본문만 여기 온다(P17-3) — 이 경우는
+            // 응답을 만들 스키마 근거가 전혀 없어 침묵 외에 대안이 없다.
             FileLogger.Warn($"[PosSocketServer] {remote} 요청 파싱 오류(이 프레임만 폐기): {ex.Message}");
             return false;
         }
 
-        FileLogger.Info($"[PosSocketServer] {remote} 요청 수신 txId={request.TransactionId}");
+        if (!outcome.IsSuccess)
+        {
+            // E40(길이 불일치)/E41(알 수 없는 거래구분) — 전문 계층(P17-3)이 이미 완성된 응답 프레임을
+            // 만들어 뒀다. Flow(큐)를 거칠 이유가 없는 순수 프로토콜 오류이므로 여기서 바로 써 보낸다.
+            FileLogger.Warn($"[PosSocketServer] {remote} 전문 오류({outcome.ErrorCode}) — 큐를 거치지 않고 즉시 응답");
+            WriteFrame(outcome.ErrorResponseFrame!, stream, writeLock, remote, "전문 오류");
+            responseSent.Set();
+            return true;
+        }
+
+        PosRequestTelegram request = outcome.Telegram!;
+        FileLogger.Info($"[PosSocketServer] {remote} 요청 수신 전문={request.TransactionTypeCode}");
 
         _queue.Enqueue(request, response =>
         {
@@ -296,7 +314,7 @@ internal sealed class PosSocketServer
     /// 넘기면(H-1, 2026-08-24 Opus 검증 리뷰) 응답을 폐기하고 로그만 남긴다 — 예외를 워커 쪽으로
     /// 던지지 않는다.
     /// </summary>
-    private static void SendResponse(PosPaymentResponse response, NetworkStream stream, object writeLock, string remote)
+    private static void SendResponse(PosResponseTelegram response, NetworkStream stream, object writeLock, string remote)
     {
         byte[] frame;
         try
@@ -305,10 +323,17 @@ internal sealed class PosSocketServer
         }
         catch (Exception ex)
         {
-            FileLogger.Error($"[PosSocketServer] 응답 직렬화 실패 txId={response.TransactionId}: {ex}");
+            FileLogger.Error($"[PosSocketServer] 응답 직렬화 실패: {ex}");
             return;
         }
 
+        WriteFrame(frame, stream, writeLock, remote, "응답");
+    }
+
+    /// <summary>완성된 프레임(길이 헤더 포함)을 소켓에 쓰는 공통 지점 — 정상 응답과 P17-3의 프로토콜
+    /// 오류 응답(E40/E41)이 함께 쓴다.</summary>
+    private static void WriteFrame(byte[] frame, NetworkStream stream, object writeLock, string remote, string logLabel)
+    {
         lock (writeLock)
         {
             try
@@ -317,7 +342,7 @@ internal sealed class PosSocketServer
             }
             catch (Exception ex)
             {
-                FileLogger.Warn($"[PosSocketServer] {remote} 응답 전송 실패(연결 끊김 또는 {SendTimeoutMilliseconds}ms 내 미수신으로 추정) txId={response.TransactionId} — 응답 폐기: {ex.Message}");
+                FileLogger.Warn($"[PosSocketServer] {remote} {logLabel} 전송 실패(연결 끊김 또는 {SendTimeoutMilliseconds}ms 내 미수신으로 추정) — 폐기: {ex.Message}");
             }
         }
     }

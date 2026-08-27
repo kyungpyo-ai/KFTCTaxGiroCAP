@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Windows;
+using KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Payment;
 using KFTCOneCAP.Wpf.Services.Pos;
@@ -70,6 +71,13 @@ public partial class App : Application
         string baseDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? AppDomain.CurrentDomain.BaseDirectory;
         NativeDllLoadSmokeTest.RunAll(baseDirectory);
 
+        // Phase 17(P17-2/P17-3, 체크포인트 1 검증 M-2 수정): POS 전문 스키마 3종을 기동 시점에 강제로
+        // 초기화한다. 스키마 생성자가 POSITION 연속성·총 길이를 자체 검증하므로, SPEC 표를 옮겨 적다
+        // 틀렸다면 첫 결제 요청 때가 아니라 지금 즉시 드러난다 — DLL 로드 스모크(위)와 같은 취지다.
+        // DLL 로드와 달리 이건 우리 코드의 자체 모순이라 조용히 넘기지 않고 그대로 던진다.
+        PosSchemaRegistry.ValidateAtStartup();
+        FileLogger.Info("POS 전문 스키마 3종 검증 완료(POSITION 연속성·총 길이·라우팅 상수 일치)");
+
         // 컴팩트 모드 판정(임의 판단, 2026-08-14 Phase 6): SystemParameters.WorkArea.Height(작업
         // 표시줄 등을 제외한 가용 영역) 대신 SystemParameters.PrimaryScreenHeight(모니터 자체의
         // 해상도 높이)를 사용한다. PRD 원문이 "화면 높이(screen height) ≤800px"라고 명시하고
@@ -109,10 +117,10 @@ public partial class App : Application
         // Phase 13(P13-1): 결제 알림창 배경 3장을 미리 디코드해 캐시(표시 지연 방지).
         PaymentNoticeBackgroundSource.WarmUp();
 
-        // Phase 15(P15-6~P15-9): 결제 Flow 조립. 리더기1/2를 IReaderEndpoint로 감싸고(P15-2 어댑터),
-        // 하나의 IntegrityCheckStore/IntegrityCheckService를 공유시킨다(App.ReaderConnections의
-        // Reader1/Reader2 순서를 그대로 따름 — PaymentOrchestrator 클래스 주석의 "인덱스 0=리더기1"
-        // 전제). VAN은 아직 스텁(P15-5 확정 사항: 실제 FNAISCRDVAN은 Phase 17).
+        // Phase 15(P15-6~P15-9), Phase 17(P17-5)에서 3전문 구조로 재구성: 결제 Flow 조립. 리더기1/2를
+        // IReaderEndpoint로 감싸고(P15-2 어댑터), 하나의 IntegrityCheckStore/IntegrityCheckService를
+        // 공유시킨다(App.ReaderConnections의 Reader1/Reader2 순서를 그대로 따름 — PaymentOrchestrator
+        // 클래스 주석의 "인덱스 0=리더기1" 전제). VAN은 아직 스텁(실제 FNAISCRDVAN은 Phase 20).
         var integrityStore = new IntegrityCheckStore();
         var integrityCheckService = new IntegrityCheckService(integrityStore);
         var readerEndpoints = new IReaderEndpoint[]
@@ -121,13 +129,13 @@ public partial class App : Application
             new ReaderEndpoint(ReaderConnections.Reader2, integrityCheckService),
         };
         var paymentPresenter = new PaymentNoticePresenter();
-        var vanService = new StubVanService();
-        // (2026-08-25, Opus 검증 리뷰 M-2) 이 빌드를 실단말에서 그대로 돌리면 모든 거래가 실제 VAN
-        // 통신 없이 조용히 승인된다 — 로그만 보는 사람이 실거래 승인으로 오해하지 않도록 기동 시점에
-        // 명시적으로 남긴다. Phase 17이 이 스텁을 실제 FNAISCRDVAN 구현으로 교체하면 이 로그도 함께
-        // 제거한다.
-        FileLogger.Warn("[PaymentOrchestrator] VAN 서비스가 스텁(StubVanService)입니다 — 실제 승인이 아닙니다(Phase 17에서 FNAISCRDVAN으로 교체 예정)");
-        Orchestrator = new PaymentOrchestrator(readerEndpoints, integrityStore, paymentPresenter, ReaderSetupGate, vanService);
+        var vanRelay = new StubVanRelayService();
+        // (2026-08-25, Opus 검증 리뷰 M-2 — Phase 17에서 StubVanRelayService로 교체돼도 같은 취지로
+        // 유지) 이 빌드를 실단말에서 그대로 돌리면 모든 거래가 실제 VAN 통신 없이 조용히 승인된다 —
+        // 로그만 보는 사람이 실거래 승인으로 오해하지 않도록 기동 시점에 명시적으로 남긴다. Phase 20이
+        // 이 스텁을 실제 FNAISCRDVAN 구현으로 교체하면 이 로그도 함께 제거한다.
+        FileLogger.Warn("[PaymentOrchestrator] VAN 서비스가 스텁(StubVanRelayService)입니다 — 실제 승인이 아닙니다(Phase 20에서 FNAISCRDVAN으로 교체 예정)");
+        Orchestrator = new PaymentOrchestrator(readerEndpoints, integrityStore, paymentPresenter, ReaderSetupGate, vanRelay);
 
         // Phase 14(P14-2/P14-3): 소켓 서버 + 단일 워커 Queue 기동. 8002 포트가 이미 사용 중이어도
         // (PRD §9) 앱 기동은 막지 않는다 — PosServer.Start()가 실패를 로그로만 남기고 넘어간다.

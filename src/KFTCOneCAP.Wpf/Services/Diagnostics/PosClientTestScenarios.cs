@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using KFTCOneCAP.Wpf.Protocol.Pos;
+using KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
 
 namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 
@@ -61,11 +62,15 @@ internal static class PosClientTestScenarios
                 client.Connect(IPAddress.Loopback, Port);
                 using var stream = client.GetStream();
                 startGate.Wait();
-                WriteRequestFrame(stream, "1000", txId);
+                WriteRequestFrame(stream, txId);
                 string? body = ReadResponseFrame(stream, TimeSpan.FromSeconds(10));
-                FileLogger.Info($"[pos-client-test][1] 응답 수신 txId={txId} body={body ?? "(타임아웃)"}");
+                string correlation = body != null ? ReadCorrelationId(body) : "(타임아웃)";
+                FileLogger.Info($"[pos-client-test][1] 응답 수신 txId={txId} #9(전문관리번호)={correlation}");
                 if (body != null)
                 {
+                    if (correlation != txId)
+                        FileLogger.Error($"[pos-client-test][1] ★ 상관관계 불일치: 요청 txId={txId}인데 응답 #9={correlation}");
+
                     lock (responseOrderLock) { responseOrder.Add(txId); }
                 }
             })
@@ -98,7 +103,7 @@ internal static class PosClientTestScenarios
         for (int i = 1; i <= 3; i++)
         {
             string txId = $"PERSIST-{i}";
-            WriteRequestFrame(stream, "500", txId);
+            WriteRequestFrame(stream, txId);
             string? body = ReadResponseFrame(stream, TimeSpan.FromSeconds(10));
             FileLogger.Info($"[pos-client-test][2] {i}번째 요청 응답 txId={txId} body={body ?? "(타임아웃)"}");
         }
@@ -134,7 +139,7 @@ internal static class PosClientTestScenarios
             client.Connect(IPAddress.Loopback, Port);
             using (NetworkStream stream = client.GetStream())
             {
-                WriteRequestFrame(stream, "700", "ABRUPT-1");
+                WriteRequestFrame(stream, "ABRUPT-1");
             }
 
             client.Client.Close(0); // 응답을 기다리지 않고 즉시 닫는다(RST에 가까움).
@@ -146,40 +151,53 @@ internal static class PosClientTestScenarios
         using var recoverClient = new TcpClient();
         recoverClient.Connect(IPAddress.Loopback, Port);
         using var recoverStream = recoverClient.GetStream();
-        WriteRequestFrame(recoverStream, "800", "AFTER-ABRUPT");
+        WriteRequestFrame(recoverStream, "AFTER-ABRUPT");
         string? body = ReadResponseFrame(recoverStream, TimeSpan.FromSeconds(10));
         FileLogger.Info($"[pos-client-test][4] 완료 — 강제 종료 뒤 다음 요청 응답: {body ?? "(타임아웃 — ★ 큐가 막혔을 가능성)"}");
     }
 
-    /// <summary>P14-3: 처리 스텁이 예외를 던져도(amount="THROW") 워커가 죽지 않고 다음 요청을 처리한다.</summary>
+    /// <summary>
+    /// P14-3: 워커 예외 후에도 다음 요청을 처리하는지 확인. **Phase 17 범위 조정**: 임시 전문 시절엔
+    /// <c>amount="THROW"</c> 같은 인위적 sentinel로 Orchestrator 예외를 직접 유도할 수 있었지만,
+    /// SPEC 501008 경로(카드리딩 없음, 순수 relay)에는 그런 sentinel이 없다 — 정상 입력만으로는
+    /// Orchestrator가 예외를 던질 지점이 없다(그게 맞는 설계다). 워커의 예외 복원력 자체는
+    /// `TransactionQueue` 리플렉션 하네스(P17-4 검증, `InternalError`→E99 폴백 확인)로 이미 별도
+    /// 검증됐으므로, 여기서는 **연속 2건이 정상 처리되는지**(워커가 요청 사이에 멈추지 않는지)만
+    /// 확인하는 것으로 축소한다.
+    /// </summary>
     private static void Scenario5_ProcessorException()
     {
-        FileLogger.Info("[pos-client-test][5] 시작 — 처리 스텁이 예외를 던져도 워커 생존 확인(P14-3)");
+        FileLogger.Info("[pos-client-test][5] 시작 — 연속 2건 정상 처리 확인(워커 생존, P14-3) — " +
+            "예외 복원력 자체는 P17-4 TransactionQueue 하네스가 별도로 검증함(위 클래스 주석 참고)");
 
         using (var client = new TcpClient())
         {
             client.Connect(IPAddress.Loopback, Port);
             using NetworkStream stream = client.GetStream();
-            WriteRequestFrame(stream, "THROW", "THROW-1");
+            WriteRequestFrame(stream, "SEQ-1");
             string? body = ReadResponseFrame(stream, TimeSpan.FromSeconds(10));
-            FileLogger.Info($"[pos-client-test][5] 예외 유발 요청 응답: {body ?? "(타임아웃)"}"); // 내부 오류 응답(99)이 정상
+            FileLogger.Info($"[pos-client-test][5] 1번째 요청 응답: {body ?? "(타임아웃)"}");
         }
 
         using var followUpClient = new TcpClient();
         followUpClient.Connect(IPAddress.Loopback, Port);
         using var followUpStream = followUpClient.GetStream();
-        WriteRequestFrame(followUpStream, "900", "AFTER-THROW");
+        WriteRequestFrame(followUpStream, "SEQ-2");
         string? followUpBody = ReadResponseFrame(followUpStream, TimeSpan.FromSeconds(10));
-        FileLogger.Info($"[pos-client-test][5] 완료 — 예외 뒤 다음 요청 응답: {followUpBody ?? "(타임아웃 — ★ 워커가 죽었을 가능성)"}");
+        FileLogger.Info($"[pos-client-test][5] 완료 — 2번째 요청 응답: {followUpBody ?? "(타임아웃 — ★ 워커가 멈췄을 가능성)"}");
     }
 
     /// <summary>
     /// H-1 재검증(Opus 검증 리뷰 2026-08-24): 응답을 전혀 읽지 않는 "먹통" 클라이언트가 있어도, 뒤이어
     /// 들어온 다른 클라이언트의 요청이 무한정 막히지 않고 <c>PosSocketServer</c>의
-    /// <c>SendTimeoutMilliseconds</c>(5초) 안팎에서 풀려나는지 확인한다. 응답 본문을 9,900바이트로
-    /// 부풀리고(App.xaml.cs <c>StubPaymentProcessor</c>의 <c>amount="BIGRESPONSE"</c> 경로) 먹통
-    /// 클라이언트의 수신 버퍼를 최소로 줄여 실제 소켓 쓰기 블로킹을 유도한다 — OS/루프백 버퍼 크기에
-    /// 따라 실제로 블로킹이 재현되지 않을 수도 있는데, 그 경우도 정상으로 보고 로그로 구분해 남긴다.
+    /// <c>SendTimeoutMilliseconds</c>(5초) 안팎에서 풀려나는지 확인한다.
+    ///
+    /// **Phase 17 범위 조정**: 임시 전문 시절엔 응답 본문을 9,900바이트까지 인위적으로 부풀릴 수
+    /// 있었지만, SPEC 고정길이 전문은 최대(902614)도 1,500바이트뿐이라 그 정도로는 OS 루프백 소켓
+    /// 버퍼를 채워 실제 쓰기 블로킹을 강제로 재현하기 어렵다 — 그래도 902614(가장 큰 전문)를 써서
+    /// 구조적으로 같은 경로(느린 소비자가 있어도 다른 연결이 막히지 않는지)는 그대로 확인한다. 실제
+    /// 블로킹이 재현되지 않아도(=응답이 빨리 옴) 실패가 아니다 — 재현 여부와 무관하게 "막히지 않았다"
+    /// 는 것만 확인하면 되는 시나리오이기 때문이다.
     /// </summary>
     private static void Scenario6_UnresponsiveClientDoesNotBlockQueue()
     {
@@ -197,7 +215,7 @@ internal static class PosClientTestScenarios
 
         stuckClient.Connect(IPAddress.Loopback, Port);
         NetworkStream stuckStream = stuckClient.GetStream();
-        WriteRequestFrame(stuckStream, "BIGRESPONSE", "STUCK-1");
+        WriteRequestFrame(stuckStream, "902614", "STUCK-1"); // 3전문 중 가장 큰 응답(1500바이트)
         FileLogger.Info("[pos-client-test][6] 먹통 클라이언트 요청 전송 완료 — 이후 응답을 절대 읽지 않음");
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -205,7 +223,7 @@ internal static class PosClientTestScenarios
         {
             normalClient.Connect(IPAddress.Loopback, Port);
             using NetworkStream normalStream = normalClient.GetStream();
-            WriteRequestFrame(normalStream, "300", "AFTER-STUCK");
+            WriteRequestFrame(normalStream, "AFTER-STUCK");
             string? body = ReadResponseFrame(normalStream, TimeSpan.FromSeconds(15));
             stopwatch.Stop();
 
@@ -237,7 +255,7 @@ internal static class PosClientTestScenarios
         client.Connect(IPAddress.Loopback, Port);
         using var stream = client.GetStream();
 
-        WriteRequestFrame(stream, "100", "IDLE-TEST-1");
+        WriteRequestFrame(stream, "IDLE-TEST-1");
         string? body = ReadResponseFrame(stream, TimeSpan.FromSeconds(10));
         FileLogger.Info($"[pos-client-test][7] 첫 응답 수신: {body ?? "(타임아웃 — ★ 확인 필요)"}, 이제 12초간 아무것도 안 보내고 대기");
 
@@ -249,15 +267,42 @@ internal static class PosClientTestScenarios
             : "[pos-client-test][7] 완료 — ★ 실패: 12초가 지나도 서버가 연결을 닫지 않음");
     }
 
-    // ---- 공용 헬퍼 — 서버와 동일한 임시 전문 형식(P14-1: [길이4(ASCII)][본문])을 그대로 재사용한다 ----
+    // ---- 공용 헬퍼 — Phase 17(P17-7)부터 실제 SPEC 전문(501008)을 보낸다. 501008은 카드리딩이 없어
+    // 리더기 하드웨어/설정 여부와 무관하게 결정적으로 동작하므로, 소켓/큐 배관 자체를 검증하는 이
+    // 시나리오들(Phase 14)에 가장 적합하다 — 상관관계 추적용 txId는 #9(전문 관리 번호, AN12)에 심고
+    // 응답에서 같은 자리를 읽어 대조한다(StubVanRelayService가 clone 기반이라 이 필드가 그대로
+    // 왕복한다). ----
 
-    private static void WriteRequestFrame(NetworkStream stream, string amount, string transactionId)
+    private static void WriteRequestFrame(NetworkStream stream, string transactionId) =>
+        WriteRequestFrame(stream, "501008", transactionId);
+
+    private static void WriteRequestFrame(NetworkStream stream, string transactionType, string correlationId)
     {
-        string body = $"PAY|{amount}|{transactionId}";
-        byte[] bodyBytes = PosMessageEncoding.Value.GetBytes(body);
+        if (!PosSchemaRegistry.TryResolve(transactionType, out PosTelegramSchema? schema) || schema is null)
+            throw new InvalidOperationException($"알 수 없는 거래구분: {transactionType}");
+
+        var telegram = PosTelegram.CreateEmpty(schema);
+        telegram.Write(1, "IGN");
+        telegram.Write(2, "095");
+        telegram.Write(3, "0200");
+        telegram.Write(4, transactionType);
+        telegram.Write(6, "G");
+        telegram.Write(9, correlationId); // AN12 — 12자 넘으면 PosField.Pad가 예외를 던져 실수를 바로 드러냄
+
+        byte[] bodyBytes = telegram.ToBody();
         byte[] lengthBytes = PosMessageEncoding.Value.GetBytes(bodyBytes.Length.ToString("D4"));
         stream.Write(lengthBytes, 0, lengthBytes.Length);
         stream.Write(bodyBytes, 0, bodyBytes.Length);
+    }
+
+    /// <summary>응답 본문에서 #9(전문 관리 번호)를 읽어 상관관계를 대조한다 — relay 응답이든 clone 기반
+    /// 실패 응답이든 이 필드는 요청 값을 그대로 보존한다(P17-3 원본 보존 원칙).</summary>
+    private static string ReadCorrelationId(string responseBody)
+    {
+        byte[] bytes = PosMessageEncoding.Value.GetBytes(responseBody);
+        // #9는 공통부에서 POSITION 35, 길이 12(공통부 정의는 3전문 동일 — PosCommonHeader 참고).
+        string raw = PosMessageEncoding.Value.GetString(bytes, 35, 12);
+        return raw.TrimEnd(' ');
     }
 
     private static string? ReadResponseFrame(NetworkStream stream, TimeSpan timeout)
