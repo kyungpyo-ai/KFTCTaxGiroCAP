@@ -24,7 +24,8 @@ namespace KFTCOneCAP.Wpf.Services.Payment;
 /// ProcessAsync(전문)
 ///  ├ 501008 → [알림창 PROCESSING] → VAN 중계 → 응답
 ///  ├ 800000 → [알림창 IC] → 무결성 선행 → 카드리딩 라운드 → BIN 채움 → [PROCESSING] → VAN 중계 → 응답
-///  └ 902614 → [알림창 IC] → 무결성 선행 → 카드리딩 라운드 → 7개 필드 채움 → [PROCESSING] → VAN 중계 → 응답
+///  └ 902614 → [알림창 IC] → 무결성 선행 → 카드리딩 라운드 → [알림창 PIN](Phase 18) → 7+1개 필드 채움
+///             → [PROCESSING] → VAN 중계 → 응답
 /// </code>
 ///
 /// <b>공통 부품은 그대로 재사용한다</b>(재구성 최대 리스크 관리 지점, P17-5) — <see
@@ -155,7 +156,8 @@ internal sealed class PaymentOrchestrator
         return await RunCardTransactionAsync(
             request, txId,
             amountFieldNumber: 15, // #15 납부세액
-            fillOneCapFields: (winner, cardData) =>
+            requiresPin: false, // 800000은 PIN 단계가 없다(Phase 18 확정 사항 1) — #51 필드 자체가 없음
+            fillOneCapFields: (winner, cardData, pin) =>
             {
                 string cardNumber = cardData.CardNumber;
                 if (cardNumber.Length < 8)
@@ -173,9 +175,10 @@ internal sealed class PaymentOrchestrator
     }
 
     /// <summary>
-    /// 902614 — 카드리딩(원캡 담당 7필드 채움) 후 중계. <c>#51</c>(암호화된 비밀번호 정보)은 Phase 17
-    /// 범위에서 space 스텁이다 — 실제 PIN 입력·채움은 Phase 18(development_plan.md P17 체크포인트 1
-    /// "P17-6에 넘긴 것" 참고).
+    /// 902614 — 카드리딩(원캡 담당 7필드 채움) → PIN 입력(Phase 18, <c>requiresPin: true</c>) → 중계.
+    /// <c>#51</c>(암호화된 비밀번호 정보)은 화면 키패드로 수집된 PIN(P18-4가 만든 통로)을
+    /// <see cref="PinFieldEncoder.ToTelegramValue"/>로 변환해 채운다(P18-5) — SEED 암호화가 확정되면
+    /// 그 메서드 본문만 바뀐다.
     /// </summary>
     private async Task<PosResponseTelegram> HandleCardApprovalAsync(PosRequestTelegram request, string txId)
     {
@@ -184,17 +187,24 @@ internal sealed class PaymentOrchestrator
         return await RunCardTransactionAsync(
             request, txId,
             amountFieldNumber: 29, // #29 총 납부 금액
-            fillOneCapFields: (winner, cardData) =>
+            requiresPin: true, // 902614만 PIN 단계를 거친다(Phase 18 확정 사항 1)
+            fillOneCapFields: (winner, cardData, pin) =>
             {
-                FillCardApprovalFields(request, cardData);
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 승인요청 필드 7종 채움 완료(#51은 Phase 17 space 스텁) — VAN 중계로");
+                if (pin == null)
+                {
+                    throw new InvalidOperationException(
+                        "902614(requiresPin: true) 흐름에서 PIN이 null임 — CollectPinAsync가 성공했을 때만 이 델리게이트에 도달해야 함");
+                }
+
+                FillCardApprovalFields(request, cardData, pin);
+                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 승인요청 필드 8종 채움 완료(#43~#46,#48,#50,#51,#53) — VAN 중계로");
                 return null;
             }).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// #43/#44/#45/#46/#48/#50/#53 7필드를 카드리딩 응답으로 채운다(<c>#51</c>은 Phase 18 몫이라
-    /// 손대지 않는다 — 스키마 생성 시 전체 space로 초기화돼 있으므로 이미 올바른 스텁 상태다).
+    /// #43/#44/#45/#46/#48/#50/#51/#53 8필드를 채운다 — #43~#46/#48/#50/#53 7필드는 카드리딩 응답으로,
+    /// #51은 화면 키패드로 수집된 PIN을 <see cref="PinFieldEncoder"/>로 변환해 채운다(Phase 18 P18-5).
     ///
     /// <b>필드 매핑 근거(2026-08-26/27, 두 SPEC 문서 사이에 명시적 대응표가 없어 <c>
     /// reader-pinpad-spec-expert</c> 조사 + 사용자 확정으로 정함)</b>:
@@ -211,6 +221,10 @@ internal sealed class PaymentOrchestrator
     /// <item><c>#48</c> 거래 입력 유형(AN1, 2/4/5) = <see cref="CardReadData.Wcc"/> 매핑(2026-08-27
     ///   사용자 확정): <c>I</c>(IC)→"5", <c>;</c>(Swipe)→"2", <c>P</c>(Pay-On)→"4". 그 외 값(RF/QR/
     ///   Key-IN 등, 이 결제 Flow가 다루는 IC/FALLBACK 범위 밖)은 예외.</item>
+    /// <item><c>#51</c> 암호화된 비밀번호 정보(ANS100) = 화면 키패드로 수집된 PIN 4자리를
+    ///   <see cref="PinFieldEncoder.ToTelegramValue"/>로 변환한 값(Phase 18 P18-5, SPEC SET 장소
+    ///   표기 모순은 development_plan.md Phase 18 "착수 전 확인이 필요한 것" #3 참고 — 사용자 확정으로
+    ///   원캡 담당). <b>이 필드 값은 어떤 로그에도 남기지 않는다.</b></item>
     /// <item><c>#53</c> EMV DATA(ANS604) = <c>"0600"</c>(4자리 고정 길이 서브필드, 항상 이 값) +
     ///   <see cref="CardReadData.EmvEncodedData"/>(가변길이, "EMV 인코딩 데이터") — 나머지는 space로
     ///   채워 총 604바이트를 맞춘다(2026-08-27 사용자 확정). 이 필드 자체가 "4바이트 길이 서브필드 +
@@ -218,7 +232,7 @@ internal sealed class PaymentOrchestrator
     ///   이 서브필드의 최대 용량(600)을 고정으로 적는다.</item>
     /// </list>
     /// </summary>
-    private static void FillCardApprovalFields(PosRequestTelegram request, CardReadData cardData)
+    private static void FillCardApprovalFields(PosRequestTelegram request, CardReadData cardData, string pin)
     {
         string readerAuthId = cardData.ReaderAuthId;
         if (readerAuthId.Length != 16)
@@ -237,6 +251,7 @@ internal sealed class PaymentOrchestrator
         request.Telegram.Write(46, cardData.EncryptedData);
         request.Telegram.Write(48, MapTransactionInputType(cardData.Wcc));
         request.Telegram.Write(50, "2"); // 신용카드 승인 인증방식 고정값(SPEC p.17)
+        request.Telegram.Write(51, PinFieldEncoder.ToTelegramValue(pin)); // 값 자체는 로그에 남기지 않는다
         request.Telegram.Write(53, EmvDataSubfieldLengthPrefix + cardData.EmvEncodedData);
     }
 
@@ -261,7 +276,8 @@ internal sealed class PaymentOrchestrator
     internal const string ProgramIdentifier = "KFTCTAXGIROCAP01";
 
     /// <summary>
-    /// 800000/902614가 공유하는 전체 흐름: 무결성 선행 → 알림창 IC → 카드리딩 라운드 → 필드 채움
+    /// 800000/902614가 공유하는 전체 흐름: 무결성 선행 → 알림창 IC → 카드리딩 라운드 →
+    /// (<paramref name="requiresPin"/>이면 PIN 입력, Phase 18 P18-4) → 필드 채움
     /// (<paramref name="fillOneCapFields"/>로 전문별 위임) → **VAN 중계까지**(P17-5 확정 사항 3 — 두
     /// 전문의 카드리딩 로직은 완전히 동일하다).
     ///
@@ -273,10 +289,16 @@ internal sealed class PaymentOrchestrator
     /// 실제 <c>PaymentNoticePresenter</c>는 그 호출을 "무시 + Warn 로그"로 처리하므로 **VAN 통신 중
     /// 화면이 사용자에게 전혀 보이지 않는** 결함이 됐다(PRD §4.10 위반). Phase 15/16이 원래 이 구조를
     /// 하나의 try/finally로 유지하고 있었고, Phase 17 재구성에서 분리하며 생긴 회귀다.
+    ///
+    /// <b>결과 확정(<c>Gate.TryClaim(FlowResult)</c>) 시점(Phase 18 P18-4 재배치)</b>: PIN 단계가 없으면
+    /// (800000) 카드리딩 성공 직후 그대로 확정한다(기존과 동일). PIN 단계가 있으면(902614) <see
+    /// cref="CollectPinAsync"/>가 취소/Timeout과 PIN 완료를 경합시킨 뒤 **PIN이 이긴 경우에만** 이
+    /// 메서드로 돌아와 확정한다 — 카드리딩이 끝난 순간부터 VAN 진입 직전까지 취소·ESC·Timeout이 계속
+    /// 동작해야 하기 때문이다(로드맵 확정 사항, PIN 입력 중에도 취소 가능해야 함).
     /// </summary>
     private async Task<PosResponseTelegram> RunCardTransactionAsync(
-        PosRequestTelegram request, string txId, int amountFieldNumber,
-        Func<IReaderEndpoint, CardReadData, PosResponseTelegram?> fillOneCapFields)
+        PosRequestTelegram request, string txId, int amountFieldNumber, bool requiresPin,
+        Func<IReaderEndpoint, CardReadData, string?, PosResponseTelegram?> fillOneCapFields)
     {
         // ===== 참여 후보 결정(§2.2.3) =====
         var settings = _loadSettings();
@@ -347,12 +369,27 @@ internal sealed class PaymentOrchestrator
             if (roundResult.EarlyFailureCode != null)
                 return PosResponseTelegram.Failure(request, roundResult.EarlyFailureCode);
 
+            // 902614만 여기서 PIN을 수집한다(Phase 18 P18-4) — 결과 확정은 PIN 대기가 끝난 뒤로
+            // 미뤄진다(아래 TryClaim). PIN 대기 중 취소/Timeout이 이기면 CollectPinAsync가 이미
+            // InterruptCode로 실패 응답을 만들어 돌려주므로 여기서는 그 값을 그대로 반환한다.
+            string? pin = null;
+            if (requiresPin)
+            {
+                PinCollectionResult pinResult = await CollectPinAsync(scope, deadline, txId).ConfigureAwait(false);
+                if (pinResult.EarlyFailureCode != null)
+                    return PosResponseTelegram.Failure(request, pinResult.EarlyFailureCode);
+
+                pin = pinResult.Pin;
+            }
+
             // VAN 진입 직전에 이 거래를 FlowResult로 확정한다(선착순 규칙이 VAN 경계에서도 지켜지는
-            // 지점 — 2025-08-25/2026-08-26 계승).
+            // 지점 — 2025-08-25/2026-08-26 계승). PIN 단계가 있는 902614는 이 확정 시점이 카드리딩
+            // 직후가 아니라 **PIN 입력 완료 후**로 옮겨졌다(Phase 18 P18-4) — 그래야 PIN 입력 중에도
+            // 취소·ESC·Timeout이 계속 유효하다.
             if (!scope.Gate.TryClaim(TransactionOutcomeReason.FlowResult))
             {
                 TransactionOutcomeReason reason = scope.Gate.ClaimedReason!.Value;
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 성공했으나 필드 채움 전 이미 확정됨({reason}) — 미진입");
+                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩(및 PIN 입력) 완료했으나 필드 채움 전 이미 확정됨({reason}) — 미진입");
                 roundResult.Winner?.SendInvalidationInit();
                 return PosResponseTelegram.Failure(request, InterruptCode(reason));
             }
@@ -361,7 +398,7 @@ internal sealed class PaymentOrchestrator
             // onCanceled가 이후에 불려도 TryClaim이 실패해 조용히 무시된다. 여기서는 구독만 끊는다.
             _presenter.Canceled -= onCanceled;
 
-            PosResponseTelegram? fieldFillFailure = fillOneCapFields(roundResult.Winner!, roundResult.CardData!);
+            PosResponseTelegram? fieldFillFailure = fillOneCapFields(roundResult.Winner!, roundResult.CardData!, pin);
             if (fieldFillFailure != null)
                 return fieldFillFailure;
 
@@ -379,6 +416,61 @@ internal sealed class PaymentOrchestrator
                 FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 결과가 확정되지 않은 채 거래가 종료됨(예외 경로로 추정) — 대기 중이던 리더기를 정리한다");
                 FireInterruptCleanup(TransactionOutcomeReason.FlowResult, scope);
             }
+        }
+    }
+
+    /// <summary>
+    /// Phase 18(P18-4) — 902614 카드리딩 성공 후 PIN 4자리를 화면 키패드로 수집한다. <see
+    /// cref="RunCardReadingRoundsAsync"/>의 <c>Task.WhenAny(broadcastTask, interruptTask)</c>와 정확히
+    /// 같은 대기 패턴을 쓴다 — 새 대기 규약을 만들지 않는다.
+    ///
+    /// <b>구독 순서가 이 메서드의 핵심이다</b>: <see cref="IPaymentNoticePresenter.PinEntered"/> 구독을
+    /// <see cref="IPaymentNoticePresenter.ChangeState"/>(PinEntry) 호출 <b>전에</b> 건다. Phase 15 Opus
+    /// 리뷰 H-1이 취소에서 정확히 이 실수를 잡았다(Show 뒤에 구독을 걸어 그 사이의 취소가 유실됨) —
+    /// 순서가 반대면 <c>FakePaymentNoticePresenter.FirePinEnteredSynchronouslyOnChangeState</c>처럼
+    /// <c>ChangeState</c> 안에서 즉시 발화하는 PIN 완료가 구독자 없이 허공에 사라진다.
+    ///
+    /// PIN 대기 중 취소/Timeout이 이기면 <see cref="InterruptCode"/>로 실패 코드를 만들어 돌려준다.
+    /// **리더기 초기화(0x60)는 여기서 별도로 보내지 않는다** — 취소/Timeout 확정은
+    /// <c>gate.TryClaim</c>이 성공하는 순간 <c>OnCanceled</c>/<c>MonitorDeadlineAsync</c>가 이미
+    /// <see cref="FireInterruptCleanup"/>으로 <c>scope.PendingParticipants</c>(카드리딩 라운드 참여자,
+    /// winner 포함) 전원에게 0x60을 예약해 뒀다(2026-08-27 체크포인트 리뷰 M-1 — 처음엔 여기서도
+    /// <c>winner.SendInvalidationInit()</c>을 불렀는데, <see cref="RunCardReadingRoundsAsync"/>의
+    /// 인터럽트 대기 경로(<c>firstCompleted == interruptTask</c>)가 의도적으로 이 호출을 하지 않는
+    /// 것과 같은 이유로 중복이었다 — 정리 책임은 <see cref="FireInterruptCleanup"/> 한 곳에만 둔다).
+    /// 구독 해제는 <c>finally</c>에서 항상 수행한다(<see cref="Canceled"/>와 같은 누수 검증 대상).
+    /// </summary>
+    private async Task<PinCollectionResult> CollectPinAsync(TransactionScope scope, PaymentDeadline deadline, string txId)
+    {
+        deadline.Extend(UserInputStepExtension);
+        FileLogger.Info($"[PaymentOrchestrator] txId={txId} PIN 입력 단계 진입 — 데드라인 {UserInputStepExtension.TotalSeconds:F0}초 연장(남은데드라인={deadline.Remaining.TotalSeconds:F1}s)");
+
+        var pinTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler<PinEnteredEventArgs> onPinEntered = (_, e) => pinTcs.TrySetResult(e.Pin);
+
+        try
+        {
+            _presenter.PinEntered += onPinEntered; // ★ ChangeState보다 반드시 먼저(위 클래스 주석 참고)
+            _presenter.ChangeState(PaymentNoticeState.PinEntry);
+
+            Task<string> pinTask = pinTcs.Task;
+            Task interruptTask = scope.Gate.Interrupted;
+            Task firstCompleted = await Task.WhenAny(pinTask, interruptTask).ConfigureAwait(false);
+
+            if (firstCompleted == interruptTask)
+            {
+                TransactionOutcomeReason reason = scope.Gate.ClaimedReason!.Value;
+                FileLogger.Info($"[PaymentOrchestrator] txId={txId} PIN 입력 대기 중 확정됨({reason}) — 즉시 실패 응답(리더기 초기화는 FireInterruptCleanup이 이미 예약함)");
+                return PinCollectionResult.Early(InterruptCode(reason));
+            }
+
+            string pin = await pinTask.ConfigureAwait(false);
+            FileLogger.Info($"[PaymentOrchestrator] txId={txId} PIN 4자리 입력 완료 — 통신중으로 진행(값은 로그에 남기지 않음)");
+            return PinCollectionResult.Success(pin);
+        }
+        finally
+        {
+            _presenter.PinEntered -= onPinEntered;
         }
     }
 
@@ -704,5 +796,25 @@ internal sealed class PaymentOrchestrator
         internal static CardReadRoundResult Early(string code) => new(code, null, null);
 
         internal static CardReadRoundResult Success(IReaderEndpoint winner, CardReadData cardData) => new(null, winner, cardData);
+    }
+
+    /// <summary>PIN 수집(<see cref="CollectPinAsync"/>)의 결과 — <see cref="EarlyFailureCode"/>가 있으면
+    /// PIN 대기 중 취소/Timeout이 이겼다는 뜻(즉시 실패 응답), 없으면 <see cref="Pin"/>에 입력된 4자리가
+    /// 담긴다. <see cref="CardReadRoundResult"/>와 정확히 같은 모양(Phase 18 P18-4).</summary>
+    private sealed class PinCollectionResult
+    {
+        private PinCollectionResult(string? earlyFailureCode, string? pin)
+        {
+            EarlyFailureCode = earlyFailureCode;
+            Pin = pin;
+        }
+
+        internal string? EarlyFailureCode { get; }
+
+        internal string? Pin { get; }
+
+        internal static PinCollectionResult Early(string code) => new(code, null);
+
+        internal static PinCollectionResult Success(string pin) => new(null, pin);
     }
 }

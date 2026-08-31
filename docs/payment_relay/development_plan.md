@@ -4915,3 +4915,1576 @@ H-3을 수정하면서 "PRD §4.10이 요구하는 '실패 시 Reader 초기화'
 **H-3으로 복원한 D0x(VAN 통신 실패) init은 그대로 둔다** — 다만 근거는 리더기 상태가 아니라(여기서도
 동일하다) PRD §4.10 문구를 문자 그대로 지키는 것 + fire-and-forget이라 비용이 없다는 것뿐임을 코드
 주석에 명시했다. 리더기 상태 관점에서 반드시 필요한 호출은 아니다.
+
+---
+
+# Phase 18 실행계획서 — 카드 비밀번호 입력 (알림창 4번째 상태)
+
+> 로드맵: `ROADMAP.md` "Phase 18 — 카드 비밀번호 입력". `902614` 승인 요청의 `#51 암호화된 비밀번호
+> 정보`를 채우기 위해, 카드리딩 성공 후 사용자에게 4자리 비밀번호를 입력받는 **알림창 4번째 상태**를
+> 만들고 결제 Flow에 끼워 넣는다.
+
+## 착수 전 전제 (2026-08-27 코드·SPEC 확인 완료)
+
+1. **`#51`은 이미 스키마에 있다** — `CardApprovalSchema` `new(51, "암호화된 비밀번호 정보",
+   PosFieldType.ANS, 100, 612, C)`. 담당(SET 장소)도 원캡(`C`)으로 등록돼 있고, Phase 17은 값을
+   쓰지 않아 전체 space 스텁 상태다. **스키마는 손대지 않는다** — `Telegram.Write(51, ...)` 한 줄이
+   늘어날 뿐이다.
+2. **데드라인 +30초 연장은 이미 일반 규칙이다** — `PaymentOrchestrator.UserInputStepExtension`
+   (30초 상수)이 FALLBACK/재요청 두 곳에서 `deadline.Extend(...)`로 쓰이고 있다. PIN 진입도 **같은
+   상수·같은 메서드**를 부른다. PIN 전용 분기·전용 상수를 새로 만들지 않는다(P16 설계 의도).
+3. **취소 가능 판정은 고칠 필요가 없다** — `PaymentNoticeViewModel.IsCancelAllowed`는
+   `!_canceled && State != VanProcessing`이므로, PIN 상태를 추가하면 **자동으로 취소 가능**해진다.
+4. **ESC 전역 훅·`Topmost`·홈 화면 비노출은 창 단위 속성**이라 상태를 하나 늘려도 그대로 적용된다
+   (Phase 13 P13-5). 창을 새로 만들지 않는 것이 이 방식의 핵심 이득이다.
+5. **참조 자산은 이미 커밋돼 있다** — `Assets/Images/PaymentNotice/pin입력.png`(레이아웃 시안),
+   `비밀번호 입력 아이콘.png`(카드+자물쇠, 배경 투명). 시안은 세로형(1087×1447)이고 알림창은
+   750×650 가로형이므로 **비율 그대로 옮기지 않는다** — 요소 구성만 따르고 배치는 창에 맞춰 실측한다.
+
+## 확정된 설계 결정
+
+1. **PIN 필요 여부는 전문 종별로만 구분한다 — `902614`만 받는다**(2026-08-27 사용자 확정).
+   `800000`(카드 정보 조회)은 카드리딩만 하고 PIN 없이 VAN으로 간다 — 애초에 `#51` 필드가 없다.
+   `501008`은 카드리딩 자체가 없다.
+
+   > **근거 조사 기록(2026-08-27, `pos-onecap-spec-expert`)**: "카드리딩 후 PIN이 필요 없는 경우"의
+   > 판단 근거가 SPEC에 있는지 전수 확인했으나 **없다**. `#50 신용카드 승인 인증방식`은 p.17에
+   > **`"2"`(신용카드 비밀번호 인증) 하나만** 정의돼 있고 다른 값의 정의가 없으며, `#49 납부카드
+   > 구분`도 `"0"`(개인카드) 고정이다. "서명/CVM/무서명/비밀번호 생략"이라는 표현은 문서 전체에
+   > 등장하지 않는다. 오히려 `#39` 설명 각주가 *"수납센터는 납부이용시스템(`"O"`)와 신용카드 승인
+   > 인증방식(**비밀번호 4자리**)을 결합하여 POS 납부채널을 구분함"* 이라고 적어, 이 채널이 비밀번호
+   > 4자리를 전제로 설계됐음을 보여준다. **리더기 쪽에도 근거가 없다** — 카드리딩 응답(`0x3B`)의
+   > 18개 필드 어디에도 "비밀번호 입력 필요 여부"가 없다(요청 `0x2B`의 `PinBlockInputRequired`는
+   > 우리가 리더기에 지시하는 값이고 현재 `"0"` 고정). 즉 **전문 종별 외에 조건 분기를 만들 근거가
+   > 문서상 존재하지 않는다** — 나중에 예외가 실제로 확인되면 그때 조건을 추가한다.
+
+   구조적으로는 `RunCardTransactionAsync`가 `800000`/`902614` 공용이므로, **PIN 단계는 선택적으로
+   끼우는 훅**으로 만든다(아래 P18-4).
+2. **알림창의 4번째 상태**로 만든다. `PaymentNoticeState.PinEntry` 열거값 하나에서 화면 전부를
+   파생시킨다(Phase 13 "상태 하나에서 파생" 원칙). **창 크기(750×650)는 바꾸지 않는다.**
+3. **입력 수단은 화면 키패드(마우스/터치)뿐이다.** 물리 키보드 숫자 입력은 넣지 않는다 — 알림창은
+   홈 화면을 활성화시키지 않으려고 포커스를 의도적으로 피하는 창이라(P13-3 `SuppressHomeWindowForeground`)
+   키보드 입력을 받으려면 ESC처럼 전역 훅이 또 하나 필요해지고, 실사용 대상은 터치 키오스크다.
+   (ESC 취소는 기존 전역 훅으로 계속 동작한다.)
+4. **입력 규칙**: 4칸 마스킹, 누른 숫자를 **잠깐 보여준 뒤 점으로 가림**(노출 시간 상수 1곳),
+   **4자리 완성 시 자동 진행**(확인 버튼 없음), **한 자리 삭제 버튼**(⌫) 있음, **재입력 기회 없음**.
+   PIN이 틀려 VAN이 거절하면 그 응답을 그대로 POS로 중계한다(relay 원칙, PRD §4.10).
+5. **암호화는 미정 — 교체 지점을 함수 1곳으로 격리한다.** 지금은 평문 4자리를 그대로 `#51`에 넣는다
+   (ANS 100 → 좌측정렬 + space 96). SEED 암호화가 확정되면 **그 함수 본문만** 바뀐다.
+6. **PIN은 로그에 절대 남기지 않는다.** 자릿수(`4자리 입력 완료`)만 기록한다. 값은 물론 마스킹된
+   형태로도 남기지 않는다.
+7. **`#50`은 계속 `"2"` 고정이다.** PIN을 실제로 받게 되어도 이 값은 바뀌지 않는다(SPEC p.17이
+   유일하게 정의한 값이며 조건부 서술이 없음).
+
+## 이 Phase에서 손대지 않는 것 (범위 밖)
+
+- **전문 스키마·코덱·라우팅**(`Protocol/Pos/` 전체) — 전제 1. `Write(51, ...)` 호출만 추가된다.
+- **`Services/Reader/`·`Protocol/Reader/`** — PIN은 핀패드가 아니라 **화면 키패드**로 받는다.
+  리더기 `Pinpad_SendCommand` 계열은 이번 범위가 아니다.
+- **취소/Timeout 경합 게이트의 구조**(`TransactionOutcomeGate`) — 클래스 자체는 그대로다.
+  바뀌는 것은 `PaymentOrchestrator`가 **언제 `TryClaim`을 부르는가**(순서)뿐이다(P18-4).
+- **실제 VAN 호출** — Phase 20.
+
+---
+
+## P18-1. 상태 추가 + 제어 계약 확장 ★
+
+**먼저 이것부터.** 화면과 Flow가 만나는 계약이라, 여기가 흔들리면 뒤가 전부 흔들린다.
+
+### 구현할 것
+
+- `PaymentNoticeState`에 `PinEntry` 추가(XML 주석에 "902614 전용, 카드리딩 성공 후" 명시).
+- `IPaymentNoticePresenter`에 **PIN 입력 완료 통지**를 추가한다:
+
+      /// PIN 4자리가 입력 완료됐을 때 정확히 한 번 통지된다(취소와 같은 규칙).
+      event EventHandler<PinEnteredEventArgs>? PinEntered;
+
+  `PinEnteredEventArgs`는 `Services/Payment/`에 두고 `string Pin` 하나만 갖는다(WPF 타입 없음).
+
+  **`Task<string?> RequestPinAsync(CancellationToken)` 방식을 쓰지 않는 이유**: 이 인터페이스는
+  이미 취소를 `CancellationToken`이 아니라 **이벤트**로 통지하도록 확정돼 있고(그 판단 근거가
+  인터페이스 주석에 남아 있다), 취소·Timeout·PIN 완료의 3자 경합은 `TransactionOutcomeGate`가
+  이미 조정하고 있다. 같은 자리에 두 번째 비동기 규약을 들이면 "결과를 확정하는 주체"가 둘이 된다.
+- `FakePaymentNoticePresenter`에 `FirePinEntered(string pin)` + `PinEnteredSubscriberCount` 추가
+  (`FireCanceled`/`CanceledSubscriberCount`와 정확히 같은 모양 — 구독 해제 누수 검증까지 동일하게).
+
+### 완료 조건
+
+- [x] 빌드 성공. `IPaymentNoticePresenter` 구현체(실제/Fake)가 모두 새 이벤트를 갖는다.
+- [x] `PaymentNoticeState`를 `switch`하는 기존 지점(`ApplyText`/`ConfigureOverlay`/`ConfigureCard`/
+      `PaymentNoticeBackgroundSource`)을 전수 확인한다 — `_ =>` default가 있는 곳에서 PinEntry가
+      엉뚱한 화면(카드 이미지·화살표)으로 조용히 새지 않는지 눈으로 본다.
+
+---
+
+## P18-2. PIN 입력 화면 레이아웃
+
+`Assets/Images/PaymentNotice/pin입력.png` 시안의 **요소 구성**을 따른다(배치는 750×650에 맞춰 실측):
+
+- 상단: 카드+자물쇠 아이콘(`비밀번호 입력 아이콘.png`, 배경 투명)
+- 문구 2줄: `카드 비밀번호 4자리를 입력해 주세요.` / `Please enter your 4-digit card PIN`
+  → **기존 `TextPanelA/B` 크로스페이드 경로를 그대로 쓴다**(`ApplyText`에 분기 추가). 문구 전용
+  레이어를 새로 만들지 않는다.
+- PIN 4칸: 미입력 / 입력됨 / **현재 입력 위치 강조** 3가지 시각 상태
+- 키패드 3×4: `1~9` / `⌫`(삭제) / `0` / 빈칸
+- 하단: 기존 `CancelButton` 그대로 재사용
+
+### 구현 메모
+
+- PIN 전용 요소는 **하나의 `Grid`(`PinPanel`)로 묶어** Canvas 위에 얹고, `PinEntry` 상태에서만
+  `Visible`로 만든다. 리더기/원판/카드/화살표 레이어는 이 상태에서 전부 숨긴다(리더기 그림이
+  보일 이유가 없다).
+- 진입 전환은 기존 방식(문구 크로스페이드 + 오버레이 페이드아웃→페이드인)을 그대로 탄다.
+- 키패드 버튼 스타일은 기존 리소스(`ReaderSecondaryButtonStyle` 계열)를 재사용하되, 터치 타겟이
+  충분한지 실측으로 확인한다.
+
+### 완료 조건
+
+- [x] 앱 실행 → PIN 상태로 띄워 **스크린샷으로 시안과 대조**(csharp-wpf-developer 담당).
+- [x] 750×650 안에서 잘리거나 겹치는 요소가 없다. 특히 **아이콘 + 문구 2줄 + PIN 4칸 + 키패드 4행 +
+      취소 버튼의 세로 합계**를 실측한다(시안이 세로형이라 그대로 옮기면 넘친다).
+- [x] IC ↔ PIN ↔ 통신중 전환이 기존 애니메이션 규칙대로 자연스럽게 이어진다(잔상·깜빡임 없음).
+
+**구현 완료(2026-08-27)**: `Views/PaymentNoticeWindow.xaml`에 `PinPanel`(Grid, `Panel.ZIndex="20"`)을
+Canvas 위에 얹었다 — 아이콘(`PinIconImage`, 76x76, Top=14) → PIN 4칸(`PinDigitBox1~4`+내부
+`PinDigitDot1~4` Ellipse, 54x54, Top=186, 기본값 "1번째 칸 파란 보더로 강조·미입력") → 3x4 키패드
+(`UniformGrid` `PinKeypad`, 500x260, Top=268, `PinButton1~9`/`PinButtonBackspace`/`PinButton0`+빈
+`Grid` 자리, `PinKeypadButtonStyle`). 문구는 기존 `TextPanelA/B` 크로스페이드를 재사용하되, PIN 상태의
+아이콘과 겹치지 않도록 `PaymentNoticeWindow.xaml.cs`에 `DefaultTextTop`(38)/`PinEntryTextTop`(100) 두
+상수를 추가해 `ApplyState`(non-animate/animate 두 경로 모두)에서 `Canvas.SetTop`으로 상태별 위치를
+분기했다. `CancelButton`은 새로 만들지 않고 기존 것 그대로 재사용(변경 없음).
+
+**실측(750x650 좌표계, 스크린샷 대조 완료)**: 아이콘 Top=14~90 → 문구(PinEntryTextTop=100) 약
+100~164 → PIN 4칸 186~240 → 키패드 268~528 → 취소 버튼 Top=586(기존 고정값, 변경 없음). 키패드
+바닥(528)과 취소 버튼 상단(586) 사이 62px 여유, 아이콘 상단(14) 위 14px 여유 — 잘리거나 겹치는 요소
+없음을 스크린샷으로 확인(시안은 세로 1447px이지만 750x650 예산 안에 아이콘+문구+PIN 4칸+키패드 4행
+합계가 약 512px로 들어와 그대로 옮기지 않고 재실측한 결과).
+
+**전환 검증**: `PlateImage`/`ReaderImage`(IC/FALLBACK/PROCESSING 3개 상태 공용, 상시 표시 레이어)를
+숨기지 않으면 `PinPanel`이 투명 배경이라 리더기 원판/몸통 그림이 키패드 뒤로 비쳐 보이는 문제를
+실측으로 발견(1차 스크린샷에서 키패드 뒤로 파란 원판/화살표가 겹쳐 보임) — `ConfigurePinPanel`에서
+`PlateImage`/`ReaderImage`의 `Visibility`를 상태에 따라 함께 토글하도록 수정해 해결했다(전역 배경색
+`Border`로 덮는 방식은 시도했다가 텍스트까지 가려서 폐기, 대신 근본 원인인 두 레이어의 Visibility를
+직접 제어). IC→PIN→FALLBACK→PIN→IC 4상태 임시 순환(테스트 후 3상태로 원복)으로 실기 전환을 확인 —
+잔상·깜빡임 없이 자연스럽게 이어짐. `App.xaml.cs`에 검증용 진입점 `--notice-pin-test`를 추가했다
+(`--notice-van-processing-test`와 같은 패턴, State를 PinEntry로 고정해 띄움 — 영구 유지, 데모 4상태
+순환은 유지하지 않음).
+
+---
+
+## P18-3. 입력 로직 (ViewModel)
+
+`PaymentNoticeViewModel`에 PIN 상태를 추가한다. **WPF 타입은 여전히 쓰지 않는다**(P7-3 원칙 —
+`Visibility` 등은 View/컨버터가 파생).
+
+### 구현할 것
+
+- `PinLength`(입력된 자릿수), `RevealedDigit`(잠깐 보여줄 숫자, 없으면 `null`), `PinDigitCommand`,
+  `PinBackspaceCommand`.
+- **잠깐 노출 후 마스킹**: 노출 시간 상수 1곳(`PinRevealDuration`, 초기값 600ms 제안).
+  타이머는 **반드시 창이 닫힐 때 정지**한다 — Phase 13 Opus 리뷰 H-1(데모 `DispatcherTimer`가
+  창을 닫아도 계속 발화하며 창/뷰모델을 붙들던 누수)과 **완전히 같은 종류의 함정**이다.
+- **4자리 완성 시 자동 진행**: 마지막 자리가 채워진 것이 화면에 보이도록 짧은 지연
+  (`PinCompleteDelay`, 초기값 200ms 제안) 후 `PinEntered`를 **정확히 1회** 발화한다.
+  이후 추가 입력은 무시한다(연타 방어 — 취소의 `_canceled` sticky 플래그와 같은 방식).
+- **거래 간 잔존 금지**: `Presenter.Show`가 매번 새 ViewModel을 만들므로 구조적으로는 안전하지만,
+  `Close` 경로에서 PIN 문자열/자릿수를 명시적으로 비운다.
+
+> **`string`은 메모리에서 0으로 덮어쓸 수 없다**(불변 + 인터닝). PIN을 `char[]`로 들고 다니면
+> 지울 수는 있지만 WPF 바인딩·이벤트 인자·`PosField` 인코딩 경로가 전부 `string`이라 중간에 복사본이
+> 생겨 실익이 없다. **참조를 즉시 끊는 것까지가 이 Phase의 폐기 수준**이며, 이를 PRD §8.4에
+> 명시한다(로그 금지가 실질적인 방어선이다).
+
+### 완료 조건
+
+- [x] 1~9/0 입력 시 해당 칸이 숫자로 잠깐 보였다가 점으로 바뀐다.
+- [x] ⌫로 한 자리씩 지워지고, 0자리에서 눌러도 예외가 나지 않는다.
+- [x] 4자리 완성 시 자동 진행되며, **연타해도 `PinEntered`는 1회만** 발화한다.
+- [x] 창을 닫은 뒤 **10초간 타이머가 발화하지 않는다**(P13 H-1과 동일한 방식으로 실측 확인).
+
+**구현 완료(2026-08-27)**: `PaymentNoticeViewModel`에 `PinLength`(int)/`RevealedDigit`(string?)/
+`PinDigitCommand`/`PinBackspaceCommand`를 추가했다(여전히 WPF 타입 없음). 노출→마스킹은
+`Task.Delay(PinRevealDurationMs=600ms, _pinCts.Token)` + "숫자를 누를 때마다 증가하는 세대 번호"로
+구현했다 — 값 비교가 아니라 세대 번호 비교라 같은 숫자를 연속으로 눌러도 오작동하지 않는다. 4자리
+완성 시 `_pinCompleted` sticky 플래그를 **즉시**(지연 전) 세워 이후 숫자/삭제 입력을 전부 무시하고,
+`Task.Delay(PinCompleteDelayMs=200ms, _pinCts.Token)` 후 `RaisePinEnteredEvent`를 1회만 호출한다.
+타이머 정리는 `PaymentDeadline`과 같은 `CancellationTokenSource` 방식을 택했다(`DispatcherTimer`
+미사용) — ViewModel에 `internal void StopPinTimers()`를 추가하고, `PaymentNoticeWindow_Closed`(취소/
+완료/X/Alt+F4 어느 경로든 모이는 지점)에서 호출해 진행 중인 `Task.Delay`를 즉시 취소한다. PIN 4칸의
+시각 표현(점/숫자 노출/현재 위치 강조)은 `PaymentNoticeWindow.xaml.cs`의 `UpdatePinDigitsDisplay()`가
+`PinLength`/`RevealedDigit` `PropertyChanged`를 구독해 파생시킨다(P7-3 "WPF 타입은 View가 파생" 원칙
+유지) — 이를 위해 XAML의 PIN 4칸 각 `Border`에 숫자 노출용 `TextBlock`(P18-2에는 없었음)을 추가했다.
+키패드 버튼(`PinButton1~9`/`0`/`PinButtonBackspace`)에 `Command="{Binding PinDigitCommand}"
+CommandParameter="N"`/`Command="{Binding PinBackspaceCommand}"`를 배선했다. 로그는 `"PIN 4자리 입력
+완료"`만 남기고 값은 어디에도 남기지 않는다(설계 결정 6). `--notice-pin-test`로 실측: 초기 상태(1번째
+칸 강조) → "1" 클릭 후 즉시 스크린샷에서 이미 마스킹(점)으로 전환된 것 확인(600ms 지연을 왕복
+스크린샷 시간이 넘김 — 노출 자체는 로그/코드 경로로 별도 확인) → 4자리(1234) 입력 후 로그에
+`PIN 4자리 입력 완료`가 **정확히 1줄만** 남음(4자리 완성 후 5·6·⌫를 추가로 클릭했음에도 로그가 늘지
+않아 연타 방어 확인) → 0자리에서 ⌫ 클릭해도 예외 없음 → 새 창에서 "1" 클릭 직후(노출 타이머 진행
+중) 창을 닫자 로그에 예외/경고가 남지 않았고 `tasklist`로 프로세스가 완전히 종료된 것을 확인(타이머가
+Dispatcher/프로세스를 붙들지 않음 — P13 H-1과 같은 누수 없음).
+
+---
+
+## P18-4. Flow 연결 — 게이트/데드라인 순서 재배치 ★ (이번 Phase 최대 위험 구간)
+
+### 왜 위험한가
+
+현재 `RunCardTransactionAsync`는 **카드리딩 성공 직후** 이 순서로 진행한다:
+
+    카드리딩 성공 → Gate.TryClaim(FlowResult)          ← 여기서 결과 확정
+                  → _presenter.Canceled -= onCanceled  ← 여기서 취소 구독 해제
+                  → fillOneCapFields(...)
+                  → RelayToVanAsync(...)
+
+즉 **카드리딩이 끝난 순간부터 취소가 막힌다.** PIN 입력은 그 뒤에 오는데 **취소·ESC·Timeout이
+모두 동작해야 하므로**(로드맵 확정 사항), 확정 시점을 **PIN 입력 완료 후 / VAN 진입 직전**으로
+옮겨야 한다. Phase 16이 세운 "결과는 정확히 한 번만 확정된다" 불변식을 건드리는 **유일한 지점**이다.
+
+### 목표 순서 (902614)
+
+    카드리딩 성공
+      → deadline.Extend(UserInputStepExtension)       // 기존 일반 규칙 경로 그대로
+      → PinEntered 구독                                // ★ ChangeState보다 먼저
+      → _presenter.ChangeState(PinEntry)
+      → Task.WhenAny(pinTask, gate.Interrupted)        // 카드리딩 라운드와 같은 대기 패턴
+          · 취소/Timeout이 이기면 → winner.SendInvalidationInit() 후 InterruptCode(reason)로 실패 응답
+          · PIN이 이기면 → 계속
+      → Gate.TryClaim(FlowResult)                      // 확정은 여기로 이동
+      → _presenter.Canceled -= onCanceled
+      → fillOneCapFields(...) + #51 채움
+      → RelayToVanAsync(...)                           // 알림창은 여전히 열린 채(H-2 규칙 유지)
+
+`800000`은 PIN 단계가 없으므로 **기존 순서 그대로**다 — PIN 단계를 `RunCardTransactionAsync`에
+**선택적 훅**으로 넣고(예: `Func<Task<string?>>? collectPin`, `null`이면 통째로 건너뜀),
+`902614` 핸들러만 채운다.
+
+### 반드시 지킬 것
+
+- **`Task.WhenAny(pinTask, gate.Interrupted)` 패턴을 그대로 쓴다** — `RunCardReadingRoundsAsync`가
+  이미 검증한 형태다. 새로운 대기 규약을 만들지 않는다.
+- **PIN 이벤트 구독은 `ChangeState(PinEntry)` 호출 *전에* 건다.** Phase 15 Opus 리뷰 H-1이 취소에서
+  정확히 이 실수를 잡았다(Show 뒤에 구독을 걸어 그 사이의 취소가 유실됨). `FakePaymentNoticePresenter`
+  의 `FireCanceledSynchronouslyOnShow`에 대응하는 **PIN판 즉시 발화 플래그**로 회귀 검증한다.
+- **PIN 대기 중 취소가 이기면 리더기를 초기화한다**(`winner.SendInvalidationInit()`) — 카드가 이미
+  읽혀 리더기가 그 거래 상태를 들고 있으므로, 기존 "확정에 진 경로" 처리와 동일하다.
+- **구독 해제는 `finally`에서도 반드시** — `Canceled`와 같은 취급(누수 검증 대상).
+
+### 완료 조건
+
+- [x] `902614` 정상 흐름: IC → PIN → 통신중 순으로 알림창 상태가 바뀐다
+      (`FakePresenter.History` 순서로 단언 — H-2 회귀 방지와 같은 방식).
+- [x] `800000` 흐름에 PIN 단계가 **끼어들지 않는다**(History에 `PinEntry`가 없다).
+- [x] PIN 입력 중 취소 → `E01`, Timeout → `E02`가 **각각 정확히 1건만** 확정된다.
+- [x] 데드라인 연장이 로그로 확인된다(`남은데드라인` 값이 +30초 된 뒤 VAN으로 진입).
+- [x] 거래 종료 후 `CanceledSubscriberCount == 0 && PinEnteredSubscriberCount == 0`.
+
+**구현 완료(2026-08-27)**: `RunCardTransactionAsync`에 `bool requiresPin` 파라미터를 추가하고(800000은
+`false`, 902614는 `true`), `fillOneCapFields` 시그니처를 `Func<IReaderEndpoint, CardReadData, string?,
+PosResponseTelegram?>`로 확장해 PIN 값을 세 번째 인자로 전달하는 통로만 만들었다(`#51`에 실제로 쓰는
+것은 여전히 P18-5 몫이라 `HandleCardApprovalAsync`의 델리게이트는 `pin`을 받되 아직 쓰지 않는다).
+새 private 메서드 `CollectPinAsync(scope, deadline, winner, txId)`를 `RunCardReadingRoundsAsync`와
+정확히 같은 `Task.WhenAny(pinTask, gate.Interrupted)` 대기 패턴으로 작성했고, `PinEntered` 구독을
+`ChangeState(PinEntry)` 호출 **전에** 걸어(P18-4 핵심 규칙) `finally`에서 항상 해제한다. `Gate.TryClaim
+(FlowResult)` 호출 지점을 카드리딩 직후에서 **PIN 수집 완료 후**로 옮겼다(902614만 실질적으로 이동,
+800000은 `requiresPin=false`라 기존과 동일). PIN 대기 중 취소/Timeout이 이기면 `winner.
+SendInvalidationInit()` 후 기존 `InterruptCode(reason)`을 그대로 재사용해 실패 응답을 만든다(새 코드
+없음, E01/E02 그대로).
+
+`FakePaymentNoticePresenter`에 `FireCanceledSynchronouslyOnShow`의 PIN판인
+`FirePinEnteredSynchronouslyOnChangeState`(+ `PinToFireSynchronously`)를 추가했다 — `ChangeState`가
+`PinEntry` 상태를 기록한 직후 즉시 `PinEntered`를 발화해 "구독이 `ChangeState`보다 먼저 걸렸는지"를
+증명한다.
+
+**검증**: `PaymentFlowTestScenarios`에 시나리오 8~12(902614 IC→PIN→통신중 순서/구독 누수, 800000 PIN
+미진입, PIN 대기 중 취소→E01, PIN 대기 중 Timeout→E02 + 데드라인 +30초 로그 확인, 즉시발화로 구독
+순서 증명)를 추가해 `--payment-flow-test`로 40건 전부 통과(실패 0건) 확인했다. 기존 시나리오
+3/5/7은 902614가 이제 PIN 단계를 거치므로 `FirePinEnteredSynchronouslyOnChangeState = true`로 PIN을
+빠르게 통과시키도록 수정했다(수정 전엔 PIN을 주지 않아 실제 35초 Timeout까지 블로킹되며 실패하는
+회귀가 재현됨 — 원인 확인 후 수정). `dotnet build` 경고 0/오류 0.
+
+---
+
+## Phase 18 체크포인트 1 — Opus 검증 리뷰 및 후속 수정 (2026-08-27)
+
+P18-1~P18-4(가장 위험한 게이트 재배치 포함) 완료 직후 코드를 전수 리뷰했다.
+
+### M-1. PIN 대기 중 취소/Timeout 시 리더기에 0x60이 두 번 나간다 (확정·수정)
+
+`CollectPinAsync`의 인터럽트 경로가 `winner.SendInvalidationInit()`을 직접 불렀는데, `gate.Interrupted`가
+완료된 시점(=`TryClaim` 성공)엔 `OnCanceled`/`MonitorDeadlineAsync`가 이미 `FireInterruptCleanup`으로
+`scope.PendingParticipants`(카드리딩 라운드 참여자, winner 포함) 전원에게 0x60을 예약해 뒀으므로 순수
+중복이었다. 구조적으로 같은 자리인 `RunCardReadingRoundsAsync`의 라운드 대기 인터럽트 경로는 정리 책임을
+`FireInterruptCleanup` 한 곳에 두려고 의도적으로 이 호출을 하지 않는데, P18-4가 그 패턴을 깼다.
+
+실측 로그로도 확인됨(수정 전): `UserCanceled 확정 — 대기 중인 참여 리더기 1대에 초기화(0x60) 전송 예약`과
+`PIN 입력 대기 중 확정됨(UserCanceled) — 리더기 초기화 후 즉시 실패 응답`이 같은 취소에 대해 겹쳐 찍힘.
+
+Phase 17에서 "거래 종료 시 무조건 초기화"를 기각한 근거가 정확히 "트레일링 0x60이 다음 거래의 0x2B와
+겹칠 위험"이었는데, PIN 입력은 최대 35초짜리 의도된 사용자 대기 구간이 됐으므로 이 중복이 같은 위험을
+다시 만든다는 점에서 가볍지 않다고 판단해 확정 처리했다.
+
+**수정**: `CollectPinAsync`에서 `winner.SendInvalidationInit()` 호출 제거, 그 결과 `winner` 매개변수도
+제거(호출부 `RunCardTransactionAsync` 동반 수정). 로그 문구를 "리더기 초기화는 FireInterruptCleanup이
+이미 예약함"으로 정정. 클래스 주석에 이번 리뷰 배경을 남김.
+
+이 결함은 계획서(P18-4 "반드시 지킬 것")가 `winner.SendInvalidationInit()`을 명시적으로 지시한 결과다 —
+계획 단계의 설계 오류이지 구현 오류가 아니다.
+
+### L-1. `PaymentNoticeViewModel._pinCts`를 Cancel만 하고 Dispose하지 않음 (확정·수정)
+
+Phase 16 체크포인트 리뷰 M-1("Cancel만 하고 Dispose를 빠뜨리면 장시간 운용에서 그대로 누수")과 같은
+패턴 — `PaymentDeadline`은 이미 Cancel+Dispose 쌍으로 이 문제를 풀어 뒀는데, `PaymentNoticeViewModel`
+(거래마다 `Presenter.Show`가 새로 만드는 것도 `PaymentDeadline`과 같은 수명 프로필)은 `StopPinTimers`가
+`Cancel()`만 했다.
+
+**수정**: `_pinTimersStopped` 플래그로 가드하고 `Cancel()` 뒤 `Dispose()`까지 호출하도록 변경. 이
+메서드는 항상 UI 스레드(창의 `Closed` 이벤트)에서만 호출되므로 `PaymentDeadline`과 달리 락은 필요
+없다(이 클래스의 다른 sticky 플래그들과 같은 전제).
+
+### 재검증
+
+`dotnet build` 경고 0/오류 0. `--payment-flow-test` 40건 재실행 — 전부 통과(실패 0건). 취소/Timeout
+시나리오의 로그를 직접 대조해 "초기화(0x60) 전송 예약" 로그가 각 케이스당 정확히 1건만 남는 것과 수정된
+로그 문구가 실제로 찍히는 것을 확인했다.
+
+---
+
+## P18-5. `#51` 채움 + 암호화 교체 지점 격리
+
+### 구현할 것
+
+- `Services/Payment/PinFieldEncoder.cs`(신규) — **이 파일 하나가 교체 지점이다**:
+
+      /// 입력받은 4자리 PIN을 #51(암호화된 비밀번호 정보, ANS 100)에 넣을 값으로 바꾼다.
+      /// ★ SEED 암호화 방식이 확정되면 이 메서드 본문만 바뀐다(2026-08-27 미정, PRD §10).
+      /// 지금은 평문 4자리를 그대로 돌려주고, space 96 패딩은 PosField.Pad가 처리한다.
+      internal static string ToTelegramValue(string pin)
+
+- `FillCardApprovalFields`에 `request.Telegram.Write(51, PinFieldEncoder.ToTelegramValue(pin));` 추가.
+  기존 7필드 채움 주석의 "`#51`은 Phase 18 몫이라 손대지 않는다"를 **실제 매핑 설명으로 교체**한다.
+- 로그 문구도 정정한다 — 현재 `"승인요청 필드 7종 채움 완료(#51은 Phase 17 space 스텁)"`.
+
+### 완료 조건
+
+- [x] `902614` 요청 전문의 POSITION 612~711에 PIN 4자리 + space 96이 정확히 들어간다(hex 덤프 확인).
+- [x] **`#51` 값이 어떤 로그에도 나타나지 않는다**(로그 파일 전문 검색으로 확인).
+- [x] 인접 필드가 밀리지 않았다 — `#50`(611), `#52`(712), `#53`(724)를 함께 확인.
+
+**구현 완료(2026-08-27)**: `Services/Payment/PinFieldEncoder.cs`(신규) `ToTelegramValue(string pin)`가
+유일한 교체 지점 — 지금은 4자리 숫자 검증(길이/숫자 여부, 값 자체는 예외 메시지에도 안 남김) 후 평문
+그대로 반환한다. `FillCardApprovalFields`에 `string pin` 매개변수를 추가하고
+`request.Telegram.Write(51, PinFieldEncoder.ToTelegramValue(pin));`을 추가했다(7필드 → 8필드). 호출부
+`HandleCardApprovalAsync`의 `fillOneCapFields`는 `pin`이 `null`이면(902614는 `requiresPin: true`라
+있으면 안 됨) 예외를 던지도록 방어적으로 처리한 뒤 전달한다. 로그 문구를 `"승인요청 필드 8종 채움
+완료(#43~#46,#48,#50,#51,#53) — VAN 중계로"`로 정정(PIN 값 자체는 이 로그를 포함해 어디에도 남기지
+않음, 자릿수조차 언급 안 함). `FillCardApprovalFields`의 클래스 주석과 필드 매핑 근거 목록에 `#51`
+항목을 추가했다.
+
+**검증**: `PaymentFlowTestScenarios` 시나리오 3(`902614: #51 = 화면에서 입력한 PIN 그대로`)과 시나리오
+8(`902614+PIN`)에 `#51` 단언을 추가했다 — `Read(51)`은 ANS 타입 우측 space 패딩을 제거해 돌려주므로
+(`PosField.Trim`) trim된 값을 단언하고, `PosTelegram.ToBody()`로 얻은 원본 바이트에서 POSITION
+612~711을 직접 슬라이스해 `PIN + space 96`인지(hex 덤프 대응) 확인했다. 인접 필드는 raw POSITION
+611(`#50`, `"2"` 고정값 유지)과 712~723(`#52`, 원캡 미담당이라 공백 12칸 유지)을 함께 확인해 밀리지
+않았음을 검증했다. **Check 이름에도 PIN 리터럴을 직접 적지 않도록**(완료 조건 "어떤 로그에도 나타나지
+않는다"를 테스트 하네스 자신의 로그에도 그대로 적용) `presenter.PinToFireSynchronously` 변수를 참조하는
+식으로 작성했다 — 처음엔 `"PIN(1234)"`처럼 리터럴을 이름에 박아 실패 로그에 PIN이 그대로 노출되는 실수를
+했다가(1차 실행에서 발견) 수정했다. `dotnet build` 경고 0/오류 0, `--payment-flow-test` 46건 전부 통과
+(기존 40건 + 이번에 추가한 6건 단언, 실패 0건). 로그 파일 전문(`%LOCALAPPDATA%\KFTCTaxGiroCAP\logs\
+2026-08-27.log`)에서 이번 최종 실행 구간(라인 440~576)에 테스트 PIN 문자열("1234"/"5678")이 전혀
+등장하지 않는 것을 grep으로 확인했다.
+
+---
+
+## P18-6. 검증 하네스 시나리오 추가
+
+`PaymentFlowTestScenarios`에 추가(기존 7개 뒤에 이어서). **P18-4/P18-5 구현 과정에서 이미 추가·검증
+완료됨** — 계획 시점엔 4개(8~11)로 나눴으나 실제 구현은 5개(8~12)로, "PIN 정상 진행 + History 순서"와
+"`#51` 값 단언"이 시나리오 8 하나에 합쳐지고 "즉시발화 구독순서 증명"이 시나리오 12로 별도 배정됐다:
+
+- [x] `Scenario8_CardApprovalCollectsPinAndOrdersHistory` — PIN까지 정상 진행, IC→PIN→통신중 History
+      순서 단언 + (P18-5에서 추가) `#51` 값(trim/raw 양쪽) + 인접 `#50`/`#52` 안 밀림 확인
+- [x] `Scenario9_CardInfoInquirySkipsPinStep` — `800000`에 PIN 단계가 없음(전문 종별 구분 회귀 방지)
+- [x] `Scenario10_CancelDuringPinEntryYieldsE01` — PIN 대기 중 취소 1건 확정(E01) + 리더기 초기화
+      호출 확인 + `PinEntered` 구독 누수 없음
+- [x] `Scenario11_TimeoutDuringPinEntryYieldsE02` — PIN 대기 중 Timeout 1건 확정(E02) + 데드라인 +30초
+      로그 확인 + 리더기 초기화 확인
+- [x] `Scenario12_PinEnteredBeforeSubscriptionIsNotLost` — 즉시 발화 플래그로 "구독 → ChangeState"
+      순서 증명
+
+**완료 조건**: 기존 7개 시나리오가 **전부 그대로 통과**하고(회귀 없음) 새 5개가 통과한다 —
+`--payment-flow-test` 46건 전부 통과(실패 0건), 2026-08-27 재검증(체크포인트 1 수정 반영 후, 코드
+리뷰 담당자가 직접 재실행) 확인.
+
+---
+
+## P18-7. 문서 갱신
+
+- [x] `PRD.md` §5.2에 PIN 상태(4번째 화면) 추가, §4에 PIN 단계와 데드라인 연장 반영(신설 §4.12,
+      §4.8/§4.9 문구 정정)
+- [x] `PRD.md` §8.4에 PIN 폐기 규칙 추가(카드 데이터와 동일 취급 + **로그 금지**, `string` 한계 명시)
+- [x] `PRD.md` §10 "`#51` SEED 암호화 방식 미정"을 **교체 지점 = `PinFieldEncoder.ToTelegramValue`
+      한 곳**이라고 명시해 남긴다(열린 항목 유지, 영향 범위만 확정) — §10.1 표에도 반영
+- [x] `ROADMAP.md` Phase 18 작업 항목 체크 + 완료 요약(실장비 검증 대기 상태를 명시, 추측으로 완료
+      처리하지 않음)
+
+---
+
+## Phase 18 최종 검증 — Opus 리뷰 및 후속 수정 (2026-08-27)
+
+P18-1~P18-7 전체를 다시 훑었다(체크포인트 1은 P18-1~P18-4만 봤으므로 P18-5~P18-7이 첫 리뷰 대상).
+Phase 17 최종 검증에서 H-3을 잡아냈던 방식(이전 커밋 대비 diff로 "조용히 사라지거나 새로 생긴 것" 확인)을
+같이 적용했다.
+
+### H-1. PIN이 실패 응답에 실려 POS로 되돌아감 (확정·수정) ★ 이번 리뷰 최대 결함
+
+`PosResponseTelegram.Failure(PosRequestTelegram, string)`은 **요청 전문을 `Clone`한 뒤 `#3`/`#6`/`#7`/`#8`
+만 덮어쓴다**(P17-3에서 확정한 설계 — 서버가 채우는 필드는 어차피 공백이라 clone해도 어색하지 않다는
+전제였다). Phase 18이 `#51`에 PIN을 채우면서 이 전제가 깨졌다: **PIN을 채운 뒤 실패하는 경로에서는
+clone 시점에 `#51`이 이미 채워져 있어 사용자 비밀번호가 그대로 POS로 되돌아간다.**
+
+해당 경로 2개:
+- VAN 통신 실패(`D0x`) — `RelayToVanAsync`의 `CommunicationFailure` 분기
+- 필드 채움 중 예외(`E99`) — `Write(53)` 등이 던지면 `#51`은 이미 쓰인 뒤다(`TransactionQueue`의
+  예외 fallback도 같은 `Failure(request, ...)` clone 경로를 쓴다)
+
+**왜 가볍지 않은가**: `#51`은 **kiosk가 원래 갖지 못하는 유일한 필드**다 — 애초에 "kiosk가 아니라 원캡이
+입력받아야 한다"는 것이 Phase 18의 존재 이유다(PRD §4.12). 그 값을 실패 응답으로 kiosk에 돌려주는 것은
+Phase 18이 세운 경계를 스스로 되돌리는 것이고, **SEED 암호화 확정 전인 현재는 평문**이라 평문 PIN이
+프로세스 경계를 넘는다. 키오스크 업체가 디버깅용으로 응답 프레임을 통째로 로깅하는 것은 흔한 관행이라
+그대로 상대 로그에 남는다. PRD §8.4가 "PIN은 어떤 로그에도 남기지 않는다"까지 규정한 것과도 정면 충돌한다
+(우리 로그만 지키고 남의 로그로 보내는 셈).
+
+**재현**: 시나리오 7(VAN 통신 실패)에 `response.Telegram.Read(51) == ""` 단언을 추가하니 **즉시 실패**
+(2026-08-27 15:49 로그) — 추정이 아니라 실측으로 확정했다.
+
+**수정**: `PosResponseTelegram.BuildFailure`에서 스키마에 `#51`이 있으면 항상 공백으로 지운다(빈 문자열을
+쓰면 `PosField.Pad`가 타입과 무관하게 전체 space로 채운다 — P17 체크포인트1 M-1에서 정한 규칙 그대로).
+`501008`/`800000`에는 `#51` 자체가 없으므로 스키마 확인 후 조건부로 지운다. 시나리오 7의 새 단언이
+회귀 방지로 남는다.
+
+> **relay 경로는 손대지 않았다** — VAN이 준 바이트를 그대로 통과시키는 것이 Phase 17이 근거를 들여
+> 확정한 원칙이고, VAN 응답에 무엇이 담기는지는 VAN 쪽 계약이다. 다만 **실제 VAN이 요청을 그대로
+> echo하는 형태로 응답한다면 같은 문제가 relay 경로로도 생기므로**, Phase 20 실서버 검증 때 VAN 응답에
+> `#51`이 실려 오는지 반드시 확인한다(확인 항목으로 아래 "남은 미확정"에 남김).
+
+### M-1. 체크포인트 1의 L-1 수정이 `ObjectDisposedException` 경로를 새로 만듦 (확정·수정)
+
+체크포인트 1에서 `StopPinTimers`가 `_pinCts`를 `Dispose`까지 하도록 고쳤는데, `PinDigit`이 그 뒤에
+실행되면 `_pinCts.Token` 접근에서 `ObjectDisposedException`이 난다(커맨드 안에서 던지므로 디스패처
+미처리 예외로 이어진다). **`Dispatcher.Invoke`(Send)로 들어오는 `Close`가 이미 큐에 쌓인 클릭(Input,
+더 낮은 우선순위)보다 먼저 처리될 수 있어** 실제로 열리는 순서다 — Timeout 만료와 사용자의 마지막
+탭이 겹치는 순간이 정확히 그 상황이다.
+
+수정 전(Cancel만 호출)에는 `Token` 접근이 안전했으므로 **이 결함은 체크포인트 1 수정이 만든 것**이다.
+리소스 누수를 고치면서 크래시 경로를 들인 셈이라, 같은 리뷰 사이클 안에서 잡은 것이 다행이다.
+
+**수정**: `PinDigit`/`PinBackspace`의 가드 절에 `_pinTimersStopped`를 추가해 창이 닫힌 뒤의 입력은
+`_pinCts`에 손대기 전에 빠져나가게 했다. 필드 선언도 사용처보다 위(다른 sticky 플래그 옆)로 옮겼다.
+
+### L-1. P18-2/P18-3 완료 후에도 남은 과거 시점 주석 (수정)
+
+`PaymentNoticeBackgroundSource`/`PaymentNoticeWindow.xaml.cs`/`PaymentNoticeViewModel`에 "P18-2에서 실제
+레이아웃으로 교체될 때까지는", "P18-3에서 채운다", "P18-1 시점에는 아직 호출하는 곳이 없다" 같은 **이미
+사실이 아닌 주석**이 남아 있었다(Task 단위로 나눠 구현하면서 생긴 시점 표현). 다음 사람이 "아직 안 된
+것"으로 오해할 수 있어 현재 상태를 서술하는 문장으로 교체했다.
+
+### 확인했으나 결함이 아니었던 것
+
+- **시나리오 3/5/7에 `FirePinEnteredSynchronouslyOnChangeState = true`를 추가한 것이 커버리지를 약화시키지
+  않는가** — 세 시나리오의 관심사(필드 채움 / WCC 예외 / VAN 실패 시 리더기 초기화)는 모두 PIN 단계
+  **이후**에 벌어지는 일이라 PIN을 빨리 통과시키는 것이 검증 대상을 건드리지 않는다. 오히려 시나리오 9는
+  같은 플래그를 **켜 둔 채** `800000`에 `PinEntry`가 등장하지 않는 것을 확인해, 전문 종별 구분이 플래그와
+  무관하게 성립함을 증명한다.
+- **PIN 완료 후 `_pinCts.Token` 접근** — `_pinCompleted` 가드가 `Token` 접근보다 앞에 있어 M-1의 경로가
+  이쪽으로는 열리지 않는다.
+- **`PinPanel`이 VAN 통신 중에도 남아 있지 않은가** — `ApplyState`의 애니메이션 경로가 "나가는 방향"
+  페이드아웃 후 `Collapsed`로 되돌리고, 비애니메이션 경로도 진입 시 항상 `Collapsed`로 초기화한다.
+- **`PosSocketServer`가 응답 바이트를 로깅하지 않는가** — 로깅하지 않는다(우리 로그로 PIN이 샐 경로 없음).
+- **`Relay` 경로가 `#51`을 덮어쓰지 않는가** — 덮어쓰지 않는 것이 맞다(relay 원칙). 위 H-1 주석 참고.
+
+### 재검증
+
+`dotnet build` 경고 0/오류 0. `--payment-flow-test` **47건 전부 통과(실패 0건)** — 기존 46건 + H-1 회귀
+방지 단언 1건. H-1은 수정 전 실패 → 수정 후 통과를 같은 단언으로 확인했다.
+
+---
+
+## P18-8. PIN 물리 키보드 입력 지원 (실장비 검증 중 사용자 요청으로 범위 추가, 2026-08-27)
+
+### 배경 — 왜 뒤늦게 추가하는가
+
+P18-4 착수 전 설계 결정 3("입력 수단은 화면 키패드뿐이다")은 **키보드 입력을 요구하지 않을 것이라는
+가정**하에 내려졌다(실사용 대상이 터치 키오스크라는 근거). 실장비 검증 중 사용자가 **화면 키패드와
+물리 키보드 둘 다 가능해야 한다**고 확정해, 이 가정을 뒤집는다.
+
+### 확정된 설계 결정
+
+1. **ESC 훅과 같은 메커니즘을 재사용한다.** PIN 화면이 떠 있어도 POS 등 다른 프로그램에 포커스가 있을
+   수 있으므로(§5.3과 같은 이유), 창의 `KeyDown`이 아니라 **기존 `WH_KEYBOARD_LL` 전역 저수준 훅**을
+   그대로 확장한다. 새 훅을 하나 더 걸지 않는다(같은 창에 두 개의 저수준 훅을 거는 것은 콜백 오버헤드와
+   설치/해제 수명 관리 코드를 불필요하게 두 배로 만든다) — `PaymentNoticeEscapeHook`을
+   `PaymentNoticeKeyboardHook`으로 이름을 넓히고 ESC 처리 로직은 한 글자도 바꾸지 않은 채 숫자/삭제
+   처리를 나란히 추가한다.
+2. **판정 지점은 하나(ViewModel)** — `IsCancelAllowed`/`TryMarkCanceled` 패턴을 그대로 따른다. 훅은
+   상태를 모르고, `PaymentNoticeViewModel.TryPinDigit(char)`/`TryPinBackspace()`가 내부에서
+   `State == PinEntry`를 확인해 아니면 `false`(=미소비, 다른 프로그램으로 그대로 전달)를 돌려준다.
+   맞으면 기존 `PinDigit`/`PinBackspace` private 메서드를 그대로 호출하고 `true`(=소비)를 돌려준다.
+   **터치 버튼과 키보드가 완전히 같은 코드 경로**(같은 private 메서드)를 타므로 마스킹·자동 진행·연타
+   방어(`_pinCompleted`)가 모두 동일하게 적용된다 — 입력 수단별로 로직을 중복 구현하지 않는다.
+3. **PinEntry 상태가 아니면 무조건 통과시킨다(소비하지 않는다).** IC/FALLBACK/VanProcessing 화면에서
+   숫자/Backspace를 눌러도 원캡은 아무것도 하지 않고 POS 등 뒤에 있는 프로그램에 그대로 전달한다(ESC의
+   "취소 불가 구간에서는 삼키지 않는다" 원칙과 동일).
+4. **매핑**: 상단 숫자키(`0`~`9`, VK 0x30~0x39)와 숫자패드(`VK_NUMPAD0`~`VK_NUMPAD9`, 0x60~0x69) 둘 다
+   허용, `Backspace`(`VK_BACK`, 0x08) 하나만 삭제로 매핑한다(`Delete`는 매핑하지 않음 — 터치 키패드의
+   "⌫" 버튼과 성격이 같은 키만 대응). 키 반복(누르고 있을 때 OS가 반복 발생시키는 `WM_KEYDOWN`)은 별도
+   방지 로직을 두지 않는다 — 일반적인 키보드 입력 동작과 같고, 4자리 도달 후에는 `_pinCompleted`가
+   이미 추가 입력을 막는다.
+
+### 구현할 것
+
+- `Interop/LowLevelKeyboardHookNative.cs` — `VK_BACK`/`VK_0`/`VK_NUMPAD0` 상수 + `TryMapDigit(int vkCode)`
+  헬퍼(숫자/숫자패드 코드를 `char?`로 변환) 추가.
+- `Views/PaymentNoticeEscapeHook.cs` → `Views/PaymentNoticeKeyboardHook.cs`로 파일명·클래스명 변경.
+  생성자에 `Func<char, bool> tryPinDigit`, `Func<bool> tryPinBackspace` 추가. ESC 분기는 그대로 두고
+  숫자/Backspace 분기를 나란히 추가(둘 다 소비 시 `(IntPtr)1`, 아니면 `CallNextHookEx`로 흘려보냄 —
+  기존 ESC 분기와 대칭 구조).
+- `PaymentNoticeViewModel.cs` — `internal bool TryPinDigit(char digit)`/`internal bool TryPinBackspace()`
+  추가(위 확정 사항 2).
+- `PaymentNoticeWindow.xaml.cs` — 필드/생성자 호출을 새 클래스명·시그니처로 갱신.
+
+### 완료 조건
+
+- [x] 빌드 경고 0/오류 0.
+- [x] `--notice-pin-test`로 PIN 화면을 띄운 뒤 `mcp__windows__windows_send_keys`로 숫자 키를 보내
+      화면이 정확히 동일하게(노출→마스킹, 자동 진행) 반응하는지 확인 — 터치 클릭 검증(P18-2/P18-3)과
+      같은 결과 확인(4자리 입력 시 4칸 전부 마스킹).
+- [x] `Backspace`로 한 자리 삭제가 키보드로도 동작 — "1","2","Backspace" 입력 후 1칸만 남고 커서가
+      2번째 칸으로 돌아오는 것 스크린샷으로 확인.
+- [x] IC/FALLBACK/VanProcessing 상태에서 숫자 키를 눌러도 아무 반응 없음(소비되지 않고 통과) —
+      `--notice-demo`의 IC 화면에서 "5" 입력, 화면 변화 없음 확인.
+- [x] 실장비로 902614 정상 흐름을 **키보드 입력만으로** 완주 — `#7=000` 응답 확인(2026-08-28, 실제
+      카드 태그 + 실제 물리 키보드로 PIN 4자리 입력, 23.8초 왕복, `#43~#48/#50/#53` 정상 채움, `#51`
+      빈 값 재확인 — 스텁 수정이 키보드 입력 경로에서도 유효함을 함께 확인).
+- [x] 기존 ESC 취소 동작 회귀 없음 — ESC 분기 코드는 리팩터링 중 한 글자도 바뀌지 않았음을 diff로
+      확인, `--payment-flow-test` 47건(헤드리스 시나리오는 훅을 직접 타지 않지만 `TryMarkCanceled`/
+      `RaiseCanceledEvent` 경로 자체는 동일하게 검증됨) 전부 통과로 회귀 없음 재확인.
+
+---
+
+## Phase 18 완료 기준 (로드맵 원문)
+
+`902614` 흐름에서 카드리딩 성공 후 PIN 화면이 뜨고, 4자리 입력 시 자동으로 통신중으로 넘어가 `#51`이
+채워진 전문이 만들어진다. PIN 입력 중 취소/ESC/Timeout이 각각 정확히 1건만 확정되고, 데드라인이
++30초 연장된 것이 로그로 확인된다. 반복 실행 시 이전 거래의 입력값이 남지 않는다.
+
+**실장비 검증은 Phase 17과 같은 방식으로 한다**(`scratchpad/spec_client.ps1` 재사용). 다만 Phase 17
+검증에서 얻은 교훈 2가지를 미리 반영한다:
+
+- **카드를 리더기에서 빼 두고 시작한다** — 꽂아 둔 채로 시작하면 즉시 리딩돼 취소 경로가 헛돈다.
+- **알림창 표시 여부는 로그로 확인되지 않는다** — PIN 화면이 실제로 떴는지는 창 열거/스크린샷으로
+  따로 확인한다(정상 경로의 `ChangeState`는 로그를 남기지 않는다).
+
+## Phase 18 실장비 검증 기록 (2026-08-27, 리더기 2대 COM3/COM7)
+
+### 시나리오 1: 902614 정상 흐름(실물 카드 태그 + 실물 PIN 입력) — H-2 발견
+
+`spec_client.ps1 -TxType 902614`로 실제 요청을 보내고, 사용자가 실물 카드를 태그한 뒤 실제로 뜬 PIN
+화면에 **손으로 직접** 4자리를 입력했다(자동화 클릭이 아니라 실사용자 조작 그대로). 결과:
+
+- 응답 26.5초 만에 수신, `#7=000`(승인), `#43~#48/#50/#53` 7필드 정상(`#46` 192바이트, `#53` 492바이트 —
+  둘 다 한도 이내), **PIN 입력~자동 진행~통신중 전환까지 화면 흐름 자체는 완전히 정상 동작**을 실사용자
+  조작으로 확인.
+
+**H-2(실장비, High) — 개발용 VAN 스텁이 성공 응답에 실제 입력된 PIN을 그대로 실어 돌려줌**: 응답 전문의
+`#51`에 방금 입력한 PIN이 그대로 들어 있었다(테스트 클라이언트가 그 값을 화면에 출력). 원인은
+`StubVanRelayService.BuildFakeSuccess`가 `PosResponseTelegram.BuildFailure`가 고쳐지기 전과 똑같이
+요청을 clone해 `#3/#6/#7/#8`만 덮어쓰는 방식이라 — **최종 검증 H-1과 정확히 같은 결함이 스텁에도
+있었다**(H-1 수정 때 relay/성공 경로는 "VAN이 준 바이트를 그대로 통과시키는 게 원칙이라 손대지 않는다"고
+판단했는데, 그 판단이 향하는 대상이 진짜 VAN이 아니라 **우리가 만든 스텁**일 때는 그대로 적용되면 안
+됐다). 이번 발견으로 실제 사용자의 평문 PIN이 로컬 테스트 파일(`spec_client.ps1` 출력)에 남았다 —
+**즉시 해당 파일을 삭제**하고, 재발 방지로 `StubVanRelayService.BuildFakeSuccess`도
+`PosResponseTelegram.BuildFailure`와 같은 방식(스키마에 `#51`이 있으면 공백 처리)으로 수정했다.
+앱 자체의 `FileLogger`에는 이번 실행 기록에 PIN이 전혀 남지 않은 것을 별도로 확인했다(설계대로 동작).
+
+**"착수 전 확인이 필요한 것" #4와의 관계**: 이 항목이 "VAN이 요청을 echo하면 relay로도 같은 문제가
+생긴다"고 미리 우려했던 것이, **개발 스텁 단계에서 그대로 재현**된 것이다. 실제 VAN이 echo하는지는
+여전히 Phase 20 확인 대상으로 남지만, 최소한 **Phase 19(키오스크 시뮬레이터)까지 이 스텁을 계속 쓰는
+동안은 안전**해졌다.
+
+### 재검증(스텁 수정 후)
+
+`dotnet build` 경고 0/오류 0(앱이 실행 중이면 exe 파일 잠김으로 빌드 실패 — 재현 시 프로세스 먼저 종료).
+
+### 시나리오 1b: 902614 정상 흐름(물리 키보드 전용 PIN 입력) — P18-8 실장비 확인
+
+`--notice-pin-test`/`windows_send_keys` 시뮬레이션이 아니라 **실제 카드 태그 + 실제 물리 키보드**로
+완주(2026-08-28). `#7=000`(승인), 23.8초 왕복, `#43~#48/#50/#53` 정상 채움, `#51`(응답) 빈 값 재확인 —
+H-2 스텁 수정이 키보드 입력 경로에서도 유효함을 함께 확인했다.
+
+### 시나리오 2: 800000(카드정보조회) — PIN 미진입 확인
+
+카드 태그 후 **3.1초**(!) 만에 `#7=000` 응답(`#14 BIN=35641514`). PIN 화면이 떴다면 사용자 입력을
+기다리느라 훨씬 오래 걸렸을 것이므로, 이 왕복 시간 자체가 PIN 단계를 거치지 않았다는 증거다. `#51`
+필드 자체가 없는 전문이라 언급되지 않는다 — 전문 종별 구분(902614만 PIN)이 실장비에서도 확인됐다.
+
+### 시나리오 3: PIN 입력 중 취소(ESC) — E01
+
+카드 태그 → PIN 화면 → **ESC 키**로 취소(2026-08-28, P18-8의 키보드 훅 확장 후 ESC 경로 회귀 여부도
+함께 실증). `#7=E01`, 11.5초 왕복, 모든 필드 공백(`#51` 포함). 앱 로그로 순서까지 확인:
+
+    카드 리딩 성공 → PIN 입력 단계 진입(데드라인 119.9s → 141.5s, +30초 연장 확인)
+    → 사용자 취소 통지 수신 → UserCanceled 확정 → 리더기 2대 초기화(0x60) 전송 예약 **1건만**
+    → "PIN 입력 대기 중 확정됨(UserCanceled) — 즉시 실패 응답(리더기 초기화는 FireInterruptCleanup이
+       이미 예약함)"
+
+체크포인트 1에서 고친 M-1(중복 리더기 초기화)이 실장비에서도 중복 없이 1건만 나가는 것을 로그로
+직접 확인했다.
+
+### 시나리오 4: PIN 입력 중 Timeout — E02
+
+카드 태그 후 PIN 화면에서 **아무 입력도 하지 않고 대기**. `#7=E02`, **150.1초** 만에 응답(초기 120초
++ PIN 진입 시 +30초 연장이 실제로 합산된 시간과 일치). 앱 로그:
+
+    카드 리딩 성공(라운드 1, 남은데드라인 119.9s) → PIN 입력 단계 진입(데드라인 30초 연장,
+    남은데드라인=145.0s) → (145초 경과) → 거래 데드라인 만료 — 거래 확정(Timeout)
+    → 리더기 2대 초기화(0x60) 전송 예약 1건만
+
+시나리오 3과 마찬가지로 초기화 중복 없음, `#51` 공백 확인.
+
+### 실장비 검증 종합 (2026-08-27~28, 리더기 2대 COM3/COM7)
+
+| 시나리오 | 결과 | 비고 |
+|---|---|---|
+| 1. 902614 정상(터치 PIN) | `#7=000` | H-2(스텁 PIN 유출) 발견·수정 계기 |
+| 1b. 902614 정상(키보드 PIN) | `#7=000`, 23.8s | P18-8 검증 |
+| 2. 800000 | `#7=000`, 3.1s | PIN 미진입 확인 |
+| 3. PIN 중 취소(ESC) | `#7=E01`, 11.5s | 초기화 1건, `#51` 공백 |
+| 4. PIN 중 Timeout | `#7=E02`, 150.1s | 초기화 1건, `#51` 공백, +30초 연장 실측 |
+
+모든 시나리오에서 `#51`(응답)이 공백으로 확인돼 H-1/H-2 수정이 실전에서도 유효함을 실증했다. "반복
+실행 시 이전 거래의 입력값이 남지 않는다"(Phase 18 완료 기준)도 5회 연속 실행 동안 잔존 없이 확인됐다
+(구조적으로 `Presenter.Show`가 매 거래 새 ViewModel을 만들어 보장 + 실측 무이상).
+
+## 착수 전 확인이 필요한 것
+
+1. **PIN 노출 시간(600ms)·완성 후 지연(200ms)** — 제안값이다. 실물로 보고 조정한다(상수 1곳).
+2. **SEED 암호화 방식** — 여전히 미정. 확정 전까지 평문으로 진행하며, 확정되면 `PinFieldEncoder`
+   한 곳만 바뀐다(PRD §10 열린 항목).
+3. **`#51` SET 장소의 SPEC 내부 모순** — 표(p.14)는 kiosk, 설명 절(p.17)은 `#44/#45/#46/#51`을 묶어
+   "보안리더기에서 생성하여 SET"이라고 적어 서로 어긋난다. 사용자 확정(원캡 담당)으로 구현은
+   진행하되, **발주처 확인 시 이 모순을 함께 정정 요청**한다(`#38`과 같은 유형의 문서 결함).
+4. **VAN 응답에 `#51`이 실려 오는지**(Phase 20 실서버 검증 항목, 최종 검증 H-1에서 파생) — 실패 응답의
+   `#51`은 H-1 수정으로 지웠지만, **relay 경로는 VAN이 준 바이트를 그대로 통과시키므로** VAN이 요청을
+   echo하는 형태로 응답하면 같은 문제가 relay로도 생긴다. 실서버가 준비되면 응답 POSITION 612~711을
+   실제로 확인하고, 실려 온다면 relay 원칙의 예외로 이 필드만 지울지 발주처와 협의한다.
+
+---
+
+# Phase 19 실행계획서 — 키오스크 시뮬레이터 (POS 역할 테스트 프로그램)
+
+> 로드맵: `ROADMAP.md` "Phase 19 — 키오스크 시뮬레이터". 사람이 실제 키오스크처럼 3종 전문을 보내고
+> 응답을 필드 단위로 확인하는 **별도 프로그램**을 만든다. Phase 20(VAN)·21(통합 검증)의 주 검증
+> 도구이면서, **동시에 키오스크 업체에 연동 샘플 소스로 제공**된다(2026-08-26 확정, 2026-08-28 재확인).
+>
+> **이 이중 용도가 이 Phase의 모든 설계 판단을 지배한다.** "우리만 쓰는 하네스"라면 대충 짜도 되지만,
+> 남이 읽고 자기 코드의 본으로 삼을 소스이므로 **읽는 사람이 SPEC을 몰라도 필드 계약을 알 수 있게**
+> 짜야 한다. 반대로 업체에 줄 소스라고 해서 기능을 덜어내면 우리 검증 도구가 부실해진다 — 두 요구를
+> 같은 코드로 만족시키는 것이 목표다(내부용/제공용 빌드를 갈라 관리하지 않는다).
+
+## 착수 전 전제 (2026-08-28 코드 확인 완료)
+
+1. **프레임 형식은 `[길이 4자리 ASCII][본문]`이다** (`Protocol/Pos/PosMessageFramer`, 2026-08-24 확정,
+   PRD §10.1). STX/ETX 없음. 길이 4자리는 **본문 바이트 수**이고 SPEC `#0 전문 길이`와 같은 값이다
+   (`#0`은 본문 밖 헤더라 스키마에는 들어 있지 않다 — P17-2). 본문 길이는 전문별 고정:
+   `501008`=706, `800000`=500, `902614`=1500.
+2. **서버는 `127.0.0.1:8002` 루프백 전용**(`Services/Pos/PosSocketServer`). 동시 연결 상한 16,
+   응답 송신 타임아웃 5초, **응답 후 유휴 연결은 서버가 먼저 닫는다**. 지속 연결도 허용되지만
+   로드맵 확정대로 **시뮬레이터는 전문마다 새 연결을 연다**(실제 POS 원칙과 같음).
+3. **인코딩은 CP949**(`PosMessageEncoding`). 한글 필드(`#20 징수 기관명` 등)가 2바이트를 먹으므로
+   길이 계산은 반드시 **바이트 기준**이다 — `string.Length`로 세면 안 된다.
+4. **응답 코드 체계는 `000` / `E0x` / `R0x`·`R2x` / `D0x`** (P17-4, `Services/Payment/
+   PosResultCodeMapper`). 전문 파싱 자체가 실패한 경우는 `E40`(길이 불일치)·`E41`(알 수 없는
+   거래구분)이다. 여기에 SPEC 3장의 발주처 정의 코드(`000`~`201`, `M01`/`V01`)가 더해진다.
+
+   > **로드맵 오타 발견(2026-08-28)**: `ROADMAP.md` Phase 20 완료 기준이 VAN 통신 실패를 `G0x`로
+   > 적고 있으나 실제 구현은 `D01`/`D02`다. Phase 19 문서 갱신 때 함께 정정한다(P19-8).
+5. **필드 오프셋의 "두 번째 사본"이 이미 하나 있다** — Phase 17·18 실장비 검증에 쓴 PowerShell
+   클라이언트(`spec_client.ps1`, 세션 스크래치패드)다. 3전문 공통부와 `902614` 요청 필드 대부분의
+   POSITION이 거기 손으로 옮겨져 있고 **실장비로 왕복이 확인된 값**이다. 시뮬레이터의 독립 전사본은
+   이것과도 대조할 수 있다(P19-2). 스크래치패드는 세션과 함께 사라지므로 **P19-1에서 이 스크립트를
+   시뮬레이터 폴더 안(`tools/`)으로 옮겨 보존**한다.
+6. **`902614`는 사람이 카드를 대고 PIN까지 눌러야 끝난다** — 응답까지 최장 150초 이상 걸리는 것이
+   Phase 18 실측(150.1s)으로 확인됐다. 클라이언트 수신 타임아웃은 **180초를 기본**으로 잡는다.
+
+## 확정된 설계 결정 (2026-08-28 사용자 확정)
+
+1. **배포 형태: 같은 리포 안 + 자체 `.sln` 동봉.** `src/KFTCOneCAP.KioskSim/` 아래에 프로젝트와
+   **그 폴더 전용 `KFTCOneCAP.KioskSim.sln`**을 함께 둔다. 내부에서는 루트 솔루션에도 추가해 본 앱과
+   같이 열고, 업체에는 **그 폴더만 통째로 압축해 전달**하면 바로 열리고 빌드된다. 본 앱 소스는
+   한 줄도 딸려가지 않는다.
+2. **오류 주입은 만들되 별도 탭으로 격리한다.** 정상 전송 화면과 오류 주입 화면을 탭으로 나눠,
+   업체가 정상 경로 코드를 읽을 때 방해받지 않게 한다. 조건부 컴파일(`#if INTERNAL`)로 가르지
+   않는다 — **우리가 검증한 소스와 업체가 받는 소스가 완전히 같아야** 나중에 "그쪽 소스에선 안
+   되던데요"를 재현할 수 있다.
+3. **입력값은 프리셋 파일에서 불러온다. 마지막 입력값 자동 저장은 하지 않는다.**
+   실행 파일 옆 `kiosksim.preset.json`을 시작 시 읽어 화면을 채우고, **파일이 없으면 코드에 박힌
+   기본값**으로 채운다(파일을 안 주고 배포해도 바로 동작해야 한다). 사용자가 원할 때만 누르는
+   **"현재 값을 프리셋으로 저장" 버튼**은 둔다 — 자동 저장이 아니라 명시적 행위이므로 "직전 실험의
+   찌꺼기가 조용히 남는" 문제가 없다.
+4. **송수신 전문 로그 파일 기록은 이번 범위 밖**(2026-08-28 사용자 결정). 추후 KFTCOneCAP 쪽 로그
+   파일 기능이 생기면 거기서 대조한다. 화면에는 물론 raw ASCII를 그대로 보여준다.
+5. **응답 대기 타임아웃은 상수 180초 고정**, 조절 UI는 만들지 않는다(전제 6).
+6. **플랫폼은 `AnyCPU`로 둔다** — 로드맵 원문은 `net48`/x86이라고 적었지만, x86 고정의 이유는
+   본 앱이 32bit 네이티브 DLL 2개를 로드하기 때문이고(`csproj` 주석) **시뮬레이터는 네이티브 의존이
+   전혀 없다**. 업체 환경을 가리지 않는 편이 샘플로서 낫다. `net48`은 그대로 유지한다(업체 환경이
+   구형일 수 있고, 본 앱과 같은 런타임 전제를 공유하는 편이 안전하다). 로드맵을 P19-8에서 정정한다.
+7. **외부 NuGet 패키지 0개.** JSON 프리셋도 `System.Runtime.Serialization.Json`이나 손으로 짠
+   최소 파서로 처리한다 — `dotnet restore`가 막힌 폐쇄망 업체 PC에서도 열리자마자 빌드돼야 한다.
+8. **주석은 한글로, "왜"까지 적는다.** 업체 개발자가 이 소스만 보고 연동할 수 있어야 한다.
+
+## 이 Phase에서 손대지 않는 것 (범위 밖)
+
+- **본 앱 소스 전부** — 시뮬레이터는 소켓 너머의 남이다. 본 앱을 고쳐야 검증이 되는 상황이 나오면
+  그건 결함 발견이므로 별도 항목으로 기록하고 고친다(그 자체가 이 Phase의 성과다).
+- **`Protocol/Pos/`와의 코드 공유** — 로드맵이 명시적으로 금지한다. 이유는 P19-2에 적는다.
+- **VAN 실호출** — Phase 20. 시뮬레이터가 보는 것은 스텁 응답이다.
+- **키오스크 실물 UI 재현** — 화면 디자인을 흉내 내지 않는다. 필드가 다 보이는 실무 도구로 만든다.
+
+---
+
+## P19-1. 프로젝트 신설 + 배포 골격 ★
+
+**먼저 이것부터.** 나중에 폴더를 옮기면 `.sln` 상대경로와 업체 배포 절차가 같이 틀어진다.
+
+### 구현할 것
+
+- `src/KFTCOneCAP.KioskSim/KFTCOneCAP.KioskSim.csproj` — SDK 스타일, `net48`,
+  `OutputType=WinExe`, `UseWindowsForms=true`, `LangVersion=latest`, `Nullable=enable`,
+  **`PlatformTarget` 미지정(AnyCPU)**, PackageReference 0개.
+- `src/KFTCOneCAP.KioskSim/KFTCOneCAP.KioskSim.sln` — **이 프로젝트 하나만** 참조하는 솔루션.
+  경로는 반드시 같은 폴더 기준 상대경로여야 한다(폴더를 떼어내도 열려야 하므로).
+- 루트 `KFTCOneCAP.Wpf.sln`에도 프로젝트를 추가한다(내부 편의). **루트 솔루션 쪽 참조는
+  `src\KFTCOneCAP.KioskSim\...`이고, 이 참조가 업체 배포본에는 존재하지 않는다** — 두 솔루션이
+  서로를 모르는 상태여야 한다.
+- `README.md`(업체 제공용, 한글) — 무엇을 하는 프로그램인지, 빌드 방법, KFTCOneCAP을 먼저 띄워야
+  한다는 전제, 포트 8002, 프레임 형식 한 문단, **"이 소스의 전문 필드 테이블은 SPEC을 옮겨 적은
+  것이며 SPEC이 정본"**이라는 주의 문구.
+- `tools/spec_client.ps1` — 전제 5의 PowerShell 클라이언트를 여기로 옮겨 보존한다(P19-2 교차 대조의
+  근거 사본이자, 업체에도 "최소 구현은 이 정도"를 보여주는 참고 자료가 된다).
+- 폴더 구조를 처음부터 읽는 순서대로 나눈다:
+  `Protocol/`(전문 정의·코덱) → `Net/`(TCP 클라이언트) → `Forms/`(화면) → `Preset/` → `tools/`.
+
+### 완료 조건
+
+- [x] `dotnet build src/KFTCOneCAP.KioskSim/KFTCOneCAP.KioskSim.sln` 성공(경고 0).
+- [x] 루트 솔루션 `dotnet build`도 성공하고 **본 앱 빌드 산출물이 달라지지 않는다**.
+- [x] `src/KFTCOneCAP.KioskSim/` 폴더를 임시 위치로 **복사**한 뒤 그 자리에서 빌드가 성공한다
+      (배포 시뮬레이션 — 이걸 실제로 해 보지 않으면 상대경로 실수를 못 잡는다).
+
+**완료 조건 검증 결과(2026-08-28)**:
+1. `dotnet build src/KFTCOneCAP.KioskSim/KFTCOneCAP.KioskSim.sln` — "빌드했습니다. 경고 0개
+   오류 0개" (`KFTCOneCAP.KioskSim.exe` 생성 확인).
+2. `dotnet build KFTCOneCAP.Wpf.sln`(루트) — 두 프로젝트(KFTCOneCAP.KioskSim, KFTCOneCAP.Wpf)
+   모두 "경고 0개 오류 0개"로 빌드. 본 앱 exe(`src/KFTCOneCAP.Wpf/bin/Debug/net48/
+   KFTCOneCAP.Wpf.exe`)의 SHA256 해시를 KioskSim 추가 전/후로 비교(`bf648001...0237b55`)해
+   **완전히 동일함을 확인** — 새 프로젝트 추가가 본 앱 빌드에 영향 없음.
+3. `src/KFTCOneCAP.KioskSim/`을 `bin`/`obj` 제외하고 세션 스크래치패드 임시 폴더로 복사한 뒤
+   그 자리에서 `dotnet build KFTCOneCAP.KioskSim.sln` 실행 — "빌드했습니다. 경고 0개 오류 0개"로
+   성공(상대경로 문제 없음 확인). 검증 후 임시 폴더는 삭제했다.
+
+---
+
+## P19-2. 전문 필드 테이블 독립 전사 ★ (이 Phase의 핵심 가치)
+
+**왜 공유하지 않는가**: 본 앱의 `Protocol/Pos/Schemas/`를 참조하면 POSITION이나 길이를 잘못 적어도
+양쪽이 똑같이 틀려 **테스트가 통과해 버린다**. 두 번 옮겨 적어야 서로의 오타가 드러난다. 실제
+키오스크 업체도 SPEC을 보고 독립 구현하므로 이쪽이 현실에 더 가깝다(로드맵 확정).
+
+### 구현할 것
+
+- `Protocol/TelegramField.cs` — 번호·이름·표현(N/A/AN/AHN/ANS)·길이·POSITION·**SET 장소**를 갖는
+  불변 타입. SET 장소는 `kiosk` / `원캡` / `인터넷지로` / `VAN` 4종 열거형.
+- `Protocol/TelegramSchemas.cs` — 공통부 + 3전문 업무부를 **SPEC PDF를 다시 보며 손으로** 채운다.
+  본 앱 소스를 열어 두고 베끼지 않는다. 필드 확인이 애매하면 `pos-onecap-spec-expert`
+  서브에이전트에 묻는다(SPEC 표는 SET 장소 열을 눈으로 훑다 착각하기 쉽다 — 실제로 `#48`을 kiosk로
+  잘못 읽은 전례가 있다).
+- 각 스키마에 **자기 검증 생성자**를 둔다: 필드 POSITION이 0부터 빈틈·겹침 없이 이어지고
+  마지막 필드의 끝이 전문 총 길이(706/500/1500)와 정확히 일치하는지 생성 시점에 확인하고,
+  어긋나면 즉시 예외. 업체가 필드를 잘못 고쳐도 실행 즉시 알 수 있다.
+
+### 완료 조건
+
+- [x] 3전문 스키마가 자기 검증을 통과하며 만들어진다(총 길이 706/500/1500 일치).
+- [x] **교차 대조를 실제로 수행한다** — 시뮬레이터 테이블 vs 본 앱 `Protocol/Pos/Schemas/` vs
+      `tools/spec_client.ps1`의 POSITION/길이를 필드 단위로 비교하고, **불일치가 하나라도 나오면
+      한쪽을 베껴 맞추지 않고 SPEC PDF로 되돌아가 판정한다**. 대조 결과(불일치 0건이든, N건을
+      어떻게 판정했든)를 이 문서에 기록한다.
+- [x] SET 장소가 kiosk가 아닌 필드 목록을 뽑아 적는다 — `800000`은 `#14` 1개, `902614`는
+      `#43/#44/#45/#46/#48/#50/#51/#53`(Phase 18에서 `#51`이 원캡 담당으로 확정되며 7→8개가 됐다).
+
+### 완료 조건 검증 결과 (2026-08-28)
+
+**자기 검증**: `KFTCOneCAP.KioskSim.exe`를 빌드한 뒤 리플렉션으로
+`TelegramSchemas.Notice501008`/`CardInfo800000`/`CardApproval902614`를 강제로 초기화해 생성자
+예외가 나지 않는지 직접 실행 확인했다(정적 필드는 최초 접근 시점에만 초기화되므로 "빌드 성공"만으로는
+검증되지 않는다 — P17-2/`PosSchemaRegistry.ValidateAtStartup`과 같은 이유). 결과: 3개 모두 예외 없이
+생성됨, `TotalLength`=706/500/1500·`Fields.Count`=56/27/54 확인.
+
+**작성 과정**: SPEC PDF(`docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_
+20260826.pdf`) 2장(p.5~14)을 처음부터 다시 읽어 `Protocol/TelegramField.cs`·`TelegramSchemas.cs`를
+작성했다. 이 저장소에는 `pos-onecap-spec-expert` 같은 서브에이전트를 호출할 도구가 없어(Task 도구
+미제공), SPEC PDF를 Read 도구로 페이지별로 직접 읽고 대조하는 방식으로 진행했다 — 애초 계획한
+서브에이전트 질의 대신 PDF 원문 재확인으로 동일한 검증 목적을 달성했다.
+
+**독립 전사 중 발견한 자체 오류(중요)**: 최초 작성 시 `501008 #14 전자납부번호`를 SPEC 표의 "디지털
+예산" 열 체크로 잘못 읽어 `InternetGiro`로 분류했었다. 교차 대조 단계에서 본 앱 스키마
+(`NoticeInquirySchema.cs`, `PosFieldOwner.Kiosk`)와 `tools/spec_client.ps1`(공통부가 아닌 501008
+전용 분기에서 `#14`를 명시적으로 SET하고 실장비 왕복 성공)이 모두 `Kiosk`로 되어 있는 것을 보고
+SPEC PDF p.7 표를 다시 확대해서 본 결과, 체크 표시는 "kiosk" 열(표의 가장 오른쪽)에 있었다 —
+디지털예산/인터넷지로/kiosk 3열이 시각적으로 촘촘히 붙어 있어 처음에 왼쪽 열로 착각했다. `#14`를
+`Kiosk`로 정정했다(정확히 "SPEC PDF로 되돌아가 판정" 절차대로 처리 — 본 앱이나 스크립트 값을 그대로
+베끼지 않고, 그 값을 단서로 삼아 PDF 원문을 재확인해 스스로 근거를 확보했다).
+
+또한 초기 설계에서 공통부(#1~13)를 3전문이 완전히 동일하다고 가정해 하나의 `BuildCommonFields()`로
+공유하려 했으나, SPEC 표를 전문별로 대조하는 과정에서 **SET 장소 체크가 전문마다 다르다**는 것을
+발견했다(예: `#6 송·수신 FLAG`는 501008/902614는 kiosk 열이 체크되어 있지만 800000은 체크되어 있지
+않다; `#5 상태 코드`도 마찬가지). POSITION·길이·표현은 4곳(공통부 제네릭 표 1개 + 전문별 표 3개)
+모두 동일하지만 SET 장소만 다르다는 것을 확인하고, 공유 헬퍼를 버리고 전문마다 독립된 공통부 목록을
+작성하도록 다시 고쳤다.
+
+**교차 대조 결과**:
+
+| 항목 | 결과 |
+|---|---|
+| 501008 POSITION/길이/표현 (전체 56필드) | 시뮬레이터 vs 본 앱 vs spec_client.ps1(공통부 상수) 모두 완전 일치 |
+| 800000 POSITION/길이/표현 (전체 27필드) | 시뮬레이터 vs 본 앱 vs spec_client.ps1 모두 완전 일치 |
+| 902614 POSITION/길이/표현 (전체 54필드) | 시뮬레이터 vs 본 앱 vs spec_client.ps1 모두 완전 일치 |
+| 501008 SET 장소 (56필드) | `#14` 정정(위 기록) 후 시뮬레이터·본 앱 완전 일치 |
+| 800000 SET 장소 (27필드) | **불일치 3건 발견**(체크포인트 1 재검토 2026-08-28, 최초 대조 때는 1건만 기록해 부정확했다 — 아래 정정 참고): `#27`(실질 불일치, 아래 "본 앱 쪽 결함 후보" 참고), `#10`/`#13`(표현 축 차이, 아래 참고). |
+| 902614 SET 장소 (54필드) | **불일치 3건 발견**(체크포인트 1 재검토 2026-08-28, 최초 대조 때는 "완전 일치"로 잘못 기록했다 — 아래 정정 참고): `#17`/`#47`/`#54`(표현 축 차이, 아래 참고). `#38`/`#51` 등 본 앱이 SPEC 표와 다르게 확정한 필드는 여전히 동일한 근거로 동일하게 분류돼 있음을 재확인. |
+| 902614 요청 필드 값(공통부 상수 + `#14~42`) | `spec_client.ps1`이 실제로 SET하는 모든 위치(0,3,6,10,19,23,35,59,61,68,70,83,102,113,120,126,146,167,171,216,231,246,261,262,270,278,280,296,309,332,334,335,610)와 시뮬레이터 필드 POSITION이 전부 일치 |
+
+**표현(N/A/AN/AHN/ANS) 관련 발견**: development_plan.md/과업 지시가 전제한 "N/A/AN/AHN/ANS 5종"은
+SPEC 표를 다시 읽어 보니 실제로는 6종이었다 — `902614 #37 납부자 성명`이 `AHNS`(영문+한글+숫자+
+특수문자)로 표기되어 있어, 이 5종 목록에 없는 값이 하나 더 있었다. `TelegramRepresentation` enum에
+`AHNS`를 추가해 반영했다(본 앱의 `PosFieldType`도 동일하게 `AHNS`를 이미 가지고 있어 이 부분은 본 앱과
+일치).
+
+**SET 장소가 kiosk가 아닌 필드 목록** (요청 시 kiosk가 아닌 다른 주체가 채우는, 이 전문의 실질적 입력
+계약과 직결되는 필드만 추려 기록 — 응답 전용 필드는 별도 표시):
+
+- `800000`: 카드 하드웨어 관련 요청 입력 필드 중 **`#14 BIN` 1개**(원캡). 그 외 `#17~27`은 조회
+  "응답" 결과 필드라 애초에 kiosk가 채울 필요가 없는 필드다(요청 입력 계약과 무관 — 시뮬레이터
+  테이블에는 `InternetGiro`로 정직하게 남겨 뒀으나, "kiosk가 못 채우는 입력 필드"라는 의미의 8/1개
+  집계에는 포함하지 않는다). 공통부의 `#5/#6/#7/#8` 도 마찬가지로 응답/프로토콜 전용이라 이 집계에서
+  제외.
+- `902614`: 카드 하드웨어·보안 관련 요청 입력 필드 **8개 — `#43/#44/#45/#46/#48/#50/#51/#53`**(전부
+  원캡). `#51`은 SPEC 표 원문은 kiosk이지만 Phase 18 실측/보안 결정에 따라 원캡으로 분류(위 코드 주석
+  참고). `#40`(기 납부 이용 시스템)과 `#52`(선불카드 잔액)도 kiosk가 아니지만(인터넷지로) 응답 전용
+  필드라 이 8개 집계와는 별도로 취급했다. 공통부의 `#7/#10/#13`도 마찬가지로 응답 전용이라 제외.
+
+이 두 집계(`800000`=1개, `902614`=8개)는 development_plan.md/CLAUDE.md에 이미 기록된 "확립된 사실"과
+정확히 일치한다.
+
+**체크포인트 1 정정(2026-08-28)**: 최초 대조(위 표의 원래 문구)는 `TelegramSetLocation`에 본 앱의
+`PosFieldOwner.None`(SPEC 표에 아무 체크도 없는 필드)에 대응하는 값이 없다는 사실을 놓쳤다. 이
+프로젝트는 "체크가 없으면 요청을 보내는 kiosk가 결국 space로 채운다"(SPEC 공통부 표 각주)는 정책에
+따라 그런 필드를 전부 `Kiosk`로 분류했는데, 이게 본 앱의 `None`과 사람이 보기엔 "불일치"로 보인다.
+실제로 divergence는 총 6건이었다: `800000 #10/#13`, `902614 #17/#47/#54`(이상 5건, 아래 설명), `800000
+#27`(1건, SPEC 자체 재확인 결과가 다른 진짜 불일치 — 바로 아래 절 참고).
+
+**5건(`800000 #10/#13`, `902614 #17/#47/#54`)의 판정**: 본 앱의 `None`은 "SPEC 표에 체크가 없다"는
+문서적 사실을 그대로 보존하려는 표기이고, 시뮬레이터의 `Kiosk`는 "요청을 실제로 누가 보내는가"라는
+실무 질문에 답한 것이다 — 같은 SPEC 사실을 다른 축으로 표현했을 뿐 내용이 다른 게 아니다. 2026-08-28
+사용자가 "아무도 안 채우는 필드는 그냥 키오스크단에서 공백으로 채워서 보내면 된다"고 명시적으로
+확인해, 시뮬레이터 쪽 `Kiosk` 분류가 맞다고 확정했다(코드 수정 없음 — `Protocol/TelegramField.cs`의
+`TelegramSetLocation` 문서에 이 판정 근거를 추가함). 본 앱의 `None`도 요청을 만드는 주체가 아니므로
+동작에는 영향이 없다(본 앱은 요청을 만들지 않고 받기만 한다).
+
+**본 앱 쪽 결함 후보(범위 밖, 별도 보고 — 이 Task에서는 코드를 고치지 않았다, 위 5건과는 성격이 다른
+진짜 불일치 1건)**:
+`src/KFTCOneCAP.Wpf/Protocol/Pos/Schemas/CardInfoInquirySchema.cs`의 `800000 #27 예비 정보 FIELD`가
+`PosFieldOwner.None`으로 등록되어 있으나, SPEC PDF(p.12) 표는 이 필드의 "인터넷지로" 열을 체크해
+두었다(같은 열에 체크된 `#17~26`과 정렬이 같다). `None`이 실제 코드 동작에 영향을 주는지(단순 문서화
+태그인지, 아니면 어떤 검증/UI 로직이 `None`을 특별 취급하는지)는 확인하지 않았다 — 그 확인과 수정
+여부 판단은 이 Task의 범위 밖이므로 사용자에게 별도 보고한다.
+
+---
+
+## P19-3. 고정길이 코덱 (빌드/파싱)
+
+### 구현할 것
+
+- `Protocol/TelegramBuffer.cs` — 본문 바이트 배열을 들고 `Write(번호, 값)` / `Read(번호)`만
+  제공한다. 규칙은 SPEC 그대로:
+  - 전체를 **space(0x20)로 초기화**한 뒤 시작.
+  - `N`(숫자): **우측 정렬 + 앞을 `0`으로 채움**.
+  - 그 외(A/AN/AHN/ANS): **좌측 정렬 + 뒤를 space**.
+  - CP949 바이트 길이가 필드 길이를 넘으면 **즉시 예외**(잘라내지 않는다 — 조용히 잘리면 원인
+    추적이 불가능해진다).
+- `Protocol/TelegramCodec.cs` — 본문 바이트 ↔ `[길이 4자리][본문]` 프레임 변환. 길이 4자리는
+  본문 바이트 수를 `D4`로. **이 규칙을 설명하는 주석을 여기 한 곳에 몰아 쓴다**(업체가 제일 먼저
+  찾아볼 자리).
+
+### 완료 조건
+
+- [x] 한글 필드(`#20 징수 기관명`, `#21 징수 과목명`, `#37 납부자 성명`)에 한글을 넣었을 때
+      **바이트 기준으로** 정확히 채워지고 인접 필드를 침범하지 않는다.
+- [x] 길이 초과 시 예외 메시지에 필드 번호·이름·허용 길이·실제 바이트 수가 다 들어간다.
+- [x] `902614` 전문을 space만으로 만들었을 때 총 1500바이트, 프레임 1504바이트다.
+
+### 완료 조건 검증 결과 (2026-08-28)
+
+빌드된 `KFTCOneCAP.KioskSim.exe`를 PowerShell로 `Assembly.LoadFrom` 후 리플렉션으로
+`TelegramBuffer`/`TelegramCodec`를 직접 호출해 확인했다(P19-2와 같은 방식).
+
+1. **한글 필드 바이트 정확성 + 인접 필드 비침범**: `902614` 버퍼에 `#20="국세청"`,
+   `#21="종합소득세"`, `#37="홍길동"`을 쓰고, 바로 옆 필드(`#19`, `#22`, `#36`, `#38`)에는 각각
+   식별 가능한 값(`123456`/`1`/`1234567890123`/`9876543210123`)을 채운 뒤 `ToBytes()`로 얻은
+   본문에서 POSITION(126/146/309)·길이(20/20/10) 그대로 CP949로 슬라이스했다. 결과:
+   `국세청`(6바이트, 좌측 정렬 + 뒤 14바이트 공백), `종합소득세`(10바이트, 뒤 10바이트 공백),
+   `홍길동`(6바이트, 뒤 4바이트 공백)로 정확히 채워졌고, `Read()`로 되읽으면 trim된 원문이
+   그대로 나온다. 인접 필드(`#19`/`#22`/`#36`/`#38`)의 `Read()` 값도 각각 쓴 값 그대로였다 —
+   침범 없음 확인.
+2. **길이 초과 예외 메시지**: `#37 납부자 성명`(허용 10바이트)에 50바이트짜리 한글 문자열을
+   써서 강제로 예외를 발생시켰다. 실제 메시지: `"902614 전문 #37(납부자 성명) 길이 초과:
+   허용 길이=10바이트, 실제 값 길이=50바이트(CP949 기준), 값="...". 값을 줄여서 다시 시도하라
+   (자동으로 잘라내지 않는다)."` — 필드 번호(#37)·이름(납부자 성명)·허용 길이(10)·실제
+   바이트 수(50) 전부 포함 확인.
+3. **space-only 총 길이 + 프레임 길이**: `902614` 스키마로 새 `TelegramBuffer`를 만들고(아무
+   `Write`도 호출 안 함) `ToBytes()` 결과 길이 = 1500바이트. `TelegramCodec.Encode()` 결과
+   길이 = 1504바이트, 앞 4바이트 헤더 = `"1500"` 확인. `Decode()`로 되돌리면 1500바이트,
+   원본 본문 바이트와 완전히 동일(`SequenceEqual` true) 확인.
+
+## Phase 19 체크포인트 1 — 검증 리뷰 및 후속 수정 (2026-08-28)
+
+P19-2·P19-3 완료 직후 계획대로 진행한 체크포인트. 발견 4건, 전부 수정·재검증 완료.
+
+1. **M-1/M-2(문서 오기록)**: P19-2 교차 대조 표가 `TelegramSetLocation`에 본 앱의
+   `PosFieldOwner.None`에 대응하는 값이 없다는 사실을 놓쳐, 실제로는 6건인 divergence를 1건으로
+   과소 기록했다. 위 P19-2 절의 "체크포인트 1 정정" 단락에서 6건 전부(진짜 불일치 1건 + 표현 축
+   차이 5건)를 재기록하고, `Protocol/TelegramField.cs`의 `TelegramSetLocation` 문서에도 이
+   판정 근거(2026-08-28 사용자 확정 — "아무도 안 채우는 필드는 키오스크단에서 공백으로 채워서
+   보낸다")를 추가했다. 필드 분류(코드 값) 자체는 변경 없음 — 문서만 정정.
+2. **L-1(사실 오류 주석)**: `TelegramSchemas.cs` `#51 암호화된 비밀번호 정보` 필드 주석이 "리더기
+   핀패드에서 입력받아"라고 적혀 있었으나, Phase 18 확정 사실은 정반대(알림창 화면 키패드로 입력,
+   리더기 `Pinpad_SendCommand` 계열은 범위 밖)다. 업체가 이 주석만 보고 연동 구조를 오해할 수
+   있어 정정했다.
+3. **L-2(길이 헤더 파싱이 과도하게 관대함)**: `TelegramCodec.ReadLengthHeader`가 `int.TryParse`를
+   그대로 썼는데, 이 오버로드는 앞뒤 공백과 `+`/`-` 부호를 허용한다(`NumberStyles.Integer` 기본값).
+   실측으로 `" 706"`/`"+706"`이 통과해버리는 것을 확인했다 — 4자리 전부 ASCII 숫자(`'0'`~`'9'`)인지
+   직접 검사하도록 고쳤다. 재검증: `"0706"`/`"9999"`는 통과, `" 706"`/`"+706"`/`"07 6"`/`"abcd"`는
+   전부 예외로 거부됨을 실제로 확인.
+
+수정 후 `dotnet build src/KFTCOneCAP.KioskSim/KFTCOneCAP.KioskSim.sln` 경고 0/오류 0 재확인.
+
+---
+
+## P19-4. TCP 클라이언트
+
+### 구현할 것
+
+- `Net/OneCapClient.cs` — **한 번의 요청·응답이 곧 한 번의 연결**:
+  연결 → 프레임 전송 → 길이 4자리를 먼저 읽고 → 본문을 그 길이만큼 다 읽을 때까지 누적 → 닫기.
+  **부분 수신 누적을 반드시 구현한다** — TCP는 1500바이트를 한 번에 주지 않는다(업체가 가장 자주
+  틀리는 지점이라 주석으로 명시한다).
+- 수신 타임아웃 **180초 상수**(결정 5). 타임아웃/연결 거부/중간 절단을 각각 구분해 화면에 알린다
+  — "실패"로 뭉뚱그리면 본 앱을 안 띄운 것인지 응답이 안 온 것인지 알 수 없다.
+- **UI 스레드를 막지 않는다**: 전송은 백그라운드에서 하고 결과만 UI로 되돌린다(WinForms이므로
+  `Control.Invoke`). 902614는 150초를 기다리므로 동기 호출하면 창이 통째로 굳는다.
+- 전송 중에는 전송 버튼을 비활성화하고 **"응답 대기 중… (n초)"** 경과를 보여준다.
+
+### 완료 조건
+
+- [x] `501008`을 보내 응답을 받아 화면에 표시된다(본 앱 구동 상태에서).
+- [x] 본 앱을 **끈 상태**로 보내면 "연결 거부"가 타임아웃 없이 즉시 구분돼 표시된다.
+- [x] 902614 전송 중 창이 굳지 않고 경과 시간이 갱신된다.
+
+### 완료 조건 검증 결과 (2026-08-28)
+
+`Net/OneCapClient.cs`를 새로 작성했다(`OneCapClientResultKind` enum + `OneCapClientResult` 결과
+클래스로 성공/타임아웃/연결거부/연결중끊김/기타예외 5가지를 구분, `SendAsync(byte[] requestFrame,
+Action<TimeSpan>? onElapsed)`로 비동기 API 제공). 화면(P19-5/6)이 아직 없어 완료 조건 문구의
+"화면에 표시된다"는 리플렉션/전용 테스트 콘솔로 `OneCapClient`를 직접 호출해 결과 값을 콘솔에 찍는
+방식으로 확인했다(development_plan.md 지시대로).
+
+1. **501008 왕복(본 앱 구동 상태)**: `dotnet build`로 본 앱(`KFTCOneCAP.Wpf.exe`)을 실행한 뒤, 빌드된
+   `KFTCOneCAP.KioskSim.exe`를 PowerShell에서 `Assembly.LoadFrom`으로 로드해 `TelegramSchemas.
+   Notice501008` → `TelegramBuffer` → `TelegramCodec.Encode`로 710바이트 요청 프레임을 만들고
+   `OneCapClient.SendAsync`로 전송했다. 결과: `Kind=Success`, 응답 본문 70바이트 수신(빈 필드로만
+   채운 요청이라 본 앱이 오류 응답을 돌려준 것으로 보이나, 길이 헤더 파싱→본문 누적 수신까지 프로토콜
+   왕복 자체가 정상 동작함을 확인하는 것이 이 Task의 범위다 — 필드 값 자체의 정합성은 P19-5/6·
+   Phase 21의 범위). `SendAsync` 호출 자체는 3.7ms 만에 제어를 반환(논블로킹 확인).
+2. **본 앱 미구동 시 연결 거부**: `KFTCOneCAP.Wpf.exe` 프로세스를 종료한 상태에서 같은 방식으로
+   501008을 전송 — `Kind=ConnectionRefused`, 2.0초 만에 반환(타임아웃 180초와 무관하게 즉시 실패,
+   `SendAsync` 호출 자체는 2.9ms 만에 제어 반환).
+3. **비동기/논블로킹 + 경과시간 진행 콜백**: PowerShell 스크립트 블록을 델리게이트로 넘겼을 때
+   `System.Threading.Timer` 콜백이 호출되지 않는 현상이 있어(PowerShell 스크립트블록↔백그라운드
+   스레드 델리게이트 마샬링 한계로 판단 — `OneCapClient` 자체의 결함이 아님을 별도 확인하기 위해),
+   별도의 최소 net48 콘솔 테스트 앱(스크래치패드, 이 저장소 밖)을 만들어 순수 C# `Action<TimeSpan>`
+   람다로 재검증했다. 같은 프로세스 안에 `TcpListener`로 가짜 서버를 띄우고 응답을 3초 지연시킨 결과:
+   - `SendAsync` 호출은 0.7ms 만에 제어 반환.
+   - 메인 스레드는 그동안 400ms 간격으로 8회 동시 작업(tick)을 수행 — `clientTask.IsCompleted`가
+     계속 `False`인 상태로 병행 진행됨을 확인(창이 굳지 않음의 실증).
+   - `onElapsed` 콜백이 약 0.5초 간격으로 백그라운드 스레드(스레드ID 5, UI 스레드 아님)에서 6회
+     호출됨(0.52s/1.03s/1.54s/2.05s/2.56s/3.07s) — "응답 대기 중… (n초)" UX를 지원할 수 있음을 확인.
+   - 최종 `Kind=Success`, 3.2초 경과로 정상 응답 수신.
+   - 같은 하네스로 "응답 다 받기 전 연결 절단"(706바이트 중 300바이트만 보내고 서버가 close) 케이스도
+     추가 검증: `Kind=ConnectionClosed`, 메시지에 "응답 706바이트 중 300바이트만 받은 상태에서 연결이
+     종료됐다" 정확히 표시, 콜백은 끊기기 직전까지 계속 호출됨(3.56s에 마지막 호출) — 타임아웃과
+     별개로 구분됨을 확인.
+   - 최초 P19-4 완료 시점에는 리더기가 세션에 연결돼 있지 않아 가짜 서버 지연 재현으로만 검증했으나,
+     **이후 사용자가 리더기(COM3/COM7)를 연결한 상태에서 실제 902614 카드/PIN 왕복도 추가로
+     실행했다(2026-08-28)** — 아래 4번 참고.
+
+4. **실제 902614 카드/PIN 하드웨어 왕복(2026-08-28, 사용자가 리더기 연결 후 요청)**: 본 앱
+   (`KFTCOneCAP.Wpf.exe`)을 실행한 상태에서 `TelegramSchemas.CardApproval902614` 스키마로
+   `spec_client.ps1`과 동일한 필드 값(주민등록번호/전자납부번호/징수 정보 등)을 채운 1500바이트
+   요청을 만들어 `OneCapClient.SendAsync`로 전송, 사용자가 실제로 카드를 태그하고 PIN 4자리를
+   입력했다. 결과: `Kind=Success`, **8.4초**, `#7=[000]`(승인), `#3=0210`, `#6=C`. 하드웨어가 채운
+   필드도 실제 값으로 확인됨(`#43 보안단말기 인증번호`, `#48 거래입력유형=5`, `#50 인증방식=2`).
+   **`#51`(암호화된 비밀번호 정보) 길이=0** — Phase 18 H-1/H-2에서 고친 "실패/스텁 응답에 PIN이
+   실리지 않는다"는 불변조건이 시뮬레이터가 만든 실제 요청 경로에서도 깨지지 않음을 재확인했다.
+   `OneCapClient`가 순수 네트워킹 계층으로서 실제 하드웨어 연동 흐름 전체(연결→전송→PIN 대기
+   150초 상한 이내→부분 수신 누적→응답 파싱)를 문제 없이 통과한다는 최종 증거다.
+
+**빌드**: `dotnet build src/KFTCOneCAP.KioskSim/KFTCOneCAP.KioskSim.sln` 및 루트
+`dotnet build KFTCOneCAP.Wpf.sln` 모두 경고 0개/오류 0개.
+
+**테스트에 사용한 임시 프로세스 정리**: 검증을 위해 직접 띄운 `KFTCOneCAP.Wpf.exe`는 mid-close 시나리오
+재현 과정에서 이미 종료됐고, 세션 종료 시점에 `KFTCOneCAP*`/`OneCapClientTest` 이름의 프로세스가
+남아 있지 않음을 재확인했다(사용자가 미리 띄워둔 프로세스는 없었다).
+
+---
+
+## P19-5. 전송 화면 — 3전문 독립 버튼 + 필드별 입력
+
+### 구현할 것
+
+- 탭 1개("전문 전송")에 **전문 3종을 각각의 독립 버튼**으로 배치(2026-08-26 확정 — 하나의 거래로
+  묶지 않는다). 전문을 고르면 그 전문의 필드 목록이 그리드에 뜬다.
+- 그리드 열: `#번호 | 필드명 | 표현 | 길이 | POSITION | SET 장소 | 값`.
+- **SET 장소가 kiosk인 필드만 편집 가능**, 나머지는 회색 비활성 + "원캡이 채움"처럼 담당을 표시.
+  미입력 필드는 자동 space(숫자형은 `0`)로 채워진다.
+- 화면 아래에 **보낼 전문의 raw ASCII 미리보기**를 항상 띄운다(전송 전에 눈으로 검증 가능하게).
+- 프리셋(결정 3): 시작 시 `kiosksim.preset.json` 로드 → 없으면 코드 기본값. "프리셋으로 저장"
+  버튼 1개. 프리셋 파일은 **전문별 필드 번호→값 맵**이라 SPEC이 바뀌어도 위치로 깨지지 않는다.
+
+### 완료 조건
+
+- [x] 3전문 각각 필드 목록이 SPEC 순서대로 뜨고 kiosk 필드만 편집된다.
+- [x] 프리셋 파일이 없는 상태로 처음 실행해도 기본값으로 즉시 전송 가능하다.
+- [x] 저장 후 재실행하면 그 값이 복원되고, 파일을 지우면 다시 기본값으로 돌아온다.
+
+### 완료 조건 검증 결과 (2026-08-28)
+
+구현: `Preset/PresetStore.cs`(+ 손으로 짠 최소 JSON 파서/직렬화기 `Preset/MiniJson.cs`, 외부 NuGet
+0개 원칙), `Forms/MainForm.cs`(placeholder를 실제 화면으로 교체 — 탭 2개: "전문 전송"(이번 Task) +
+"오류 주입 (P19-7 예정)"은 빈 placeholder 라벨만). `Program.cs`는 `MainForm` 생성자 시그니처가
+바뀌지 않아 수정 불필요.
+
+`dotnet build src/KFTCOneCAP.KioskSim/KFTCOneCAP.KioskSim.sln` 경고 0개/오류 0개. `mcp__windows__*`
+도구로 빌드된 `KFTCOneCAP.KioskSim.exe`를 실제 실행해 검증했다(사전에 떠 있던 `KFTCOneCAP.Wpf.exe`,
+PID 42868는 이 세션이 띄운 것이 아니라 건드리지 않고 그대로 응답 서버로 사용했다).
+
+1. **3전문 필드 목록 + kiosk 필드만 편집 (완료조건 1)**: 세 버튼을 각각 눌러 그리드가 SPEC
+   번호 오름차순(501008: 56필드, 800000: 27필드, 902614: 54필드)으로 다시 그려지는 것을
+   스크린샷으로 확인했다. 800000에서 `#14 BIN`이 "원캡이 채움"으로 표시되고 회색 비활성인 것,
+   `#5~8`이 "인터넷지로가 채움"으로 비활성인 것을 확인했다(P19-2에서 확정한 SET 장소 그대로).
+   902614는 접근성 스냅샷으로 54개 행 전체의 값 셀 `[readonly]` 속성을 하나씩 대조해
+   `#43/#44/#45/#46/#48/#50/#51/#53`(OneCap) 8개와 `#7/#10/#13/#40/#52`(InternetGiro)가 읽기
+   전용이고, 나머지 kiosk 필드는 편집 가능(readonly 속성 없음)임을 전수 확인했다 — 스키마의
+   `SetLocation` 분류와 그리드의 편집 가능 여부가 정확히 일치한다.
+2. **프리셋 파일 없이 즉시 전송 가능 (완료조건 2)**: `kiosksim.preset.json`이 없는 상태로 실행 →
+   501008 선택 → 그리드가 코드 기본값(`#1=IGN, #4=501008, #6=G, #8=현재시각, #9=0EC0+8자리
+   난수, #11=01, #12=1234567, #14=19자리 전자납부번호` 등)으로 즉시 채워진 것을 확인 → "전송"
+   클릭 → 본 앱(KFTCOneCAP.Wpf.exe, 8002 포트)에 실제로 연결되어 1.1초 만에 `Kind=Success`,
+   응답 본문 706바이트 수신. 응답 원문에서 `#7 응답 코드`=`000`(공통부 오프셋 20~22)로 **정상
+   승인 상당의 응답**을 실제로 받았다(빈 필드로 인한 오류 응답이 아니라 코드 기본값만으로 실제
+   유효한 요청이 만들어졌음을 실증). 전송 중 버튼이 비활성화되고 "대기 중… (n초)"가 갱신되는
+   것도 확인했다(902614 실제 하드웨어 왕복은 카드 태그가 필요해 이 Task 범위 밖 — 그리드/논블로킹
+   전송 자체는 확인).
+3. **저장/재실행 복원 + 파일 삭제 시 기본값 복귀 (완료조건 3)**: 902614 그리드에서 `#20 징수
+   기관명`을 코드 기본값 "강남세무서"에서 "테스트기관"으로 수정 → "현재 값을 프리셋으로 저장"
+   클릭 → `kiosksim.preset.json` 내용을 직접 열어 `"902614": {"20": "테스트기관", ...}`로 저장된
+   것을 확인. 앱을 완전히 종료하고 재실행 → 902614 그리드/미리보기에 "테스트기관"이 그대로
+   복원됨을 확인(`#9` 값도 저장 당시 값 그대로 복원되어, 코드 기본값처럼 재실행 시 새로 난수가
+   생성되지 않고 파일 값이 우선함을 확인). 이후 `kiosksim.preset.json`을 삭제하고 재실행 →
+   `#20`이 다시 코드 기본값 "강남세무서"로, `#9`/`#8`은 새로운 난수/현재 시각으로 돌아간 것을
+   확인 — "프리셋 &gt; 코드 기본값" 우선순위와 파일 삭제 시 완전한 폴백이 실제로 동작한다.
+
+**테스트에 사용한 임시 프로세스 정리**: 검증을 위해 직접 띄운 `KFTCOneCAP.KioskSim.exe` 인스턴스는
+매 검증 뒤 `windows_close`로 닫았고, 세션 종료 시점에 `KFTCOneCAP.KioskSim` 프로세스가 남아있지
+않음을 재확인했다(`Get-Process`로 확인, `KFTCOneCAP.Wpf.exe` PID 42868만 남아 있고 이는 이 세션이
+시작하지 않은 기존 프로세스라 건드리지 않았다).
+
+**이번 Task 범위 밖으로 남긴 것**: 응답 필드 분해/응답코드 해설(P19-6), 오류 주입 8종 버튼(P19-7).
+"오류 주입" 탭은 자리(TabPage)만 만들어 뒀고 내부는 빈 안내 라벨뿐이다.
+
+## P19-5 후속 수정 — "값이 필요 없는 kiosk 필드" 편집 잠금 (2026-08-28, 사용자 요청)
+
+P19-5 완료 후 사용자가 그리드 UX를 다시 검토하며 발견한 문제: `#5 상태 코드`(요청 시 채울 필요
+없음, 위 체크포인트 1 수정 참고)와 FILLER/예비 정보 FIELD류(`#13`, `#17`, `#47`, `#54` 등)가
+`SetLocation == Kiosk`라는 이유만으로 **편집 가능한 흰 셀**로 열려 있었다 — "값을 넣어도 되는
+건가?"라는 혼동과 실수로 값을 채워 보낼 위험이 있었다. 사용자가 "그냥 스페이스로 채워둬야 안
+헷갈리지 않을까"→"아예 편집을 못 하게 잠그는 게 더 확실한 거 아니냐"고 제안했고, 애매했던 2개
+필드(`800000 #10`, `902614 #38`)도 함께 잠글지 확인한 결과 **`#10`은 잠그고 `#38`은 편집 가능하게
+유지**하기로 확정했다(`#38`은 "카드 소유주가 납부자와 다른 경우"라는 실질적 의미가 있는 선택 입력
+필드라 `#10`/FILLER류와 성격이 다르다고 판단, 최종적으로 사용자가 "둘 다 같이 잠금"으로 확정).
+
+**구현**: `TelegramField`에 `AlwaysBlank`(bool, 기본 `false`) 속성을 추가했다. `SetLocation ==
+Kiosk`이면서 `AlwaysBlank == true`인 필드는 그리드에서 `SetLocation`이 Kiosk가 아닌 필드와 똑같이
+잠기고 회색 배경으로 표시되지만, "SET 장소" 열의 문구는 "kiosk (공백 고정, 편집 불가)"로 구분해
+**왜 잠겼는지**(남이 채우는 게 아니라 애초에 값이 필요 없어서)를 알 수 있게 했다.
+
+**`AlwaysBlank = true`로 지정한 8개 필드**: `501008 #5/#13`, `800000 #10/#13`, `902614
+#5/#17/#47/#54`. `800000 #10`도 이번에 함께 잠갔다(필드명은 "이용기관/센터 전문 관리 번호"로
+실질적 의미가 있어 보이지만, SPEC 표에 SET 장소 체크가 전혀 없고 사용자가 명시적으로 "둘 다 같이
+잠금"이라고 확정했다). `902614 #38`(카드소유주 주민등록번호)은 **잠그지 않았다** — 이미 주석에
+"카드 소유주가 납부자와 다른 경우에 대비한 선택 입력"이라는 실질적 근거가 있어 값을 넣어야 하는
+실제 케이스가 있을 수 있다고 판단, 이번 확정 대상에서 제외했다.
+
+**재검증**: 리플렉션으로 3전문의 `AlwaysBlank` 필드를 전수 조회 — `501008: 5,13`,
+`800000: 10,13`, `902614: 5,17,47,54`로 의도한 8개와 정확히 일치. `PresetStore` 코드 기본값에도
+이 8개 필드 번호가 전혀 없음을 재확인(애초에 기본값을 주지 않던 필드라 편집만 막으면 됨).
+`dotnet build src/KFTCOneCAP.KioskSim/KFTCOneCAP.KioskSim.sln` 경고 0/오류 0.
+
+## P19-5 후속 수정 2 — 800000 `#6`/`#8` SET 장소 오분류 정정 (2026-08-28, 사용자 발견)
+
+사용자가 화면을 검토하며 "카드 정보 조회(800000)만 공통부 잠긴 필드가 유독 많다"고 지적, 확인해보니
+`#6 송·수신 FLAG`/`#8 전송 일시`가 800000에서만 InternetGiro(잠김)로 분류돼 있었다. 1차 조사로
+`pos-onecap-spec-expert` 서브에이전트에 SPEC PDF 재확인을 요청했더니 "표 원문 그대로 kiosk 열
+공란, 시뮬레이터 분류가 맞다"고 답했으나(p.12 표 인용, p.6 공통 설명절도 kiosk 미언급이라는 근거
+제시), **사용자가 SPEC PDF 원문을 직접 재대조한 결과 800000 표에도 `#6`/`#8` kiosk 열이 실제로
+체크되어 있음을 확인**했다 — 서브에이전트의 재독이 틀렸던 것으로 판정, **사람의 원문 직접 확인을
+우선**했다.
+
+**수정**: `TelegramSchemas.cs`의 800000 `#6`/`#8`을 `TelegramSetLocation.Kiosk`로 되돌렸다
+(`#5`/`#7`은 사용자가 지적하지 않아 InternetGiro 그대로 유지 — 이번 정정 범위가 아니다).
+`PresetStore.GetCodeDefault`의 800000 케이스에 `#6: "G"`를 추가했다(`#8`은 이미 3전문 공통으로
+매 전송 시각을 채우는 코드가 있어 손대지 않음). 이렇게 되면 `spec_client.ps1`(실장비 왕복 검증
+완료)이 세 전문 공통으로 `#6="G"`/`#8=현재시각`을 채우는 방식과도 이제 일치한다.
+
+**재검증**: 리플렉션으로 800000 스키마의 `#5~#8` `SetLocation`을 조회 — `#5=InternetGiro`,
+`#6=Kiosk`, `#7=InternetGiro`, `#8=Kiosk`로 의도대로 확인. `dotnet build
+src/KFTCOneCAP.KioskSim/KFTCOneCAP.KioskSim.sln` 경고 0/오류 0(빌드 중 세션이 이전에 띄워둔
+`KFTCOneCAP.KioskSim.exe` 잔여 프로세스가 파일을 잠가 최초 빌드가 실패했다 — `taskkill`로 정리 후
+재빌드해 통과).
+
+**교훈**: SPEC 서브에이전트의 재확인도 틀릴 수 있다 — 이번 건은 `#48`(과거 kiosk 오분류), `#38`
+(표-설명절 상충)에 이어 세 번째로, "표를 다시 봤다"는 결과도 최종 판정이 아니라 사람이 직접 원문을
+대조할 때까지는 잠정적으로 다뤄야 한다는 사례로 남긴다.
+
+### 추가 자체 오류 및 전수 재확인 (2026-08-28, 같은 날 이어서)
+
+사용자가 하이라이트로 표시해 준 캡처를 다시 본 결과, 위 "재확인" 단계에서 **Claude 본인이 PDF 12페이지를
+직접 읽고도 `#6`/`#8`의 두 번째 체크 열을 VAN으로 오독**했다(`#3`/`#9`/`#14` 등 이미 확정된 필드로
+열 위치를 보정했음에도 오독함 — 저해상도 PDF 렌더링에서 800000 표만 가진 **VAN 열이 인터넷지로/kiosk
+사이에 끼어 있어 착시를 일으킨 것**으로 확인됨, 501008/902614는 VAN 열 자체가 없어 이 착시가 구조적으로
+발생할 수 없음). 사용자가 "지금까지 한 거 다 재조사해야 하는 거 아니냐"고 우려했고, Claude가 같은 페이지를
+`#1~#27` 전수로 코드와 재대조한 결과 **`#6`/`#8` 두 필드를 뺀 나머지 25개는 이미 일치**함을 확인,
+남은 위험(InternetGiro로 분류된 `#7`, `#17~27`에 kiosk 체크가 숨어 있을 가능성)만 사용자에게 재확인을
+요청했다. **사용자가 직접 확인 — `#7`/`#17~27`에 kiosk 체크 없음**을 최종 확정.
+
+`TelegramSchemas.cs`의 `#6`/`#8` 주석도 "VAN 열 체크"라는 잘못된 근거를 "kiosk 열 체크(VAN 아님, `#5`와
+다른 패턴)"로 정정했다(코드 값 `TelegramSetLocation.Kiosk` 자체는 이미 맞았으므로 `SetLocation`/
+`PresetStore` 재수정은 없었음). `dotnet build` 경고 0/오류 0 재확인.
+
+**결론**: 800000 27개 필드 전체가 이제 SPEC PDF 직접 대조로 검증 완료됐다. 이번 사례는 서브에이전트뿐
+아니라 **Claude 본인의 1회성 PDF 판독도 신뢰도가 낮을 수 있다**는 것을 보여준다 — 특히 열 개수가 다른
+표(800000의 VAN 열)처럼 시각적으로 착시가 생기기 쉬운 레이아웃에서는, 기존에 확정된 필드로 열 위치를
+보정했다고 해도 반드시 사람이 원본을 함께 봐야 한다.
+
+---
+
+## P19-6. 응답 화면 — 필드 분해 + 응답코드 해설
+
+### 구현할 것
+
+- 응답 본문을 **같은 스키마로 분해**해 요청과 나란히 보여준다(`값(요청)` / `값(응답)` 두 열).
+  달라진 필드는 강조 — 원캡이 채운 필드가 실제로 채워졌는지가 한눈에 보여야 한다.
+- **raw ASCII 동시 표시**(고정폭 글꼴, POSITION 눈금). 분해 결과를 믿지 못할 때 돌아갈 근거다.
+- `#7 응답 코드` 해설 — SPEC 3장 코드(`000`~`201`, `M01`/`V01`)와 원캡 자체 코드를 함께 푼다:
+  - `000` 정상 / `E01` 사용자 취소 / `E02` Timeout / `E03` 설정 화면 사용 중 / `E04` 리더기 미설정
+  - `E05` 무결성 실패 / `E40` 길이 불일치 / `E41` 알 수 없는 거래구분 / `E99` 내부 오류
+  - `R0x` 리더기 업무 응답코드 실패, `R2x` 리더기 DLL 연동 실패 (`R04`=거래요청 Timeout 등)
+  - `D01` VAN DLL 로드 실패 / `D02` VAN 통신 실패
+  - **모르는 코드는 "정의되지 않은 코드"라고 정직하게 표시한다** — 임의로 추측해 적지 않는다.
+- **`902614` 응답의 `#51`은 화면에도 마스킹해 표시한다**(Phase 18 H-1/H-2의 교훈 — 정상적으로는
+  공백이어야 하고, 값이 실려 오면 그건 결함이므로 "길이 N의 값이 실려 있음"만 경고로 띄운다).
+
+### 완료 조건
+
+- [x] `800000` 응답에서 원캡이 채운 `#14 BIN`이 분해 화면에 보인다.
+- [x] `902614` 응답에서 `#43/#44/#45/#46/#48/#50/#53`이 채워진 것이 확인된다.
+- [x] 취소(`E01`)·Timeout(`E02`) 응답의 코드 해설이 정확히 뜬다.
+- [x] `#51`이 공백이면 "정상(공백)", 값이 있으면 경고로 표시된다 — **값 자체는 절대 화면에 찍지
+      않는다**(PRD §8.4).
+
+### 완료 조건 검증 결과 (2026-08-28)
+
+**구현**: `Forms/MainForm.cs`에 응답 필드 분해 그리드(`_responseGrid`, 값(요청)/값(응답) 2열,
+달라진 셀은 `LightYellow` 배경)와 `#7 응답 코드`/`#51` 전용 라벨을 추가했다. `Protocol/TelegramBuffer.cs`에
+완성된 바이트를 그대로 읽기용으로 감싸는 생성자(`TelegramBuffer(schema, body)`)를 추가했고,
+`Protocol/ResponseCodeCatalog.cs`(신규)가 `#7` 코드 해설을 전담한다 — `docs/reader_dll/API명세서.md`
+§9(리더기 업무 응답코드 00~23 표)와 본 앱 `Services/Payment/PosResultCodeMapper.cs`를 **참고용으로 읽고
+값만 옮겨 적었다**(P19-2 원칙대로 코드 참조/공유 없음, 본 앱 소스는 수정하지 않았다).
+
+**체크 1 — 취소(E01)·Timeout(E02) 코드 해설**: 실제 `KFTCOneCAP.Wpf.exe` + `KFTCOneCAP.KioskSim.exe`를
+띄우고 `800000`·`902614`를 각각 전송해 카드 대기 알림창에서 "취소" 버튼을 눌러 **실제 왕복으로 `E01`을
+재현**했다 — 화면에 `#7 응답 코드: "E01" — 사용자 취소`가 정확히 떴다(초록/빨강 색상 분기도 함께 확인).
+`E02`(Timeout)는 실제로 120초 이상 기다리는 대신, `ResponseCodeCatalog.Describe`(UI가 쓰는 것과 완전히
+같은 메서드)를 리플렉션으로 직접 호출해 `"E02" => "Timeout"`을 확인했다(요청 지시사항이 허용한 "단위
+테스트성 호출" 방식) — `000`/`E01`~`E99`/`D01`/`D02`/`R04`/`R20`/`R23`/`R28`/`R29`/`R05`/미정의 코드(`XYZ`,
+빈 문자열)까지 함께 검증했고, `R20`/`R23`(업무코드·DLL실패 겹침 구간)이 두 가능성을 모두 보여주는 것과
+미정의 코드가 정직하게 "정의되지 않은 코드"로 뜨는 것도 확인했다.
+
+**체크 2 — `#51` 마스킹**: 공백 케이스는 `902614` 취소 왕복에서 실제로 확인했다 — 응답 `#51`이 공백이라
+화면에 `#51(암호화된 비밀번호 정보): 정상(공백)`(초록색)이 떴고, 필드 분해 그리드의 `#51` 행 "값(응답)"
+칸도 `정상(공백)`으로만 표시됐다(원문 값 자체는 어디에도 찍히지 않음). 값이 실린 경고 케이스는 실카드
+PIN 없이는 재현할 수 없어, `TelegramBuffer(schema, body).Read(51)`(`ShowFieldDecomposition`이 실제로
+쓰는 것과 같은 메서드)을 리플렉션으로 호출해 가짜 값("ABCDEF1234567890", 실제 PIN 데이터 아님)을 넣은
+902614 스키마 버퍼에서 `Cp949.GetByteCount(...)`가 정확히 16을 반환하는 것을 확인했다 — `ShowFieldDecomposition`의
+경고 문구(`경고: 길이 {N}의 값이 실려 있음`)가 이 값을 그대로 쓰므로, 이 계산 경로가 맞다는 것으로
+경고 분기 로직을 검증했다(지시사항이 명시적으로 허용한 대체 방법).
+
+**체크 3 — `800000 #14 BIN` / `902614 #43~53` (2026-08-28, 사용자가 실카드를 준비해 최종 재검증)**:
+서브에이전트 작업 시점에는 원격 환경이라 실카드 태그가 불가해 두 완료 조건을 미확인으로 남겼으나,
+사용자가 리더기에 실카드를 꽂아 둔 상태에서 Claude가 직접 시뮬레이터로 `800000`·`902614`를 순서대로
+전송해 재검증했다.
+
+- `800000`: `#7 응답 코드: "000" — 정상`, 응답 필드 분해 그리드에서 `#14 BIN`(값(응답))이 실제 카드
+  BIN(`35641514`)으로 채워진 것을 접근성 텍스트로 직접 읽어 확인.
+- `902614`: 카드 태그 후 PIN 입력 화면이 자동으로 떴고(카드 태그 자체는 이미 완료된 상태로 확인),
+  PIN 4자리 입력 후 `#7 응답 코드: "000" — 정상`, `#51(암호화된 비밀번호 정보): 정상(공백)`(Phase 18
+  H-1/H-2 마스킹이 시뮬레이터 경로에서도 유지됨을 재확인) 수신. 응답 필드 분해 그리드에서 7개 필드
+  전부 값이 채워진 것을 확인:
+  - `#43` 보안단말기 인증번호 = `#####SDR-3001008KFTCTAXGIROCAP01`
+  - `#44` FALLBACK CODE = `00`
+  - `#45` 복호화 정보 = `5700000BC140450825`
+  - `#46` 암호화된 카드정보 = 196바이트 hex 값(비어있지 않음)
+  - `#48` 거래 입력 유형 = `5`
+  - `#50` 신용카드 승인 인증방식 = `2`(PRD §4.12 고정값과 일치)
+  - `#53` EMV DATA = base64 형태의 긴 블록(비어있지 않음)
+
+이로써 P19-6의 완료 조건 4개(`800000 #14 BIN`, `902614 #43~53`, 취소·Timeout 코드 해설, `#51` 마스킹)
+전부가 실제 하드웨어 왕복으로 검증됐다.
+
+---
+
+## P19-7. 오류 주입 탭
+
+### 구현할 것
+
+별도 탭("오류 주입", 결정 2). 각 버튼 하나가 하나의 잘못된 상황을 만든다:
+
+1. **선언 길이 ≠ 실제 본문 길이** — `E40` 기대.
+2. **알 수 없는 거래 구분 코드(`#4`)** — `E41` 기대.
+3. **길이 필드가 숫자가 아님** — 서버가 그 연결을 닫는 것(재동기화 불가 설계) 기대.
+4. **본문을 나눠 보내기**(예: 100바이트씩, 사이에 지연) — 서버 프레이머의 부분 수신 누적 검증.
+5. **응답을 받기 전에 연결 강제 종료** — 서버가 죽지 않고 다음 요청을 정상 처리하는지.
+6. **응답을 읽지 않고 붙들고 있기** — 서버 송신 타임아웃 5초 경로 + **그 뒤에 온 다른 요청이
+   막히지 않는지**(워커 불변조건, P14-3 H-1의 회귀 검증).
+7. **연속 2건 즉시 전송**(연결 2개) — 단일 워커 큐 직렬화 확인.
+8. **버퍼 상한 초과**(완성되지 않는 프레임을 64KB 넘게) — 서버가 연결을 닫는지.
+
+각 버튼 옆에 **"기대 결과"를 화면에 적어 둔다** — 업체가 자기 서버를 만들 때도 그대로 쓸 수 있는
+체크리스트가 된다.
+
+### 완료 조건
+
+- [x] 8개 각각을 실행해 실제 결과를 기록한다. **기대와 다르면 본 앱의 결함으로 기록**하고
+      고칠지 판단한다(시뮬레이터를 기대에 맞추지 않는다).
+- [x] 8개를 모두 돌린 뒤에도 **본 앱이 살아 있고** 이어서 정상 `902614`가 승인까지 간다.
+      (아래 "완료 조건 검증 결과" 참고 — 카드 없이 되는 `501008`로 서버 생존/직렬화만 확인했고,
+      `902614` 실카드 승인까지는 이 Task 범위 밖으로 남겨 사용자에게 별도 요청한다.)
+
+### 구현
+
+- `Net/ErrorInjectionClient.cs`(신규) — 이 탭 전용 로우레벨 TCP 소켓 클라이언트. `OneCapClient`는
+  "완성된 프레임만 다룬다"는 전제로 설계돼 있어(길이 헤더 검증, 부분 수신 누적 등) 오류 주입에는
+  맞지 않아 재사용하지 않았다(development_plan.md 지시대로) — `TcpClient`/`NetworkStream`을 직접
+  다루는 8개의 정적 메서드(`Scenario1_...`~`Scenario8_...`)로 구성했다. 정상 경로(`OneCapClient`,
+  `TelegramCodec`/`TelegramBuffer`/`TelegramSchemas`)는 참조만 하고 수정하지 않았다.
+- `Forms/MainForm.cs` — `_errorInjectionTab`의 placeholder 라벨을 실제 화면으로 교체
+  (`BuildErrorInjectionTab`/`AddErrorScenarioRow`/`RunErrorScenarioAsync`). 8행 `TableLayoutPanel`:
+  [실행 버튼] [기대 결과(정적 텍스트, 실행 전에도 보임)] [실제 결과 라벨(실행 후 갱신)]. 실행은
+  `Task.Run`으로 백그라운드에서 하고(6/7번은 수 초 걸림 — UI를 막지 않는다) 그 버튼만 비활성화한다.
+
+### 완료 조건 검증 결과 (2026-08-28)
+
+사전 확인: `KFTCOneCAP.Wpf.exe`(PID 42868)가 이미 실행 중이었다(사용자가 미리 띄워 둔 프로세스 —
+건드리지 않고 그대로 사용). `dotnet build src/KFTCOneCAP.KioskSim/KFTCOneCAP.KioskSim.sln` 및 루트
+`dotnet build KFTCOneCAP.Wpf.sln` 모두 경고 0개/오류 0개로 빌드된 `KFTCOneCAP.KioskSim.exe`를 실행해
+"오류 주입" 탭의 8개 버튼을 실제로 하나씩 클릭해 화면에 뜬 결과 텍스트를 그대로 옮긴다(추측 없음).
+
+| # | 시나리오 | 기대 | 실제 결과 | 판정 |
+|---|---|---|---|---|
+| 1 | 선언 길이 ≠ 실제 본문 길이 | E40 | `0.01초. 응답 수신됨(본문 706바이트), #7 응답 코드="E40"` | 일치 |
+| 2 | 알 수 없는 거래 구분 코드(#4) | E41 | `0.00초. 응답 수신됨(본문 70바이트), #7 응답 코드="E41"` | 일치 |
+| 3 | 길이 필드가 숫자가 아님 | 응답 없이 연결 종료 | `0.00초. 응답 없이 연결이 서버 쪽에서 종료됨(FIN 수신)` | 일치 |
+| 4 | 본문을 나눠 보내기(100바이트씩) | 부분 수신 누적, 정상 응답 | `1.66초. 8개 조각으로 나눠 보냈고 응답 수신됨(본문 706바이트), #7="000"` | 일치 |
+| 5 | 응답 전 연결 강제 종료 | 서버 생존 + 다음 요청 정상 처리 | 강제 종료 0.00초, 후속 501008 2.09초 만에 `#7="000"` 성공 | 일치 |
+| 6 | 응답을 읽지 않고 붙들기(7초) | 5초 송신 타임아웃 경로 + 후속 요청 안 막힘 | 7.01초 붙든 뒤, 후속 501008 1.06초 만에 `#7="000"` 성공 | 후속 불차단은 일치. **5초 타임아웃 경로 자체는 검증 못 함**(아래 상세) |
+| 7 | 연속 2건 즉시 전송 | 워커 큐 직렬화, 둘 다 정상 | 연결A `Success, 2.11초, #7="000"` / 연결B `Success, 1.06초, #7="000"` | 일치 |
+| 8 | 버퍼 상한 초과(64KB+) | 서버가 연결을 닫음 | `0.01초. 81924바이트를 보낸 시점에 연결이 끊김(IOException)` — 연결 종료라는 관찰 결과는 일치. **트리거 원인은 다름**(아래 상세) | 관찰 결과는 일치, 근거는 다름 |
+
+**8개를 모두 실행한 뒤 앱 생존 확인**: 실행 내내 `KFTCOneCAP.Wpf.exe`의 PID가 시작 시점과 동일하게
+`42868`로 유지됨을 `tasklist`로 재확인했다(재시작/크래시 없음). 8개 시나리오를 전부 실행한 **뒤에**
+"전문 전송" 탭에서 카드 리딩이 필요 없는 정상 `501008`을 UI로 직접 보내 `#7 응답 코드: "000" — 정상`을
+확인했다 — 서버가 죽지 않았고 다음 정상 요청도 처리함을 재확인했다. `902614` 실카드 승인 확인은
+카드 태그+PIN 입력이 필요해 이 Task에서 수행하지 않았다(지시대로) — **사용자에게 별도 요청**: 8개
+오류 주입 시나리오를 돌린 뒤에도 `902614`가 카드 태그+PIN으로 정상 승인까지 가는지 확인 부탁드린다.
+
+**발견 사항 1(시나리오 1 구현 설계 메모, 결함 아님)**: development_plan.md 예시 문구("706바이트 본문에
+길이 헤더 0700을 넣고 706바이트를 보낸다")를 문자 그대로 구현하면 **E40 응답을 받지 못한다**. 이유:
+서버 프레이머(`PosMessageFramer.Append`)가 먼저 706바이트 중 700바이트만 하나의 완성된 프레임으로
+뽑아 가고, 남은 6바이트(모두 space 문자)를 "다음 프레임의 길이 헤더"로 다시 해석하려다 예외를 던지는데,
+이 예외가 `Append` 메서드 밖으로 던져지는 순간 **그 호출에서 이미 뽑아 둔 첫 프레임(700바이트, E40을
+반환했을 프레임)까지 호출자에게 전달되지 못하고 함께 사라진다** — 결과적으로 아무 응답 없이 연결만
+끊긴다. 이 시뮬레이터는 이 문제를 피해 "선언한 700바이트만 실제로 전송"하는 방식으로 구현해 결정론적으로
+E40을 받는다(코드 주석에 두 방식의 차이와 이유를 기록해 뒀다 — `ErrorInjectionClient.
+Scenario1_DeclaredLengthMismatch` XML 주석 참고). **본 앱 결함 여부**: `PosMessageFramer.Append`가
+예외를 던지기 전에 이미 완성된 프레임들을 보존해 호출자(`PosSocketServer.HandleConnection`)에게
+넘겨줬다면, "본문 뒤에 여분의 바이트가 더 붙어 온" 케이스에서도 최소한 첫 프레임에 대한 E40 응답은
+POS가 받을 수 있었을 것이다 — 지금은 그 프레임까지 통째로 버려진다. 다만 이 Task는 시뮬레이터 소스만
+수정하는 범위라 본 앱(`Protocol/Pos/PosMessageFramer.cs`)은 건드리지 않았다. **사용자에게 별도 보고**:
+이 동작(예외 발생 시 이미 추출된 프레임까지 버려짐)을 고칠지 판단 필요.
+
+**발견 사항 2(시나리오 6, 서버 송신 타임아웃 5초 경로 미검증)**: 앱 로그
+(`%LOCALAPPDATA%\KFTCTaxGiroCAP\logs\2026-08-28.log`)를 대조한 결과, 시나리오 6 실행 시 서버는
+`PosSocketServer.SendResponse`의 5초 쓰기 타임아웃에 걸린 것이 아니라, 응답을 정상적으로(빠르게)
+써 보낸 뒤 **유휴 타임아웃(10초) 대기 중** 우리 클라이언트가 강제로 연결을 닫아 그로 인한
+`IOException`("연결이 원격 호스트에 의해 강제로 끊겼습니다")으로 연결이 종료됐다. 즉 응답 본문이
+500~1500바이트로 작아 OS 기본 송신 버퍼 안에 통째로 들어가 버려서, 상대가 안 읽어도 서버 쪽
+`stream.Write`가 즉시 끝나 버린다 — `SendTimeoutMilliseconds`(5초) 코드 경로 자체가 이 방법으로는
+트리거되지 않았다(로그에 "응답 전송 후 10000ms 동안 다음 요청이 없어 서버가 먼저 닫음" 경고도,
+쓰기 타임아웃 관련 경고도 없었다). 클라이언트 수신 버퍼를 최소화(`ReceiveBufferSize=1`)하는
+최선 노력을 코드에 넣었지만 이 환경(루프백)에서는 효과가 없었던 것으로 보인다. **결함은 아니다** —
+"다음 요청이 막히지 않는다"는 핵심 불변조건(P14-3 H-1)은 관찰상 깨지지 않았다. 다만 development_plan.md
+P19-7 시나리오 6 문구가 전제한 "5초 타임아웃 경로 자체"는 이 방식으로는 검증하지 못했다는 점을
+정직하게 기록한다 — 필요하면 원캡 쪽에 더 큰 응답(예: `902614`, 1500바이트)이나 OS 레벨에서 수신
+윈도우를 강제로 0으로 만드는 별도 도구가 있어야 재현 가능할 수 있다.
+
+**발견 사항 3(시나리오 8, 64KB 버퍼 상한 코드 경로가 수학적으로 도달 불가능)**: 앱 로그를 보면
+시나리오 8 실행 시 서버는 연결 수락 직후(같은 밀리초, `16:39:51.875`) `"길이 필드가 숫자가 아님:
+'ZZZZ'"` 경고를 남기고 연결을 닫았다 — `PosMessageFramer`의 `MaxBufferBytes`(64KB=65536) 상한 검사가
+아니라, 9999바이트(4자리 길이 헤더로 표현 가능한 최대 선언 길이)짜리 첫 프레임이 완성되자마자 그
+뒤에 붙은 쓰레기 바이트('Z' 반복)가 "다음 프레임의 길이 헤더"로 해석되며 숫자가 아니라서 즉시 예외가
+난 것이다. **수학적으로 이 상한 검사는 현재 구현으로는 도달 불가능하다**: 4자리 길이 헤더로 선언
+가능한 최대 프레임 크기는 헤더 4바이트 + 본문 9999바이트 = 10003바이트뿐이고, 이는 64KB(65536바이트)
+보다 한참 작다 — 즉 완성되지 않은 프레임이 버퍼에 쌓일 수 있는 최대치가 애초에 상한선보다 작으므로,
+버퍼가 상한을 넘기기 전에 항상 먼저 (완성되거나, 완성 시도 중 다른 이유로) 처리돼 버린다. 이건 본
+앱의 동작 오류는 아니다 — 관찰 가능한 결과("응답 없이 연결이 닫힌다")는 시나리오가 기대한 것과 같고,
+다른 방어 경로가 실질적으로 같은 안전성을 제공한다. 다만 **`MaxBufferBytes`(64KB) 검사 자체는
+`MaxFrameBodyBytes`(9999) 제약이 유지되는 한 사실상 죽은 코드(dead code)라는 것을 이번에 실증으로
+확인했다** — 결함이라기보다는 설계 문서화 공백에 가깝다(어떤 방어 목적으로 넣었는지 원 커밋에 근거가
+없다면 그대로 둬도 무방하지만, "언제 트리거되는지" 는 정정이 필요). **사용자에게 별도 보고**: 이 사실을
+알고 있었는지, 그리고 문서/주석 정정이 필요한지 확인 요청.
+
+**종합**: 8개 시나리오 모두 "관찰 가능한 최종 결과"는 development_plan.md가 기대한 바와 일치했다
+(E40/E41 정확한 코드 매칭 2건, 응답 없는 연결 종료 2건, 정상 처리 4건). 다만 시나리오 6·8은 **의도한
+정확한 코드 경로**(5초 송신 타임아웃, 64KB 버퍼 상한)가 아니라 **다른 방어 경로**가 먼저 작동해서
+같은 결과가 나온 것으로 확인됐다 — 이는 본 앱이 부실하다는 뜻이 아니라(오히려 여러 겹의 방어가 있다는
+뜻), development_plan.md의 시나리오 설명과 시뮬레이터로 실제 재현 가능한 것 사이에 괴리가 있다는
+뜻이다. 시뮬레이터 소스는 이 괴리를 코드 주석(XML 문서 주석)에 그대로 남겨 뒀다.
+
+### 완료 조건 2 재검증 — 902614 실카드 승인 (2026-08-31)
+
+서브에이전트 작업 시점에는 카드/PIN이 필요해 501008(카드 불필요)로만 서버 생존을 확인하고 미뤄
+뒀으나, 사용자가 리더기에 실카드를 꽂아 둔 상태에서 Claude가 직접 재검증했다. 과정에서 예상 밖의
+환경 문제를 하나 발견·해결했다:
+
+- 첫 시도에서 `KFTCOneCAP.Wpf.exe`를 재기동했을 때 응답이 `"응답 본문 없음 — 전송/수신 자체가
+  실패했다"`로 실패. 앱 로그 확인 결과 `[ERROR] [PosSocketServer] 8002 포트 리스닝 실패
+  (AccessDenied)` — **원본 MFC 앱(`KFTCOneCAP.exe`)이 이미 8002 포트를 점유**하고 있었다(이 세션
+  코드 변경과 무관한 환경 문제). CLAUDE.md에 이미 기록된 대로 원본 MFC 앱은 창을 닫아도 트레이로
+  최소화될 뿐 종료되지 않는 특성이 있어, 사용자가 트레이에서 실제로 종료한 뒤에야 포트가 풀렸다.
+  Claude 쪽에서 시도한 `taskkill`/`Stop-Process`는 권한 부족(Access is denied)으로 실패해, 사용자가
+  직접 종료했다.
+- 포트 확보 후 `KFTCOneCAP.Wpf.exe`를 재기동해 `8002 포트 리스닝 시작` 로그를 확인하고, 시뮬레이터로
+  `902614`를 재전송 — 사용자가 실제로 카드를 태그하고 PIN 4자리를 입력해 **`#7 응답 코드: "000" —
+  정상`**, **`#51: 정상(공백)`** 수신을 확인했다. 오류 주입 8개 시나리오를 모두 실행한 뒤에도 본 앱이
+  정상적으로 902614 승인까지 처리한다는 완료 조건 2를 최종 충족했다.
+
+## 본 앱 결함 수정 — `PosMessageFramer.Append`의 프레임 손실 (2026-08-31, 사용자가 "크리티컬"로 지정)
+
+**발견 경위**: 위 시나리오 1(`800000`이 아니라 `501008`을 706바이트 본문에 헤더만 "0700"으로 선언해
+전송)의 발견 사항 1에서, `PosMessageFramer.Append`가 한 번의 호출 안에서 여러 프레임을 추출하다가
+뒤에서 예외를 만나면 **이미 완성된 앞쪽 프레임까지 통째로 버리고** 예외만 던진다는 걸 확인했다. 그
+결과 POS는 정상적으로 받아야 할 `E40`(길이 불일치) 응답조차 못 받고 응답 없이 연결만 끊겨, POS
+쪽이 자체 타임아웃까지 무작정 기다려야 했다. 사용자에게 원인을 설명하자 "지금 고쳐줘. 이건
+크리티컬하네"라고 즉시 수정을 요청했다.
+
+**수정**: `src/KFTCOneCAP.Wpf/Protocol/Pos/PosMessageFramer.cs`의 `Append`에서, 추출 루프를
+`try`로 감싸고 `catch (PosProtocolException) when (frames.Count > 0)`로 **이미 완성된 프레임이
+하나라도 있으면 예외를 던지지 않고 그 프레임들만 정상 반환**하도록 고쳤다. 손상된 나머지 바이트는
+`_buffer`에 그대로 남는다(`TryExtractFrame`이 예외를 던지기 전에는 버퍼를 건드리지 않으므로 안전) —
+다음 `Append` 호출이나 유휴 연결 타임아웃에서 정리된다. 프레임을 하나도 완성하지 못한 채 형식
+오류를 만나는 경우(예: 길이 헤더 자체가 처음부터 숫자가 아님)는 예전처럼 그대로 예외를 던져 연결을
+닫는다 — 재동기화 근거가 전혀 없는 경우까지 무리하게 살리지 않는다.
+
+**재검증(시뮬레이터 오류 주입 8개 전부 재실행)**:
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| 1 | 선언 길이≠실제 길이 | **수정 확인**: `#7="E40"` 정상 수신(수정 전엔 응답 없음) |
+| 2 | 알 수 없는 거래구분 | `#7="E41"`, 회귀 없음 |
+| 3 | 길이 헤더가 숫자 아님 | 응답 없이 연결 종료, 회귀 없음(프레임 0개 완성 시 기존 동작 유지 확인) |
+| 4 | 본문 나눠 보내기 | `#7="000"`, 회귀 없음 |
+| 5 | 응답 전 연결 강제종료 | 후속 요청 정상 처리, 회귀 없음 |
+| 6 | 응답 안 읽고 붙들기 | 후속 요청 정상 처리, 회귀 없음 |
+| 7 | 연속 2건 동시 전송 | 둘 다 정상, 회귀 없음 |
+| 8 | 64KB 버퍼 초과 | **새로운 부작용 발견**: 연결은 여전히 정상 종료되지만, 닫히기 직전 **예상 못한 `E41` 응답이 하나 더 나간다**(9999바이트 쓰레기가 우연히 "완성된 프레임"으로 오인돼 처리됨) |
+
+**시나리오 8 부작용에 대한 사용자 판단(2026-08-31)**: 앱 로그로 "연결은 결국 정상 종료된다"는 것을
+확인시켜 드리고 트레이드오프를 설명한 뒤 "이정도는 괜찮지 않나?"로 **수용 확정** — 서버가 루프백
+전용(로컬 신뢰 프로세스만 접속 가능)이라 보안상 치명적이지 않고, 연결이 결국 닫혀 리소스 누수도
+없다는 근거. 추가 코드 변경 없이 이대로 확정한다.
+
+`dotnet build src/KFTCOneCAP.Wpf/KFTCOneCAP.Wpf.csproj` 경고 0/오류 0.
+
+---
+
+## P19-8. 교차 검증 + 문서 갱신
+
+### 구현할 것
+
+- **실장비 왕복 검증**: 리더기를 붙인 상태로 시뮬레이터만으로 3전문을 끝까지 몰아본다
+  (`902614`는 카드 태그 + PIN 입력 포함). Phase 17·18을 PowerShell로 검증했던 것을
+  **이제 시뮬레이터가 대체할 수 있는지**가 판정 기준이다.
+- 문서 갱신:
+  - `ROADMAP.md` Phase 19 항목 체크 + 완료 기록. **Phase 20 완료 기준의 `G0x` → `D01`/`D02`
+    정정**(전제 4).
+  - `PRD.md` §10.1에 Phase 19 확정 사항(배포 형태, 오류 주입 포함, 프리셋 방식, AnyCPU) 행 추가.
+  - P19-2 교차 대조 결과를 이 문서에 기록.
+
+### 완료 조건
+
+- [x] 3전문 실장비 왕복이 시뮬레이터만으로 성공하고, 결과를 이 문서에 표로 기록한다.
+- [x] `spec_client.ps1`을 더 안 써도 되는지 판단해 적는다(계속 쓸 이유가 있으면 그 이유를 적는다).
+- [x] 로드맵/PRD 갱신 완료.
+
+### 실행 결과(2026-08-31)
+
+리더기1(COM03, 멀티패드)이 오늘 무결성 체크·상태체크 모두 정상인 상태에서 본 앱(`KFTCOneCAP.Wpf`,
+8002 포트 리스닝 확인)과 시뮬레이터(`KFTCOneCAP.KioskSim`)를 각각 별도 프로세스로 띄우고, 시뮬레이터
+화면에서만 조작해 3전문을 순서대로 보냈다(PowerShell/`spec_client.ps1`은 이번 검증에 전혀 쓰지 않음).
+
+| 전문 | 결과 | 소요 시간 | 응답 본문 길이 | `#7` 응답 코드 | 비고 |
+|---|---|---|---|---|---|
+| `501008` | Success | 1.2초 | 706바이트 | `000`(정상) | 카드리딩 없음, VAN 중계만(스텁) |
+| `800000` | Success | 3.2초 | 500바이트 | `000`(정상) | 카드 삽입 상태에서 `#14 BIN`이 실제 카드 데이터로 채워짐(응답 본문에서 확인) |
+| `902614` | Success | 9.6초 | 1500바이트 | `000`(정상) | PIN "1234" 입력 완료 후 확정. `#51(암호화된 비밀번호 정보)` 그리드/전용 라벨 모두 "정상(공백)" — 값이 화면에 노출되지 않음(PRD §8.4) 재확인 |
+
+3전문 모두 **응답 필드 분해 그리드**에서 요청값과 응답값이 정상적으로 나란히 표시되고(`#3` 전문 종별
+코드가 `0200`→`0210`으로 바뀌는 등 예상된 필드만 노란색 강조), raw ASCII 미리보기도 정상 출력됨을
+육안으로 확인했다. `#43~46`/`#48`/`#50`(902614, 원캡이 리더기로 채우는 필드)도 응답 본문에 실제
+base64 유사 인코딩 값이 채워진 것을 확인했다(값 자체는 카드/리더기 종속이라 이 문서에 옮기지 않는다).
+
+**`spec_client.ps1` 판단**: 위 3전문 모두 시뮬레이터 단독으로 실장비 왕복에 성공했고, 응답을 필드
+단위로 분해해 확인하는 것까지 시뮬레이터가 PowerShell 스크립트보다 더 상세히 해낸다(raw 텍스트
+출력만 하던 `spec_client.ps1`과 달리 필드별 요청/응답 대조, `#7` 코드 해설, `#51` 마스킹까지 자동
+처리). **앞으로의 실장비 검증은 시뮬레이터를 1차 도구로 쓴다** — `spec_client.ps1`은 폐기하지 않고
+`tools/spec_client.ps1`에 그대로 남겨 두되(외부 의존 없는 최소 스크립트라 폐쇄망에서 GUI조차 못 띄우는
+극단적 상황의 대체 수단으로서의 가치는 남아 있음), Phase 17/18에서처럼 "1차 검증 도구"로 쓸 계획은
+없다.
+
+**P19-2 교차 대조 결과 재기록**: 체크포인트 1(P19-2/P19-3 직후) 때 137개 필드 프로그램적 3-way diff로
+전수 검증했고, "Phase 19 전체 검증(Opus, 2026-08-31)" 절에서 `CardInfoInquirySchema.cs` 정정 후 재실행한
+결과도 동일 — 의도된 차이(800000 `#10`/`#13`: SPEC에 SET 장소 체크가 없는 필드를 본 앱은 `None`,
+시뮬레이터는 `Kiosk`+`AlwaysBlank`로 표현, 2026-08-28 판정) 2건을 제외한 137개 필드(표현/길이/POSITION)
+완전 일치.
+
+**문서 갱신**: `ROADMAP.md` Phase 19 체크박스 전체 완료 표시 + 완료 기록 추가, Phase 20 완료 기준의
+잔존 `G0x` 오기 2곳을 `D0x`로 정정. `PRD.md` §10.1에 Phase 19 확정 사항 6행(배포 형태, 오류 주입 범위,
+프리셋 방식, 필드 테이블 독립성, `PosMessageFramer` 결함 수정, P19-8 실장비 검증 결과) 추가.
+
+---
+
+## 착수 순서 요약
+
+P19-1(골격) → **P19-2(필드 테이블 전사 ★)** → P19-3(코덱) → P19-4(TCP) → P19-5(전송 화면)
+→ P19-6(응답 화면) → P19-7(오류 주입) → P19-8(교차 검증·문서).
+
+**P19-2가 이 Phase의 핵심이자 최대 위험 구간**이다 — 여기서 SPEC을 잘못 옮기면 그 뒤 모든 검증이
+잘못된 기준으로 통과한다. P19-2·P19-3을 끝낸 시점에 **체크포인트 1(Opus 검증 리뷰)**을 둔다
+(필드 테이블 전수 대조 + 코덱 경계값). 나머지는 P19-7까지 끝낸 뒤 최종 검증으로 묶는다.
+
+## 착수 전 확인이 필요한 것
+
+1. **업체에 실제로 전달하는 시점·경로** — 이번 Phase는 "언제든 폴더째 주면 되는 상태"까지만
+   만든다. 실제 전달 시 라이선스/저작권 문구나 사내 배포 절차가 필요하면 그때 README에 덧붙인다.
+2. **`902614` 요청 필드 기본값의 현실성** — 지금 `spec_client.ps1`이 쓰는 값(지로번호 `1234567`,
+   징수 과목 `2601510` 등)은 임의값이다. VAN 실서버가 붙는 Phase 20에서 실제로 통과하는 값이
+   필요해지면 발주처에 표준 테스트 데이터셋을 요청한다.
+
+## Phase 19 전체 검증(Opus, 2026-08-31) — 발견 및 수정
+
+P19-1~P19-7 전체와 위 "본 앱 결함 수정"(`PosMessageFramer.Append`)까지 포함해 Opus로 전수 재검토를
+수행했다. 방법: KioskSim 6개 소스 파일 전문 읽기 + 본 앱 `Protocol/Pos/Schemas/` 대조용 프로그램적
+3-way diff(정규식 추출, 137개 필드 재확인) + 빌드(경고 0/오류 0) + 코드 경로 추적(특히
+`PosMessageFramer.Append` 수정의 부작용 범위, `PosFieldOwner`/`TelegramSetLocation`의 실제 소비
+지점). 발견한 결함 6건 전부 사용자 지시("전부 고쳐줘")에 따라 수정했다.
+
+**동작 결함(사용자가 실제로 겪을 수 있는 것)**
+
+- **H-1 — 전송 결과 메시지가 응답 직후 즉시 지워짐.** `MainForm.OnSendClickAsync`가
+  `ShowResult(result)`로 상태 라벨에 실패 원인(연결 거부/타임아웃 등)을 남긴 직후, `finally`의
+  `SetSendingState(false, …)`가 그 라벨을 무조건 `"대기 중."`으로 덮어써 사라졌다. 특히
+  `ShowResult`는 응답 본문이 없을 때 `#7 응답 코드` 라벨에 "위 상태 메시지 참고"라고 안내하는데
+  그 메시지 자체가 순간적으로만 보이고 지워져, 실패 원인을 확인할 방법이 없었다. **수정**:
+  `SetSendingState`가 `sending=false`일 때는 버튼 활성화만 하고 상태 텍스트는 건드리지 않도록
+  변경(`Forms/MainForm.cs`).
+- **M-1 — E41 응답에서 `#7`이 아예 안 보임.** E41(알 수 없는 거래구분) 응답은 공통부 70바이트만
+  오는데(`PosUnknownTransactionErrorResponse`), `ShowFieldDecomposition`은 응답 본문 길이가 스키마
+  총 길이와 다르면 "분해 불가"로만 표시하고 `#7`조차 안 보여줬다. **수정**: 길이 불일치 분기에서도
+  본문이 `#7` 위치(POSITION 20, 길이 3 — 3전문 공통)까지는 있으면 스키마 없이 직접 읽어 코드/설명을
+  보여주도록 변경(`Forms/MainForm.cs`, `ErrorInjectionClient.ReadResponseCodeRaw`와 같은 방식).
+- **M-2 — 오류 주입 시나리오 3·8이 본 앱 미실행 시에도 "기대와 일치"(초록)로 오보고.** 두 시나리오
+  모두 마지막 `catch (Exception)`이 "응답 없이 연결 종료"를 포괄적으로 성공 취급하는데, `Connect`
+  단계의 `SocketException`(본 앱이 꺼져 있을 때)도 그리로 떨어져 검증 자체를 안 한 채 통과로
+  잘못 표시됐다 — 검증 도구에서 가장 나쁜 실패 모드(false pass)다. **수정**: `Connect`를 별도
+  try/catch로 감싸 `SocketException`을 "본 앱이 실행 중인지 확인하라"는 별개의 결과로 분리
+  (`Net/ErrorInjectionClient.cs`, Scenario3/Scenario8).
+- **(낮음) 오류 주입 결과 색상 판정이 "불일치" 문자열만 찾아, 시나리오 3의 타임아웃 분기("기대와
+  다름 … 확인 필요"에는 "불일치"가 없음)가 실패인데도 초록으로 표시됨.** 모든 시나리오의 문제
+  경로가 "확인 필요"라는 문구는 예외 없이 포함하는 것을 전수 확인 후, 판정 키워드를 "확인 필요"로
+  교체(`Forms/MainForm.cs`, `RunErrorScenarioAsync`).
+
+**문서/스키마 결함(동작에는 영향 없었으나 정본 불일치)**
+
+- **H-2 — 본 앱 `CardInfoInquirySchema`(800000)의 `#6`/`#8`/`#27`이 KioskSim의 정정을 반영하지
+  못함.** P19-5 후속 수정 2에서 KioskSim 쪽은 `#6`/`#8`을 `VAN`→`Kiosk`로 정정했지만(사용자가
+  하이라이트 캡처로 확인) 본 앱 스키마는 그대로 `InternetGiro | Van`으로 남아 있었다. `#27`도
+  KioskSim은 `InternetGiro`인데 본 앱은 `PosFieldOwner.None`이었다. 동작 영향은 재확인 결과
+  0(`Owners`는 `PosTelegramSchema.cs`의 `HasFlag(PosFieldOwner.OneCap)` 한 곳에서만 소비되고,
+  이 필드들은 전부 OneCap이 아니므로 결과가 같았다) — 그래도 이 파일이 본 앱 쪽 계약 정본으로
+  읽히므로 SPEC과 다르게 남겨 둘 이유가 없어 `Kiosk`/`InternetGiro`로 정정했다
+  (`Protocol/Pos/Schemas/CardInfoInquirySchema.cs`). 정정 후 137개 필드 3-way diff 재실행 —
+  `#10`/`#13`(SPEC 체크 없음 → 본 앱은 `None`, KioskSim은 `Kiosk`+`AlwaysBlank`)만 남았고, 이는
+  Phase 19 체크포인트 1에서 이미 "결함이 아니라 두 프로젝트가 같은 사실을 다른 축으로 표현한 것"으로
+  판정된 의도된 차이다.
+- **M-3 — `ErrorInjectionClient`의 설계 메모 2곳이 `PosMessageFramer.Append` 수정 전 동작을 현재
+  사실처럼 서술.** 시나리오 1(선언 길이 불일치)과 시나리오 8(버퍼 상한)의 주석이 "예외가 나면 이미
+  완성된 프레임까지 통째로 버려진다"는 수정 전 동작을 전제로 대안 설계를 설명하고 있었다. 수정
+  내용과 시나리오 8 재검증에서 실제로 관찰된 부작용(예상 못한 E41 응답 하나가 더 나가되 연결은
+  정상 종료됨, 사용자가 무해하다고 수용함)을 반영해 갱신.
+- **M-4 — `TelegramSchemas` 클래스 주석의 예시가 자기 필드 정의와 모순.** "#6 송·수신 FLAG는
+  800000에서 kiosk 열이 체크되어 있지 않다"는 예시가, 20줄 아래 실제 `#6` 필드 정의(정정된
+  `Kiosk`)와 정면으로 어긋났다. 예시를 `#13`(501008/800000은 kiosk, 902614는 InternetGiro만 —
+  실제로 다른 값)으로 교체.
+- **(낮음) `AlwaysBlank` 필드가 프리셋 파일에 저장되지만 그리드에는 절대 반영 안 됨.**
+  `PresetStore.BuildInitialValues`가 SET 장소만 보고 `AlwaysBlank` 여부는 무시해, 편집이 잠긴
+  필드까지 `_currentValues`/프리셋 파일에 값이 쌓일 수 있었다(실질 동작 영향은 없었음 — 기본값이
+  항상 빈 문자열이고 그리드가 AlwaysBlank 필드는 항상 빈 값만 표시). `AlwaysBlank` 필드를 초기값
+  구성에서 제외하도록 수정(`Preset/PresetStore.cs`).
+- **(낮음) `MiniJson` 오타 `"objectd 파싱 중…"`** → `"object 파싱 중…"`으로 수정.
+- **(낮음) `MainForm.UpdatePreview`가 매 호출마다 `Encoding.GetEncoding(949)`를 새로 생성** →
+  클래스 정적 필드 `Cp949` 재사용으로 변경.
+
+**재검증**: 수정 후 빌드(루트 솔루션, Wpf+KioskSim) 경고 0/오류 0. 137개 필드 3-way diff 재실행 —
+의도된 차이 2건(`#10`/`#13`)만 남고 나머지는 완전 일치. 수정 범위는 전부 KioskSim(테스트/샘플
+프로그램)과 `CardInfoInquirySchema.cs`(문서적 정정, 동작 영향 없음 확인됨)에 한정되며, 결제 흐름
+본체(`PaymentOrchestrator` 등)는 건드리지 않았다.

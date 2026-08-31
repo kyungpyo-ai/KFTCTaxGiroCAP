@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!--
+      Phase 19(docs/payment_relay/development_plan.md P19-1): 이 프로그램은 본 앱(KFTCOneCAP.Wpf)과
+      달리 네이티브 32bit DLL(ReaderSerial.dll/KFTC_GIRO.dll)을 전혀 로드하지 않는다 — 소켓 너머로
+      본 앱과 통신할 뿐인 순수 클라이언트다. 그래서 PlatformTarget을 x86으로 고정하지 않고 AnyCPU로
+      둔다(2026-08-28 사용자 확정) — 업체 환경(32bit/64bit 어느 쪽이든)을 가리지 않기 위함.
+    -->
+  </PropertyGroup>
+
+</Project>

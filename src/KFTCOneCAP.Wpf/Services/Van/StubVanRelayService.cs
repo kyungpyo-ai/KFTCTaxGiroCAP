@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using System.Threading.Tasks;
 using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Services.Payment;
@@ -59,6 +60,15 @@ internal sealed class StubVanRelayService : IVanRelayService
         }
     }
 
+    /// <summary><c>#51</c> 암호화된 비밀번호 정보 — 902614에만 있는 필드. clone 기반 흉내 응답이
+    /// 요청의 값을 그대로 물고 있으면 안 되는 이유는 <see cref="PosResponseTelegram"/>의 같은 이름
+    /// 상수 주석 참고(2026-08-27 Phase 18 실장비 검증 중 실제 재현됨 — 사용자가 실물 키패드로 입력한
+    /// PIN이 이 스텁의 "성공" 응답에 그대로 실려 테스트 클라이언트 화면/로그에 노출됐다). **이건 진짜
+    /// VAN이 그렇게 응답한다는 뜻이 아니다** — Phase 20이 실제 호출로 교체되면 실제 VAN 응답에 `#51`이
+    /// 오는지 별도로 확인해야 한다(development_plan.md Phase 18 "남은 미확정" #4). 지금은 이 스텁이
+    /// 실장비 검증 도구로 계속 쓰이는 동안 같은 유출이 반복되지 않도록 막는다.</summary>
+    private const int EncryptedPinFieldNumber = 51;
+
     private static VanRelayOutcome BuildFakeSuccess(PosRequestTelegram request)
     {
         PosTelegram cloned = request.Telegram.Clone();
@@ -66,6 +76,12 @@ internal sealed class StubVanRelayService : IVanRelayService
         cloned.Write(6, "C");
         cloned.Write(7, "000");
         cloned.Write(8, DateTime.Now.ToString("yyMMddHHmmss", CultureInfo.InvariantCulture));
+
+        if (cloned.Schema.Fields.Any(f => f.Number == EncryptedPinFieldNumber))
+        {
+            cloned.Write(EncryptedPinFieldNumber, string.Empty);
+        }
+
         return VanRelayOutcome.Success(cloned.ToBody());
     }
 }

@@ -186,6 +186,15 @@ public partial class App : Application
             };
             revealTimer.Start();
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--notice-pin-test")
+        {
+            // 개발/회귀 검증용(P18-2 완료 조건 "PIN 상태로 띄워 스크린샷 대조"): State를 PinEntry로
+            // 고정한 채(순환 없이) 띄워 레이아웃을 확인한다. --notice-van-processing-test와 같은 패턴.
+            var vm = new PaymentNoticeViewModel { State = PaymentNoticeState.PinEntry };
+            var window = new PaymentNoticeWindow(vm);
+            MainWindow = window;
+            window.Show();
+        }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--presenter-test")
         {
             // 개발/회귀 검증용(P13-6 완료 조건): IPaymentNoticePresenter의 모든 메서드를 백그라운드
@@ -242,7 +251,7 @@ public partial class App : Application
         {
             // 개발/회귀 검증용(docs/payment_relay/development_plan.md P13-5 완료 조건 "10회 연속
             // 열고 닫은 뒤에도 훅이 남아 있지 않음"): 알림창을 같은 프로세스에서 10회 연속 열고 닫아
-            // ESC 훅 설치/해제(PaymentNoticeEscapeHook.Install/Uninstall)가 누적 실패 없이 반복되는지
+            // ESC 훅 설치/해제(PaymentNoticeKeyboardHook.Install/Uninstall)가 누적 실패 없이 반복되는지
             // 확인한다. 훅 설치는 Loaded에서, 해제는 Closed에서 일어나며, Show()가 반환하기 전에
             // Loaded가 처리되므로(WPF가 Show() 안에서 그만큼 디스패처를 펌프함) 메시지 펌프 없이도
             // 안전하다. 예외 없이 끝까지 돌면 성공 — 끝나면 조용히 종료한다.

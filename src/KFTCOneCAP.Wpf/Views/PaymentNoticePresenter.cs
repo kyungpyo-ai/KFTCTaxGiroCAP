@@ -23,6 +23,7 @@ public sealed class PaymentNoticePresenter : IPaymentNoticePresenter
     private PaymentNoticeViewModel? _viewModel;
 
     public event EventHandler? Canceled;
+    public event EventHandler<PinEnteredEventArgs>? PinEntered;
 
     /// <summary>운영 코드에서는 인자 없이 생성 — 앱의 UI 스레드 Dispatcher를 사용한다.</summary>
     public PaymentNoticePresenter() : this(System.Windows.Application.Current.Dispatcher)
@@ -51,6 +52,7 @@ public sealed class PaymentNoticePresenter : IPaymentNoticePresenter
                 var oldViewModel = _viewModel;
                 oldWindow.Closed -= OnWindowClosed;
                 oldViewModel!.Canceled -= OnViewModelCanceled;
+                oldViewModel.PinEntered -= OnViewModelPinEntered;
                 _window = null;
                 _viewModel = null;
                 oldWindow.Close();
@@ -58,6 +60,7 @@ public sealed class PaymentNoticePresenter : IPaymentNoticePresenter
 
             _viewModel = new PaymentNoticeViewModel { State = state };
             _viewModel.Canceled += OnViewModelCanceled;
+            _viewModel.PinEntered += OnViewModelPinEntered;
 
             _window = new PaymentNoticeWindow(_viewModel);
             _window.Closed += OnWindowClosed;
@@ -98,6 +101,7 @@ public sealed class PaymentNoticePresenter : IPaymentNoticePresenter
         if (_viewModel != null)
         {
             _viewModel.Canceled -= OnViewModelCanceled;
+            _viewModel.PinEntered -= OnViewModelPinEntered;
         }
 
         if (_window != null)
@@ -110,6 +114,8 @@ public sealed class PaymentNoticePresenter : IPaymentNoticePresenter
     }
 
     private void OnViewModelCanceled(object? sender, EventArgs e) => Canceled?.Invoke(this, EventArgs.Empty);
+
+    private void OnViewModelPinEntered(object? sender, PinEnteredEventArgs e) => PinEntered?.Invoke(this, e);
 
     private void RunOnUiThread(Action action)
     {

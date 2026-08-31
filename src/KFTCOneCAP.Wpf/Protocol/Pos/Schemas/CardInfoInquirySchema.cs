@@ -22,6 +22,14 @@ internal static class CardInfoInquirySchema
     internal static PosTelegramSchema Create()
     {
         // 공통부 SET 장소(p.12 표): VAN/인터넷지로/kiosk 조합(디지털예산 없음). #10/#13은 표시 없음.
+        //
+        // **정정(2026-08-28, Phase 19 P19-5 후속 수정 2)**: #6/#8은 초기 전사 당시 VAN 열로
+        // 잘못 읽었다 — SPEC 표(p.12)를 사용자가 하이라이트로 표시해 재확인한 결과 실제로는
+        // 인터넷지로+kiosk 열이 체크되어 있다(VAN 열이 아니다). 800000 표는 다른 두 전문에 없는
+        // VAN 열이 추가로 있어 인터넷지로 열의 위치가 한 칸 밀려 보이는 착시가 원인이었다
+        // (src/KFTCOneCAP.KioskSim/Protocol/TelegramSchemas.cs, docs/payment_relay/development_plan.md
+        // "P19-5 후속 수정 2" 참고 — 독립 전사본인 KioskSim 쪽에서 먼저 정정됐고 이 파일은 그 뒤
+        // 뒤늦게 맞췄다).
         var headerOwners = new[]
         {
             PosFieldOwner.None, // 0 (미사용)
@@ -30,9 +38,9 @@ internal static class CardInfoInquirySchema
             PosFieldOwner.Van | PosFieldOwner.Kiosk, // 3 전문 종별 코드
             PosFieldOwner.Kiosk, // 4 거래 구분 코드
             PosFieldOwner.InternetGiro | PosFieldOwner.Van, // 5 상태 코드
-            PosFieldOwner.InternetGiro | PosFieldOwner.Van, // 6 송·수신 FLAG
+            PosFieldOwner.InternetGiro | PosFieldOwner.Kiosk, // 6 송·수신 FLAG(정정: VAN이 아니라 kiosk)
             PosFieldOwner.InternetGiro, // 7 응답 코드
-            PosFieldOwner.InternetGiro | PosFieldOwner.Van, // 8 전송 일시
+            PosFieldOwner.InternetGiro | PosFieldOwner.Kiosk, // 8 전송 일시(정정: VAN이 아니라 kiosk)
             PosFieldOwner.Kiosk, // 9 은행/센터 전문 관리 번호
             PosFieldOwner.None, // 10 이용기관/센터 전문 관리 번호 — SPEC 표시 없음
             PosFieldOwner.Kiosk, // 11 이용기관 발행기관 분류코드
@@ -61,7 +69,7 @@ internal static class CardInfoInquirySchema
             new(24, "납부대행 수수료 금액", PosFieldType.N, 12, 250, I),
             new(25, "합계금액", PosFieldType.N, 12, 262, I),
             new(26, "API 세부 응답코드", PosFieldType.AN, 6, 274, I),
-            new(27, "예비 정보 FIELD", PosFieldType.AN, 220, 280, PosFieldOwner.None),
+            new(27, "예비 정보 FIELD", PosFieldType.AN, 220, 280, I), // SPEC 표(p.12)는 인터넷지로 열 체크(응답 전용) — 직접 재확인
         };
 
         return new PosTelegramSchema(TransactionTypeCode, header.Concat(business).ToList(), totalLength: 500);

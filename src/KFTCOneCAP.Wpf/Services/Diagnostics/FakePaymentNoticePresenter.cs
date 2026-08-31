@@ -22,6 +22,7 @@ internal sealed class FakePaymentNoticePresenter : IPaymentNoticePresenter
     internal bool IsShown { get; private set; }
 
     public event EventHandler? Canceled;
+    public event EventHandler<PinEnteredEventArgs>? PinEntered;
 
     /// <summary>
     /// (2026-08-25, Opus 검증 리뷰 H-1 회귀 방지용) 실제 <see cref="Views.PaymentNoticePresenter.Show"/>는
@@ -63,7 +64,24 @@ internal sealed class FakePaymentNoticePresenter : IPaymentNoticePresenter
 
         if (ThrowOnChangeState)
             throw new InvalidOperationException("FakePaymentNoticePresenter: ChangeState 예외(테스트용)");
+
+        if (FirePinEnteredSynchronouslyOnChangeState && state == PaymentNoticeState.PinEntry)
+            FirePinEntered(PinToFireSynchronously);
     }
+
+    /// <summary>
+    /// (2026-08-27, Phase 18 P18-4 회귀 방지용) <see cref="FireCanceledSynchronouslyOnShow"/>의 PIN판 —
+    /// <see cref="PaymentOrchestrator.CollectPinAsync"/>가 <c>PinEntered</c> 구독을
+    /// <c>ChangeState(PinEntry)</c> 호출 **전에** 거는지를 증명한다. 이 플래그를 켜면 <see
+    /// cref="ChangeState"/>가 <c>PinEntry</c> 상태를 기록한 직후(=구독이 걸려 있어야만 통지가 도달하는
+    /// 최악의 타이밍) 즉시 <see cref="PinEntered"/>를 발화한다 — 순서가 반대(ChangeState → 구독)라면
+    /// 이 PIN 완료는 구독자 없이 유실되고, 거래는 PIN을 영영 받지 못한 채 멈춰야 정상이다(회귀 시 오히려
+    /// "멈추지 않고 성공"하는 형태로 드러난다).
+    /// </summary>
+    internal bool FirePinEnteredSynchronouslyOnChangeState { get; set; }
+
+    /// <summary><see cref="FirePinEnteredSynchronouslyOnChangeState"/>가 켜졌을 때 발화할 PIN 값.</summary>
+    internal string PinToFireSynchronously { get; set; } = "0000";
 
     public void Close()
     {
@@ -81,4 +99,21 @@ internal sealed class FakePaymentNoticePresenter : IPaymentNoticePresenter
     /// <summary>현재 <see cref="Canceled"/>에 붙어 있는 구독자 수 — 거래 종료 후 구독 해제가
     /// 제대로 됐는지(Phase 13 Opus 리뷰 M-1과 같은 종류의 누수가 없는지) 검증하는 용도.</summary>
     internal int CanceledSubscriberCount => Canceled?.GetInvocationList().Length ?? 0;
+
+    /// <summary>검증 하네스가 원하는 시점에 PIN 입력 완료를 일으킨다(docs/payment_relay/development_plan.md
+    /// P18-1) — 실제 <see cref="PinEntered"/> 구독자(<c>PaymentOrchestrator</c>, P18-4에서 배선)가
+    /// 그대로 통지받는다. <see cref="FireCanceled"/>와 정확히 같은 패턴.</summary>
+    internal void FirePinEntered(string pin)
+    {
+        lock (_lock)
+        {
+            History.Add("PinEntered");
+        }
+
+        PinEntered?.Invoke(this, new PinEnteredEventArgs(pin));
+    }
+
+    /// <summary>현재 <see cref="PinEntered"/>에 붙어 있는 구독자 수 — <see cref="CanceledSubscriberCount"/>와
+    /// 정확히 같은 패턴(거래 종료 후 구독 해제 누수 검증용).</summary>
+    internal int PinEnteredSubscriberCount => PinEntered?.GetInvocationList().Length ?? 0;
 }

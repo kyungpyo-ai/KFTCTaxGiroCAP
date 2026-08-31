@@ -59,6 +59,12 @@ internal static class PaymentNoticeBackgroundSource
     private static readonly BitmapImage MsCardBitmap = Load("Assets/Images/PaymentNotice/ms_card.png");
 
     /// <summary>
+    /// PIN 입력 화면(Phase 18, P18-2) 상단 아이콘 — 카드+자물쇠, 배경 투명 PNG.
+    /// <see cref="PaymentNoticeState.PinEntry"/> 전용, 다른 상태는 참조하지 않는다.
+    /// </summary>
+    private static readonly BitmapImage PinIconBitmap = Load("Assets/Images/PaymentNotice/비밀번호 입력 아이콘.png");
+
+    /// <summary>
     /// 정지 리더기 이미지 — IC/FALLBACK/PROCESSING 3개 상태 모두 동일(교체 없음, 크로스페이드 대상
     /// 아님). 배경은 이미 투명 PNG로 확인됐다(alpha 검증 완료, 코너 픽셀 A=0).
     /// </summary>
@@ -71,6 +77,9 @@ internal static class PaymentNoticeBackgroundSource
     /// </summary>
     public static BitmapImage PlateSource => PlateBitmapValue;
 
+    /// <summary>PIN 입력 화면 상단 아이콘(카드+자물쇠).</summary>
+    public static BitmapImage PinIconSource => PinIconBitmap;
+
     /// <summary>앱 기동 시 호출해 정적 생성자(이미지 디코드)를 미리 끝내 둔다. 부작용 없음(idempotent).</summary>
     public static void WarmUp()
     {
@@ -80,29 +89,34 @@ internal static class PaymentNoticeBackgroundSource
         _ = ArrowMsBitmap;
         _ = IcCardBitmap;
         _ = MsCardBitmap;
+        _ = PinIconBitmap;
     }
 
     /// <summary>
-    /// 상태별 카드 이미지. <see cref="PaymentNoticeState.VanProcessing"/>은 카드가 없으므로
-    /// <c>null</c>을 반환한다.
+    /// 상태별 카드 이미지. <see cref="PaymentNoticeState.VanProcessing"/>과
+    /// <see cref="PaymentNoticeState.PinEntry"/>는 카드가 없으므로 <c>null</c>을 반환한다(PinEntry는
+    /// PIN 키패드 화면(P18-2의 <c>PinPanel</c>)이 그 자리를 대신하므로 카드 레이어를 숨긴다).
     /// </summary>
     public static BitmapImage? GetCardSource(PaymentNoticeState state) => state switch
     {
         PaymentNoticeState.IcCardRequest => IcCardBitmap,
         PaymentNoticeState.FallbackCardRequest => MsCardBitmap,
         PaymentNoticeState.VanProcessing => null,
+        PaymentNoticeState.PinEntry => null,
         _ => null,
     };
 
     /// <summary>
     /// 상태별 화살표 오버레이 이미지. <see cref="PaymentNoticeState.VanProcessing"/>은 화살표가
-    /// 없으므로(로딩 인디케이터로 대체) <c>null</c>을 반환한다.
+    /// 없으므로(로딩 인디케이터로 대체) <c>null</c>을 반환하고, <see cref="PaymentNoticeState.PinEntry"/>도
+    /// 리더기 안내 애니메이션이 필요 없으므로(PIN 키패드 화면) <c>null</c>을 반환한다.
     /// </summary>
     public static BitmapImage? GetArrowSource(PaymentNoticeState state) => state switch
     {
         PaymentNoticeState.IcCardRequest => ArrowIcBitmap,
         PaymentNoticeState.FallbackCardRequest => UseArrowMsAsset ? ArrowMsBitmap : ArrowIcBitmap,
         PaymentNoticeState.VanProcessing => null,
+        PaymentNoticeState.PinEntry => null,
         _ => null,
     };
 

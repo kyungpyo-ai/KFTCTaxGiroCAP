@@ -58,6 +58,8 @@
     <Resource Include="Assets\Images\PaymentNotice\arrow_ms.png" />
     <Resource Include="Assets\Images\PaymentNotice\ic_card.png" />
     <Resource Include="Assets\Images\PaymentNotice\ms_card.png" />
+    <!-- Phase 18(P18-2): PIN 입력 화면 아이콘(카드+자물쇠, 배경 투명). -->
+    <Resource Include="Assets\Images\PaymentNotice\비밀번호 입력 아이콘.png" />
   </ItemGroup>
 
   <!--

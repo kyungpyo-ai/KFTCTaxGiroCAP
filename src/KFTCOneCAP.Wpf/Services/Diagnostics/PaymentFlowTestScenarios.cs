@@ -42,6 +42,11 @@ internal static class PaymentFlowTestScenarios
             await Scenario5_UnknownWccSurfacesAsInternalError().ConfigureAwait(false);
             await Scenario6_UserCancelDuringCardApproval().ConfigureAwait(false);
             await Scenario7_VanCommunicationFailureResetsReader().ConfigureAwait(false);
+            await Scenario8_CardApprovalCollectsPinAndOrdersHistory().ConfigureAwait(false);
+            await Scenario9_CardInfoInquirySkipsPinStep().ConfigureAwait(false);
+            await Scenario10_CancelDuringPinEntryYieldsE01().ConfigureAwait(false);
+            await Scenario11_TimeoutDuringPinEntryYieldsE02().ConfigureAwait(false);
+            await Scenario12_PinEnteredBeforeSubscriptionIsNotLost().ConfigureAwait(false);
 
             FileLogger.Info($"[payment-flow-test] 완료 — 통과 {_passCount}건, 실패 {_failCount}건");
         }
@@ -156,11 +161,16 @@ internal static class PaymentFlowTestScenarios
         Check("800000: VAN 요청에 실린 BIN이 카드번호 앞 8자리", vanRelay.LastRequest?.Read(14) == "94123456");
     }
 
-    /// <summary>902614 — 원캡 담당 7필드(#51 제외)가 정확히 채워지는지.</summary>
+    /// <summary>902614 — 원캡 담당 8필드(#43~#46,#48,#50,#51,#53)가 정확히 채워지는지. Phase 18(P18-4)부터 902614는
+    /// 카드리딩 성공 후 PIN 입력 단계를 거치므로(<see cref="PaymentOrchestrator.CollectPinAsync"/>),
+    /// PIN을 주지 않으면 이 시나리오가 실제 Timeout(35초)까지 블로킹된다 — 즉시발화 플래그로 PIN
+    /// 단계를 빠르게 통과시킨다(이 시나리오의 관심사는 필드 채움이지 PIN 자체가 아니므로).</summary>
     private static async Task Scenario3_CardApprovalFillsSevenFields()
     {
         var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
         r1.EnqueueCardReadOutcome(SuccessOutcome(wcc: "I"));
+        presenter.FirePinEnteredSynchronouslyOnChangeState = true;
+        presenter.PinToFireSynchronously = "1234";
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
         PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
@@ -175,7 +185,12 @@ internal static class PaymentFlowTestScenarios
         Check("902614: #48 WCC 'I' -> '5'(IC)", vanRelay.LastRequest.Read(48) == "5");
         Check("902614: #50 고정값 '2'", vanRelay.LastRequest.Read(50) == "2");
         Check("902614: #53 EMV DATA = 0600(고정 길이 서브필드) + EmvEncodedData", vanRelay.LastRequest.Read(53) == "0600EMV0001");
-        Check("902614: #51은 Phase 17 스텁이라 공백(빈 문자열)", vanRelay.LastRequest.Read(51) == "");
+        // P18-5 — #51(암호화된 비밀번호 정보)은 PIN 그대로(Read()는 ANS 타입 우측 space 패딩을
+        // 제거하고 돌려준다 — #44의 좌측 0패딩과 반대로 이쪽은 trim이 정상 동작이다).
+        // Check 이름에 PIN 리터럴을 직접 적지 않는다(P18-5 완료 조건 "#51 값이 어떤 로그에도 나타나지
+        // 않는다"는 이 테스트 자신의 로그에도 그대로 적용한다 — presenter.PinToFireSynchronously의
+        // 값을 그대로 참조해 이름을 짓는다).
+        Check("902614: #51 = 화면에서 입력한 PIN 그대로(패딩 제거 후)", vanRelay.LastRequest.Read(51) == presenter.PinToFireSynchronously);
 
         // PRD §4.10 — VAN 통신 중에는 PROCESSING 화면이 실제로 떠 있어야 한다. 실제 Presenter는 창이
         // 닫힌 뒤의 ChangeState를 "무시 + Warn 로그"로 처리하므로(Views/PaymentNoticePresenter), 호출
@@ -213,6 +228,9 @@ internal static class PaymentFlowTestScenarios
     {
         var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
         r1.EnqueueCardReadOutcome(SuccessOutcome(wcc: "R")); // RF — 이 Flow가 다루지 않는 값
+        // Phase 18(P18-4)부터 902614는 필드 채움 전에 PIN 단계를 먼저 거친다 — 이 시나리오의 관심사는
+        // WCC 예외이지 PIN이 아니므로 즉시발화로 빠르게 통과시킨다.
+        presenter.FirePinEnteredSynchronouslyOnChangeState = true;
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
 
@@ -271,6 +289,9 @@ internal static class PaymentFlowTestScenarios
         var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
         r1.EnqueueCardReadOutcome(SuccessOutcome());
         vanRelay.SetNextOutcome(VanRelayOutcome.CommunicationFailure(VanFailureKind.CommunicationFailure, "테스트용 통신 실패"));
+        // Phase 18(P18-4)부터 902614는 VAN 진입 전에 PIN 단계를 먼저 거친다 — 이 시나리오의 관심사는
+        // VAN 실패 시 리더기 초기화이지 PIN이 아니므로 즉시발화로 빠르게 통과시킨다.
+        presenter.FirePinEnteredSynchronouslyOnChangeState = true;
 
         int invalidationsBefore = r1.InvalidationCount;
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
@@ -279,5 +300,145 @@ internal static class PaymentFlowTestScenarios
         Check("902614: VAN 통신 실패 시 D02", response.Telegram.Read(7) == "D02");
         Check("902614: VAN 통신 실패 시 채택 리더기 초기화(PRD §4.10, H-3 회귀 방지)",
             r1.InvalidationCount > invalidationsBefore);
+
+        // (2026-08-27 Phase 18 최종 검증 H-1 회귀 방지) 실패 응답은 요청을 clone해 만들므로, PIN을
+        // 채운 뒤 실패하면 #51이 그대로 POS로 되돌아간다. #51은 kiosk가 원래 갖지 못하는 유일한
+        // 필드이자(그래서 원캡이 입력받는다) 현재 평문이므로, 실패 응답에서는 반드시 비워야 한다.
+        Check("902614: VAN 실패 응답에 PIN(#51)이 실려나가지 않음(H-1 회귀 방지)",
+            response.Telegram.Read(51) == "");
+    }
+
+    // ===== Phase 18(P18-4) 임시 검증 시나리오 — 커밋 전 회귀 확인용, 정식 추가는 P18-6 몫 =====
+
+    /// <summary>902614 정상 흐름: IC -> PIN -> 통신중 순서, 거래 종료 후 구독 누수 없음.</summary>
+    private static async Task Scenario8_CardApprovalCollectsPinAndOrdersHistory()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        r1.EnqueueCardReadOutcome(SuccessOutcome());
+        presenter.FirePinEnteredSynchronouslyOnChangeState = true;
+        presenter.PinToFireSynchronously = "1234";
+
+        var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
+        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+
+        FileLogger.Info($"[payment-flow-test] 902614+PIN 알림창 호출 이력: {string.Join(" -> ", presenter.History)}");
+        Check("902614+PIN: 응답 성공(#7=000)", response.Telegram.Read(7) == "000");
+
+        int icIndex = presenter.History.IndexOf($"Show:{PaymentNoticeState.IcCardRequest}");
+        int pinChangeIndex = presenter.History.IndexOf($"ChangeState:{PaymentNoticeState.PinEntry}");
+        int processingIndex = presenter.History.IndexOf($"ChangeState:{PaymentNoticeState.VanProcessing}");
+        Check("902614+PIN: IC -> PIN -> 통신중 순서", icIndex >= 0 && pinChangeIndex > icIndex && processingIndex > pinChangeIndex);
+        Check("902614+PIN: 거래 종료 후 Canceled 구독 누수 없음", presenter.CanceledSubscriberCount == 0);
+        Check("902614+PIN: 거래 종료 후 PinEntered 구독 누수 없음", presenter.PinEnteredSubscriberCount == 0);
+
+        // P18-5 — #51(암호화된 비밀번호 정보, ANS 100)에 화면에서 입력한 PIN이 정확히 들어갔는지,
+        // 인접 필드(#50/#53)가 밀리지 않았는지 요청 전문(request.Telegram, ProcessAsync가 제자리에서
+        // 채운다)으로 확인한다. Read()는 ANS 타입의 우측 space 패딩을 제거해 돌려주므로
+        // (PosField.Trim), trim된 값으로 단언하고, POSITION 612~711의 원본 바이트(PIN 4자리 + space
+        // 96)는 raw ToBody()로 별도 확인한다. Check 이름에 PIN 리터럴을 직접 적지 않는다(P18-5 완료
+        // 조건 "#51 값이 어떤 로그에도 나타나지 않는다"는 이 테스트 자신의 로그에도 그대로 적용한다).
+        Check("902614+PIN: #51 값 = 화면에서 입력한 PIN 그대로(패딩 제거 후)", request.Telegram.Read(51) == presenter.PinToFireSynchronously);
+        Check("902614+PIN: #50(신용카드 승인 인증방식) 밀리지 않음(고정값 \"2\")", request.Telegram.Read(50) == "2");
+        Check("902614+PIN: #53(EMV DATA) 밀리지 않음(길이 서브필드 \"0600\"으로 시작)", request.Telegram.Read(53).StartsWith("0600"));
+
+        byte[] rawBody = request.Telegram.ToBody();
+        string raw51 = System.Text.Encoding.ASCII.GetString(rawBody, 612, 100); // PIN은 ASCII 숫자라 CP949/ASCII 동일
+        Check("902614+PIN: raw POSITION 612~711 = 화면에서 입력한 PIN + space 96(hex 덤프 대응)",
+            raw51 == presenter.PinToFireSynchronously + new string(' ', 96));
+        string raw50 = System.Text.Encoding.ASCII.GetString(rawBody, 611, 1);
+        string raw52to53Start = System.Text.Encoding.ASCII.GetString(rawBody, 712, 12); // #52(712,12)
+        Check("902614+PIN: raw #50(POSITION 611) 밀리지 않음", raw50 == "2");
+        Check("902614+PIN: raw #52(POSITION 712) 영역이 #51 침범으로 깨지지 않음(공백 12칸, #52는 원캡 미담당)",
+            raw52to53Start == new string(' ', 12));
+    }
+
+    /// <summary>800000에는 PIN 단계가 끼어들지 않는다(전문 종별 구분 회귀 방지). PIN 즉시발화 플래그를
+    /// 켜 둬도(사용자 실수를 가정) History에 PinEntry가 등장하지 않아야 한다.</summary>
+    private static async Task Scenario9_CardInfoInquirySkipsPinStep()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        r1.EnqueueCardReadOutcome(SuccessOutcome());
+        presenter.FirePinEnteredSynchronouslyOnChangeState = true;
+
+        var request = BuildRequest("800000", new Dictionary<int, string> { [15] = "1000" });
+        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+
+        Check("800000: 응답 성공(#7=000)", response.Telegram.Read(7) == "000");
+        Check("800000: History에 PinEntry 없음(PIN 단계 미진입)",
+            !presenter.History.Contains($"ChangeState:{PaymentNoticeState.PinEntry}"));
+    }
+
+    /// <summary>PIN 대기 중 취소 -> E01 정확히 1건 확정 + 리더기 초기화 호출 확인.</summary>
+    private static async Task Scenario10_CancelDuringPinEntryYieldsE01()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        r1.EnqueueCardReadOutcome(SuccessOutcome());
+
+        var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
+        Task<PosResponseTelegram> processTask = orchestrator.ProcessAsync(request);
+
+        for (int i = 0; i < 40 && !presenter.History.Contains($"ChangeState:{PaymentNoticeState.PinEntry}"); i++)
+            await Task.Delay(25).ConfigureAwait(false);
+        Check("902614: PIN 화면 진입 확인(전제조건)", presenter.History.Contains($"ChangeState:{PaymentNoticeState.PinEntry}"));
+
+        presenter.FireCanceled();
+
+        PosResponseTelegram response = await processTask.ConfigureAwait(false);
+        Check("902614: PIN 대기 중 취소 시 E01(정확히 1건 확정)", response.Telegram.Read(7) == "E01");
+
+        for (int i = 0; i < 20 && r1.InvalidationCount < 1; i++)
+            await Task.Delay(50).ConfigureAwait(false);
+        Check("902614: PIN 대기 중 취소 시 채택 리더기 초기화(0x60)", r1.InvalidationCount >= 1);
+        Check("902614: 취소 후 PinEntered 구독 누수 없음", presenter.PinEnteredSubscriberCount == 0);
+    }
+
+    /// <summary>PIN 대기 중 Timeout -> E02 정확히 1건 확정. UserInputStepExtension(30초)이 실제로
+    /// 적용되는 것을 그대로 겪어야 하므로(짧게 우회할 훅이 없다 — 상수 1곳 원칙) 약 30초 이상 걸린다.
+    /// </summary>
+    private static async Task Scenario11_TimeoutDuringPinEntryYieldsE02()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        r1.EnqueueCardReadOutcome(SuccessOutcome());
+
+        var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
+        Task<PosResponseTelegram> processTask = orchestrator.ProcessAsync(request);
+
+        for (int i = 0; i < 40 && !presenter.History.Contains($"ChangeState:{PaymentNoticeState.PinEntry}"); i++)
+            await Task.Delay(25).ConfigureAwait(false);
+        Check("902614(Timeout): PIN 화면 진입 확인(전제조건)", presenter.History.Contains($"ChangeState:{PaymentNoticeState.PinEntry}"));
+
+        // PIN을 끝까지 입력하지 않고 데드라인(원래 5초 + PIN 진입 시 +30초 연장) 만료를 기다린다.
+        PosResponseTelegram response = await processTask.ConfigureAwait(false);
+        Check("902614(Timeout): PIN 대기 중 Timeout 시 E02(정확히 1건 확정)", response.Telegram.Read(7) == "E02");
+
+        for (int i = 0; i < 20 && r1.InvalidationCount < 1; i++)
+            await Task.Delay(50).ConfigureAwait(false);
+        Check("902614(Timeout): Timeout 시 채택 리더기 초기화(0x60)", r1.InvalidationCount >= 1);
+        Check("902614(Timeout): Timeout 후 PinEntered 구독 누수 없음", presenter.PinEnteredSubscriberCount == 0);
+    }
+
+    /// <summary>PIN 즉시발화 플래그로 "구독 -> ChangeState" 순서를 증명한다(Phase 15 Opus 리뷰 H-1과
+    /// 같은 종류의 회귀 방지, development_plan.md P18-4 "반드시 지킬 것"). 순서가 반대라면 이 PIN
+    /// 완료는 구독자 없이 유실되고 거래는 데드라인까지 멈춰야 한다 — 여기서는 짧은 시간 안에 정상
+    /// 완료되는 것으로 순서가 올바름을 확인한다.</summary>
+    private static async Task Scenario12_PinEnteredBeforeSubscriptionIsNotLost()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        r1.EnqueueCardReadOutcome(SuccessOutcome());
+        presenter.FirePinEnteredSynchronouslyOnChangeState = true;
+        presenter.PinToFireSynchronously = "5678";
+
+        var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
+        Task<PosResponseTelegram> processTask = orchestrator.ProcessAsync(request);
+        Task completed = await Task.WhenAny(processTask, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+
+        Check("902614: PIN 즉시발화가 유실되지 않고 2초 안에 정상 완료(구독이 ChangeState보다 먼저 걸림)",
+            completed == processTask);
+
+        if (completed == processTask)
+        {
+            PosResponseTelegram response = await processTask.ConfigureAwait(false);
+            Check("902614: 즉시발화 순서 검증 — 응답 성공(#7=000)", response.Telegram.Read(7) == "000");
+        }
     }
 }

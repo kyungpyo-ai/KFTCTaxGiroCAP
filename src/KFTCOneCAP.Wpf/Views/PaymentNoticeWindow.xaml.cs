@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Shapes;
 using KFTCOneCAP.Wpf.Services.Payment;
 using KFTCOneCAP.Wpf.ViewModels;
 
@@ -62,11 +63,25 @@ public partial class PaymentNoticeWindow : Window
     private const double ArrowMsLeft = 485;
     private const double ArrowMsTop = 175;
 
+    // Phase 18(P18-2): 문구 크로스페이드 레이어(TextPanelA/B)는 IC/FALLBACK/PROCESSING 3개 상태
+    // 공용 Canvas.Top=38 위치를 그대로 쓰지만, PinEntry는 그 위에 아이콘(76x76, Top=14)이 얹히므로
+    // 문구를 아래로 내려야 겹치지 않는다 — "요소 구성만 따르고 배치는 750x650에 맞춰 실측"
+    // (development_plan.md P18-2). PIN 패널 내부 요소(PinDigitsPanel Top=186, PinKeypad Top=268)와
+    // 겹치지 않는지도 이 상수와 함께 실측 확인했다(스크린샷 검증 참고).
+    private const double DefaultTextTop = 38;
+    private const double PinEntryTextTop = 100;
+
     private readonly PaymentNoticeViewModel _viewModel;
-    private readonly PaymentNoticeEscapeHook _escapeHook;
+    private readonly PaymentNoticeKeyboardHook _keyboardHook;
     private EventHandler? _dispatcherShutdownHandler;
     private bool _isFirstRender = true;
     private bool _isTextAFront = true;
+
+    // Phase 18(P18-3): PIN 4칸의 시각 상태(점/숫자 노출/현재 위치 강조)를 ViewModel의
+    // PinLength/RevealedDigit에서 파생시키기 위한 인덱스 배열 — 생성자에서 채운다.
+    private Border[] _pinBoxes = Array.Empty<Border>();
+    private Ellipse[] _pinDots = Array.Empty<Ellipse>();
+    private TextBlock[] _pinTexts = Array.Empty<TextBlock>();
 
     // VanProcessing은 IC 삽입 후에도 MS 스와이프 후에도 공통으로 진입하는 상태라, 슬롯 빛 흐름은
     // IC/MS 중 어느 쪽 채널을 보여줄지 직전 카드 상태로 판단해야 한다. 기본값은 IC(가장 흔한 경로).
@@ -105,15 +120,23 @@ public partial class PaymentNoticeWindow : Window
 
         PlateImage.Source = PaymentNoticeBackgroundSource.PlateSource;
         ReaderImage.Source = PaymentNoticeBackgroundSource.ReaderSource;
+        PinIconImage.Source = PaymentNoticeBackgroundSource.PinIconSource;
+
+        _pinBoxes = new[] { PinDigitBox1, PinDigitBox2, PinDigitBox3, PinDigitBox4 };
+        _pinDots = new[] { PinDigitDot1, PinDigitDot2, PinDigitDot3, PinDigitDot4 };
+        _pinTexts = new[] { PinDigitText1, PinDigitText2, PinDigitText3, PinDigitText4 };
 
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
 
         // P13-5: ESC 전역 훅. _tryCancel은 "삼킬지 판정"과 "취소 확정"을 한 번에 동기 처리한다
         // (H-3 수정 — ViewModel.TryMarkCanceled 주석 참고). 통지(RaiseCanceledEvent)만 훅 내부에서
         // Dispatcher.BeginInvoke로 지연된다.
-        _escapeHook = new PaymentNoticeEscapeHook(
+        // P18-8: 같은 훅에 PIN 숫자/Backspace 판정을 나란히 추가(새 훅을 걸지 않음 — 클래스 주석 참고).
+        _keyboardHook = new PaymentNoticeKeyboardHook(
             tryCancel: () => _viewModel.TryMarkCanceled(),
             notifyCanceled: () => _viewModel.RaiseCanceledEvent(),
+            tryPinDigit: d => _viewModel.TryPinDigit(d),
+            tryPinBackspace: () => _viewModel.TryPinBackspace(),
             dispatcher: Dispatcher);
 
         // (Opus 검증 리뷰 2026-08-24, M-1) 훅 설치를 생성자가 아니라 Loaded로 옮겼다 — 생성자에서
@@ -125,13 +148,13 @@ public partial class PaymentNoticeWindow : Window
         Loaded += (_, _) =>
         {
             ApplyState(_viewModel.State, animate: false);
-            _escapeHook.Install();
+            _keyboardHook.Install();
         };
         Closed += PaymentNoticeWindow_Closed;
 
         // 해제는 PaymentNoticeWindow_Closed에서(3중 보장 중 ①), 아래 Dispatcher.ShutdownStarted
         // 백스톱이 ③(development_plan.md P13-5 "해제 3중 보장").
-        _dispatcherShutdownHandler = (_, _) => _escapeHook.Uninstall();
+        _dispatcherShutdownHandler = (_, _) => _keyboardHook.Uninstall();
         Dispatcher.ShutdownStarted += _dispatcherShutdownHandler;
     }
 
@@ -240,6 +263,42 @@ public partial class PaymentNoticeWindow : Window
         {
             ApplyState(_viewModel.State, animate: !_isFirstRender);
         }
+        else if (e.PropertyName == nameof(PaymentNoticeViewModel.PinLength)
+            || e.PropertyName == nameof(PaymentNoticeViewModel.RevealedDigit))
+        {
+            UpdatePinDigitsDisplay();
+        }
+    }
+
+    /// <summary>
+    /// Phase 18(P18-3): ViewModel의 <see cref="PaymentNoticeViewModel.PinLength"/>/
+    /// <see cref="PaymentNoticeViewModel.RevealedDigit"/>에서 PIN 4칸의 점/숫자 노출/현재 위치 강조를
+    /// 파생시키는 유일한 지점. ViewModel은 여전히 WPF 타입(Brush 등)을 모른다 — 이 메서드가 그 값을
+    /// 시각 요소로 옮긴다(P7-3 원칙).
+    /// </summary>
+    private void UpdatePinDigitsDisplay()
+    {
+        int length = _viewModel.PinLength;
+        string? revealed = _viewModel.RevealedDigit;
+        var highlightBrush = (Brush)FindResource("Blue500Brush");
+        var normalBrush = (Brush)FindResource("TblBorderBrush");
+
+        for (int i = 0; i < _pinBoxes.Length; i++)
+        {
+            bool filled = i < length;
+            bool isRevealing = filled && i == length - 1 && revealed != null;
+
+            _pinDots[i].Visibility = filled && !isRevealing ? Visibility.Visible : Visibility.Hidden;
+            _pinTexts[i].Visibility = isRevealing ? Visibility.Visible : Visibility.Collapsed;
+            if (isRevealing)
+            {
+                _pinTexts[i].Text = revealed;
+            }
+
+            bool isCurrent = i == length && length < _pinBoxes.Length;
+            _pinBoxes[i].BorderBrush = isCurrent ? highlightBrush : normalBrush;
+            _pinBoxes[i].BorderThickness = new Thickness(isCurrent ? 2 : 1);
+        }
     }
 
     private void ApplyState(PaymentNoticeState state, bool animate)
@@ -249,12 +308,15 @@ public partial class PaymentNoticeWindow : Window
         if (!animate)
         {
             ApplyText(TextAKr1, TextAKr2, TextAEn1, TextAEn2, state);
+            Canvas.SetTop(TextPanelA, state == PaymentNoticeState.PinEntry ? PinEntryTextTop : DefaultTextTop);
             TextPanelA.Opacity = 1;
             TextPanelB.Opacity = 0;
             _isTextAFront = true;
 
             OverlayHost.Opacity = 0;
             CardImage.Opacity = 0;
+            PinPanel.Opacity = 0;
+            PinPanel.Visibility = Visibility.Collapsed;
             StopCard();
             ProcessingIndicator.Stop();
             ProcessingRing.Stop();
@@ -265,7 +327,12 @@ public partial class PaymentNoticeWindow : Window
 
             ConfigureOverlay(state);
             ConfigureCard(state);
+            ConfigurePinPanel(state);
             FadeElement(OverlayHost, 1, FadeInSeconds);
+            if (state == PaymentNoticeState.PinEntry)
+            {
+                FadeElement(PinPanel, 1, FadeInSeconds);
+            }
             return;
         }
 
@@ -273,6 +340,7 @@ public partial class PaymentNoticeWindow : Window
         var backText = _isTextAFront ? TextPanelB : TextPanelA;
         _isTextAFront = !_isTextAFront;
 
+        double textTop = state == PaymentNoticeState.PinEntry ? PinEntryTextTop : DefaultTextTop;
         if (ReferenceEquals(backText, TextPanelA))
         {
             ApplyText(TextAKr1, TextAKr2, TextAEn1, TextAEn2, state);
@@ -281,6 +349,7 @@ public partial class PaymentNoticeWindow : Window
         {
             ApplyText(TextBKr1, TextBKr2, TextBEn1, TextBEn2, state);
         }
+        Canvas.SetTop(backText, textTop);
 
         // 문구 크로스페이드
         FadeElement(frontText, 0, CrossfadeSeconds);
@@ -295,7 +364,23 @@ public partial class PaymentNoticeWindow : Window
             SignalWaveIndicator.Stop();
             SignalWaveIndicator.Visibility = Visibility.Collapsed;
             ConfigureOverlay(state);
-            FadeElement(OverlayHost, 1, FadeInSeconds);
+            ConfigurePinPanel(state);
+            FadeElement(OverlayHost, state == PaymentNoticeState.PinEntry ? 0 : 1, FadeInSeconds);
+            if (state == PaymentNoticeState.PinEntry)
+            {
+                FadeElement(PinPanel, 1, FadeInSeconds);
+            }
+        });
+
+        // PIN 패널 페이드아웃(다른 상태로 나갈 때). PinEntry로 들어올 때는 위 콜백에서 별도로
+        // 페이드인한다 — 여기서는 "나가는" 방향만 처리하고, 완료 후 PinEntry가 아니면 Collapsed로
+        // 되돌려 히트테스트가 다시 걸리지 않게 한다.
+        FadeElement(PinPanel, 0, CrossfadeSeconds, () =>
+        {
+            if (state != PaymentNoticeState.PinEntry)
+            {
+                PinPanel.Visibility = Visibility.Collapsed;
+            }
         });
 
         FadeElement(CardImage, 0, CrossfadeSeconds, () =>
@@ -305,19 +390,45 @@ public partial class PaymentNoticeWindow : Window
         });
     }
 
+    /// <summary>
+    /// Phase 18(P18-2): PIN 입력 패널(PinPanel) 표시/숨김 및 초기 상태 구성. 실제 입력 로직(숫자
+    /// 반영, 현재 위치 강조 갱신 등)은 <see cref="UpdatePinDigitsDisplay"/>가 ViewModel의
+    /// <c>PinLength</c>/<c>RevealedDigit</c>에서 파생시킨다(P18-3) — 이 메서드는 패널 자체의
+    /// 표시/숨김과 그 아래 레이어 정리만 담당한다.
+    ///
+    /// 바닥 원판(PlateImage)/리더기 몸통(ReaderImage)은 IC/FALLBACK/PROCESSING 3개 상태 공용으로
+    /// 항상 표시되는 레이어라(교체·페이드 대상 아님), PIN 입력 중에는 여기서 함께 숨긴다 — 그러지
+    /// 않으면 PinPanel(투명 배경)의 키패드 뒤로 리더기 그림이 비쳐 보인다(실측 확인).
+    /// </summary>
+    private void ConfigurePinPanel(PaymentNoticeState state)
+    {
+        bool isPinEntry = state == PaymentNoticeState.PinEntry;
+        PlateImage.Visibility = isPinEntry ? Visibility.Collapsed : Visibility.Visible;
+        ReaderImage.Visibility = isPinEntry ? Visibility.Collapsed : Visibility.Visible;
+
+        if (!isPinEntry)
+        {
+            return;
+        }
+
+        PinPanel.Visibility = Visibility.Visible;
+    }
+
     private void ConfigureCard(PaymentNoticeState state)
     {
         StopCard();
 
-        if (state != PaymentNoticeState.VanProcessing)
+        if (state == PaymentNoticeState.IcCardRequest || state == PaymentNoticeState.FallbackCardRequest)
         {
             // ApplyState에서 슬롯 빛 흐름(IC/MS)을 결정할 때 참고할 "직전 카드 상태"를 기록한다.
             _lastCardState = state;
         }
 
-        if (state == PaymentNoticeState.VanProcessing)
+        if (state == PaymentNoticeState.VanProcessing || state == PaymentNoticeState.PinEntry)
         {
-            // 거래 중: 카드를 표시하지 않음 (카드 제거)
+            // 거래 중 / PIN 입력 중: 카드를 표시하지 않음 (카드 제거)
+            // PinEntry는 PIN 키패드 레이아웃(PinPanel, P18-2)으로 교체됐다 — 여기서는 카드 레이어만
+            // 숨겨서 리더기 카드 애니메이션이 잘못 보이지 않게 한다.
             CardImage.Source = null;
             CardImage.Opacity = 0;
             return;
@@ -378,6 +489,20 @@ public partial class PaymentNoticeWindow : Window
             // 신호 웨이브 인디케이터(리더기 위쪽 공중, OverlayHost 소속 아님)도 별도로 켠다.
             SignalWaveIndicator.Visibility = Visibility.Visible;
             SignalWaveIndicator.Play();
+            return;
+        }
+
+        if (state == PaymentNoticeState.PinEntry)
+        {
+            // PIN 입력 중: 리더기 관련 오버레이(화살표/처리중 인디케이터/진행광 링/신호 웨이브)를 전부
+            // 숨긴다 — 리더기 그림이 보일 이유가 없다(대신 PinPanel/PIN 키패드가 보인다, P18-2).
+            ArrowImage.Visibility = Visibility.Collapsed;
+            ProcessingIndicator.Visibility = Visibility.Collapsed;
+            ProcessingIndicator.Stop();
+            ProcessingRing.Stop();
+            ProcessingRing.Visibility = Visibility.Collapsed;
+            SignalWaveIndicator.Stop();
+            SignalWaveIndicator.Visibility = Visibility.Collapsed;
             return;
         }
 
@@ -460,6 +585,13 @@ public partial class PaymentNoticeWindow : Window
                 (string?)null,
                 "Payment is processing",
                 (string?)null),
+            // P18-2 "문구 2줄" 원문 그대로 — 실제 표시 위치(Canvas.Top)는 ApplyState의
+            // PinEntryTextTop 상수로 PinPanel 아이콘과 겹치지 않게 아래로 내린다.
+            PaymentNoticeState.PinEntry => (
+                "카드 비밀번호 4자리를 입력해 주세요.",
+                (string?)null,
+                "Please enter your 4-digit card PIN",
+                (string?)null),
             _ => (string.Empty, (string?)null, string.Empty, (string?)null),
         };
 
@@ -493,9 +625,13 @@ public partial class PaymentNoticeWindow : Window
         ((Storyboard)ArrowImage.Resources["ArrowBounceLeftStoryboard"]).Stop(ArrowImage);
         _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
 
+        // Phase 18(P18-3): PIN 노출/자동 진행 지연 작업을 창이 닫힐 때 반드시 정지한다(P13 H-1과
+        // 같은 종류의 누수 방지 — Closed 경로는 취소/완료/X/Alt+F4 어느 쪽이든 여기로 모인다).
+        _viewModel.StopPinTimers();
+
         // 해제 3중 보장 ①(P13-5). 창이 사라지는 경로(취소/완료/X/Alt+F4)는 전부 Closed로 모인다 —
         // 경로마다 해제 코드를 복붙하지 않는다(P12-6에서 확인된 결함과 같은 종류를 반복하지 않기 위함).
-        _escapeHook.Uninstall();
+        _keyboardHook.Uninstall();
         if (_dispatcherShutdownHandler != null)
         {
             Dispatcher.ShutdownStarted -= _dispatcherShutdownHandler;

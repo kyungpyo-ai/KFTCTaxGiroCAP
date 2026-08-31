@@ -35,6 +35,31 @@
         페이드아웃 → 새 것 페이드인").
         리더기/원판/화살표 → 이미지 매핑은 Views/PaymentNoticeBackgroundSource.cs 한 곳에서만 이루어진다.
     -->
+    <Window.Resources>
+        <!--
+            Phase 18(P18-2) PIN 키패드 버튼 스타일. Themes/Buttons.xaml의 ModernButtonBase를 그대로
+            베이스로 쓰되(눌림 시 살짝 축소되는 클릭 피드백 재사용), 배경/보더/폰트만 시안(pin입력.png)에
+            맞춘다 — 흰 배경 + 얇은 회색 보더 + 큰 볼드 숫자. 이 창 전용이라 전역 Buttons.xaml에는
+            넣지 않는다.
+        -->
+        <Style x:Key="PinKeypadButtonStyle" TargetType="Button" BasedOn="{StaticResource ModernButtonBase}">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource TblBorderBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TitleTextBrush}"/>
+            <Setter Property="FontFamily" Value="{StaticResource PretendardFontFamily}"/>
+            <Setter Property="FontSize" Value="26"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="0"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#F5F7FA"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#EAEDF1"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
     <Grid>
         <!-- 2026-08-24 8차 수정(사용자 피드백 "창이 너무 크다"): 내부 좌표는 그대로 두고 Viewbox로
              감싸 전체 비율을 유지한 채 스케일만 축소한다. Canvas(750x650)와 취소 버튼을 750x650
@@ -165,6 +190,107 @@
             <controls:PaymentSignalWaveIndicator x:Name="SignalWaveIndicator"
                    Canvas.Left="225" Canvas.Top="180"
                    Visibility="Collapsed" IsHitTestVisible="False" Panel.ZIndex="10"/>
+
+            <!-- ===== PIN 입력 패널 (Phase 18 P18-2, PinEntry 전용) =====
+                 `Assets/Images/PaymentNotice/pin입력.png` 시안의 요소 구성(아이콘 → 문구 2줄 → PIN
+                 4칸 → 3x4 키패드 → 취소)을 따르되, 시안은 세로형(1087x1447)이라 750x650 가로형에
+                 맞춰 배치를 다시 실측했다. 문구는 기존 TextPanelA/B 크로스페이드 레이어를 그대로
+                 쓴다(여기서는 아이콘/PIN 4칸/키패드만 배치). 리더기/원판/카드/화살표 레이어는
+                 PinEntry 상태에서 코드비하인드(ConfigureCard/ConfigureOverlay)가 이미 숨긴다.
+                 Panel.ZIndex=20으로 다른 모든 레이어보다 위에 둔다. -->
+            <Grid x:Name="PinPanel" Canvas.Left="0" Canvas.Top="0" Width="750" Height="650"
+                  Opacity="0" Visibility="Collapsed" Panel.ZIndex="20">
+
+                <!-- 아이콘: 카드+자물쇠, 배경 투명. Top=14, 76x76, 가로 중앙(Left=337). -->
+                <Image x:Name="PinIconImage" Width="76" Height="76"
+                       HorizontalAlignment="Left" VerticalAlignment="Top"
+                       Margin="337,14,0,0" Stretch="Uniform" IsHitTestVisible="False"
+                       RenderOptions.BitmapScalingMode="HighQuality"/>
+
+                <!-- PIN 4칸: 미입력/입력됨/현재 위치 강조 3가지 시각 상태를 표현할 수 있도록 각 칸을
+                     개별 Border(+내부 Ellipse 점)로 분리해 둔다(P18-3에서 ViewModel 프로퍼티 바인딩
+                     대상). 기본값은 "1번째 칸이 강조된 초기 상태"(0자리 입력) — 나머지 3칸은 빈 칸. -->
+                <StackPanel x:Name="PinDigitsPanel" Orientation="Horizontal"
+                            HorizontalAlignment="Center" VerticalAlignment="Top"
+                            Margin="0,186,0,0">
+                    <Border x:Name="PinDigitBox1" Width="54" Height="54" Margin="0,0,18,0"
+                            Background="White" CornerRadius="8"
+                            BorderBrush="{StaticResource Blue500Brush}" BorderThickness="2">
+                        <Grid>
+                            <Ellipse x:Name="PinDigitDot1" Width="12" Height="12"
+                                     Fill="{StaticResource TitleTextBrush}" Visibility="Hidden"/>
+                            <TextBlock x:Name="PinDigitText1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       FontFamily="{StaticResource PretendardFontFamily}" FontSize="24" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TitleTextBrush}" Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+                    <Border x:Name="PinDigitBox2" Width="54" Height="54" Margin="0,0,18,0"
+                            Background="White" CornerRadius="8"
+                            BorderBrush="{StaticResource TblBorderBrush}" BorderThickness="1">
+                        <Grid>
+                            <Ellipse x:Name="PinDigitDot2" Width="12" Height="12"
+                                     Fill="{StaticResource TitleTextBrush}" Visibility="Hidden"/>
+                            <TextBlock x:Name="PinDigitText2" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       FontFamily="{StaticResource PretendardFontFamily}" FontSize="24" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TitleTextBrush}" Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+                    <Border x:Name="PinDigitBox3" Width="54" Height="54" Margin="0,0,18,0"
+                            Background="White" CornerRadius="8"
+                            BorderBrush="{StaticResource TblBorderBrush}" BorderThickness="1">
+                        <Grid>
+                            <Ellipse x:Name="PinDigitDot3" Width="12" Height="12"
+                                     Fill="{StaticResource TitleTextBrush}" Visibility="Hidden"/>
+                            <TextBlock x:Name="PinDigitText3" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       FontFamily="{StaticResource PretendardFontFamily}" FontSize="24" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TitleTextBrush}" Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+                    <Border x:Name="PinDigitBox4" Width="54" Height="54"
+                            Background="White" CornerRadius="8"
+                            BorderBrush="{StaticResource TblBorderBrush}" BorderThickness="1">
+                        <Grid>
+                            <Ellipse x:Name="PinDigitDot4" Width="12" Height="12"
+                                     Fill="{StaticResource TitleTextBrush}" Visibility="Hidden"/>
+                            <TextBlock x:Name="PinDigitText4" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       FontFamily="{StaticResource PretendardFontFamily}" FontSize="24" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TitleTextBrush}" Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <!-- 3x4 키패드: 1~9 / ⌫(삭제) / 0 / 빈칸. Command 배선은 P18-3 — 지금은 클릭해도
+                     동작하지 않는다(x:Name만 미리 부여해 둔다). -->
+                <UniformGrid x:Name="PinKeypad" Rows="4" Columns="3"
+                             Width="500" Height="260"
+                             HorizontalAlignment="Center" VerticalAlignment="Top"
+                             Margin="0,268,0,0">
+                    <Button x:Name="PinButton1" Content="1" Margin="6" Style="{StaticResource PinKeypadButtonStyle}"
+                            Command="{Binding PinDigitCommand}" CommandParameter="1"/>
+                    <Button x:Name="PinButton2" Content="2" Margin="6" Style="{StaticResource PinKeypadButtonStyle}"
+                            Command="{Binding PinDigitCommand}" CommandParameter="2"/>
+                    <Button x:Name="PinButton3" Content="3" Margin="6" Style="{StaticResource PinKeypadButtonStyle}"
+                            Command="{Binding PinDigitCommand}" CommandParameter="3"/>
+                    <Button x:Name="PinButton4" Content="4" Margin="6" Style="{StaticResource PinKeypadButtonStyle}"
+                            Command="{Binding PinDigitCommand}" CommandParameter="4"/>
+                    <Button x:Name="PinButton5" Content="5" Margin="6" Style="{StaticResource PinKeypadButtonStyle}"
+                            Command="{Binding PinDigitCommand}" CommandParameter="5"/>
+                    <Button x:Name="PinButton6" Content="6" Margin="6" Style="{StaticResource PinKeypadButtonStyle}"
+                            Command="{Binding PinDigitCommand}" CommandParameter="6"/>
+                    <Button x:Name="PinButton7" Content="7" Margin="6" Style="{StaticResource PinKeypadButtonStyle}"
+                            Command="{Binding PinDigitCommand}" CommandParameter="7"/>
+                    <Button x:Name="PinButton8" Content="8" Margin="6" Style="{StaticResource PinKeypadButtonStyle}"
+                            Command="{Binding PinDigitCommand}" CommandParameter="8"/>
+                    <Button x:Name="PinButton9" Content="9" Margin="6" Style="{StaticResource PinKeypadButtonStyle}"
+                            Command="{Binding PinDigitCommand}" CommandParameter="9"/>
+                    <Button x:Name="PinButtonBackspace" Content="⌫" Margin="6" Style="{StaticResource PinKeypadButtonStyle}"
+                            Command="{Binding PinBackspaceCommand}"/>
+                    <Button x:Name="PinButton0" Content="0" Margin="6" Style="{StaticResource PinKeypadButtonStyle}"
+                            Command="{Binding PinDigitCommand}" CommandParameter="0"/>
+                    <!-- 빈칸(오른쪽 아래) — 시안대로 버튼 없이 자리만 유지 -->
+                    <Grid/>
+                </UniformGrid>
+            </Grid>
 
         </Canvas>
 

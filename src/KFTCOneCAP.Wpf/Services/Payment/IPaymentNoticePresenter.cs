@@ -31,4 +31,13 @@ public interface IPaymentNoticePresenter
     /// CALLBACK 중재 구조가 아직 확정되지 않아서다.
     /// </summary>
     event EventHandler? Canceled;
+
+    /// <summary>
+    /// PIN 4자리가 입력 완료됐을 때 정확히 한 번 통지된다(취소와 같은 "정확히 한 번" 규칙,
+    /// docs/payment_relay/development_plan.md P18-1). <see cref="PaymentNoticeState.PinEntry"/> 상태에서만
+    /// 발생한다. 여기서도 <c>Task&lt;string?&gt;</c> 방식은 쓰지 않는다 — <see cref="Canceled"/>와 같은
+    /// 이유로, 취소·Timeout·PIN 완료 3자 경합의 결과 확정 주체를 하나(호출자 쪽 게이트)로 유지하기
+    /// 위해서다.
+    /// </summary>
+    event EventHandler<PinEnteredEventArgs>? PinEntered;
 }

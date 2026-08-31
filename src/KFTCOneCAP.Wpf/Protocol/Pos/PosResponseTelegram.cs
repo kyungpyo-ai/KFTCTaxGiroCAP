@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
 
 namespace KFTCOneCAP.Wpf.Protocol.Pos;
@@ -53,12 +54,31 @@ public sealed class PosResponseTelegram
     public static PosResponseTelegram Failure(PosTelegramSchema schema, string resultCode) =>
         BuildFailure(PosTelegram.CreateEmpty(schema), resultCode);
 
+    /// <summary>
+    /// <c>#51</c> 암호화된 비밀번호 정보 — 실패 응답에서 반드시 지워야 하는 필드(902614 전용).
+    /// (2026-08-27 Phase 18 최종 검증 H-1) 실패 응답은 요청을 <see cref="PosTelegram.Clone"/>해서
+    /// 만드는데, PIN을 채운 뒤 실패하는 경로(VAN 통신 실패 <c>D0x</c>, 필드 채움 중 예외 <c>E99</c>)에서는
+    /// clone 시점에 <c>#51</c>이 이미 채워져 있어 <b>사용자 비밀번호가 그대로 POS로 되돌아갔다</b>.
+    /// <c>#51</c>은 kiosk가 원래 갖지 못하는 유일한 필드이고(그래서 원캡이 화면에서 직접 입력받는다 —
+    /// PRD §4.12), SEED 암호화 확정 전인 현재는 평문이라 그대로 프로세스 경계를 넘는다. 요청 방향으로
+    /// VAN에 보내는 것만이 이 값의 유일한 용도이므로 응답에서는 무조건 지운다.
+    /// </summary>
+    private const int EncryptedPinFieldNumber = 51;
+
     private static PosResponseTelegram BuildFailure(PosTelegram telegram, string resultCode)
     {
         telegram.Write(3, ResponseTransactionTypeSuffix);
         telegram.Write(6, SendFlagFromOneCap);
         telegram.Write(7, resultCode);
         telegram.Write(8, DateTime.Now.ToString("yyMMddHHmmss", CultureInfo.InvariantCulture));
+
+        // 902614에만 있는 필드라 스키마에 있을 때만 지운다(501008/800000에는 #51 자체가 없다).
+        // 빈 문자열을 쓰면 PosField.Pad가 타입과 무관하게 전체 space로 채운다(P17 체크포인트1 M-1).
+        if (telegram.Schema.Fields.Any(f => f.Number == EncryptedPinFieldNumber))
+        {
+            telegram.Write(EncryptedPinFieldNumber, string.Empty);
+        }
+
         return new PosResponseTelegram(telegram);
     }
 
