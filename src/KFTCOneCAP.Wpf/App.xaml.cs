@@ -62,8 +62,30 @@ public partial class App : Application
     /// </summary>
     internal static PaymentOrchestrator? Orchestrator { get; private set; }
 
+    /// <summary>
+    /// 단일 인스턴스 가드용 Mutex(docs/operations/development_plan.md P22-0 보강, 2026-09-01) — 관리자
+    /// 권한 승격(UAC) 과정에서 exe가 중복 기동되는 현상이 실물 검증 중 발견됐다. 소유권을 얻은
+    /// (새 인스턴스로 판정된) 프로세스만 이 필드를 보관하며, 앱 종료 시 <see cref="OnExit"/>에서
+    /// 명시적으로 해제한다. .NET Mutex는 프로세스 종료 시 OS가 자동 회수하므로 이 명시적 해제가
+    /// 없어도 안전하지만, 정상 종료 경로에서 즉시 해제해 두는 편이 재실행 지연을 줄인다.
+    /// </summary>
+    private Mutex? _singleInstanceMutex;
+
     protected override void OnStartup(StartupEventArgs e)
     {
+        // 단일 인스턴스 가드(docs/operations/development_plan.md P22-0 보강, 2026-09-01): 로그 싱크
+        // 구성보다도 먼저 체크한다 — 이미 살아있는 인스턴스가 있으면 이 프로세스는 로그 한 줄 남기지
+        // 않고 조용히 즉시 종료한다(살아있는 인스턴스가 있다면 그쪽 로그에 흔적을 남기는 편이 더
+        // 유용하지만, 그건 이 인스턴스가 할 일이 아니다). 개발용 진단 하네스 인자(--payment-flow-test
+        // 등, 아래 분기 참고)가 있을 때는 가드를 건너뛴다 — 프로덕션 기동은 인자 없이 이뤄지므로,
+        // 인자가 있으면 개발자가 의도적으로 여러 인스턴스/여러 하네스를 동시에 띄우는 상황으로
+        // 간주한다.
+        if (e.Args.Length == 0 && !TryAcquireSingleInstance())
+        {
+            Shutdown();
+            return;
+        }
+
         // Phase 22(docs/operations/development_plan.md P22-3/P22-4, PRD.md §1.3-a/§1.3-d): 로그 싱크
         // 목록을 앱 기동 시 한 번 구성한다. 다른 모든 FileLogger 호출보다 먼저 실행돼야 한다.
         // FileLogSink는 파일에 렌더링해 남기고, RingBufferSink는 최근 500건을 메모리에 유지한다
@@ -339,6 +361,71 @@ public partial class App : Application
         PaymentQueue?.Stop(TimeSpan.FromSeconds(5));
         ReaderConnections?.CloseAll();
         FileLogger.Info(LogCategory.App, "애플리케이션 종료 완료");
+
+        // 단일 인스턴스 가드 해제(P22-0 보강, 2026-09-01): 이 프로세스가 실제로 Mutex 소유권을
+        // 획득했던 경우(=정상 실행된 인스턴스)에만 해제한다. 중복 인스턴스로 판정돼 Shutdown()된
+        // 경로는 Mutex를 획득한 적이 없으므로(TryAcquireSingleInstance에서 실패 시 즉시 Dispose하고
+        // null로 둔다) 여기서 할 일이 없다.
+        try
+        {
+            _singleInstanceMutex?.ReleaseMutex();
+        }
+        catch (ApplicationException)
+        {
+            // 이미 소유하지 않은 Mutex에 ReleaseMutex를 호출한 경우(방어적 처리) — 무시한다.
+        }
+        finally
+        {
+            _singleInstanceMutex?.Dispose();
+            _singleInstanceMutex = null;
+        }
+
         base.OnExit(e);
+    }
+
+    /// <summary>
+    /// 단일 인스턴스 가드(P22-0 보강, 2026-09-01)를 시도한다. <c>Global\</c> 네임스페이스로 먼저
+    /// 시도해 터미널 서비스/세션 분리 환경에서도 전역으로 단일 인스턴스를 보장한다. 이 앱은 항상
+    /// 관리자 권한으로 기동하므로(app.manifest <c>requireAdministrator</c>) 모든 인스턴스가 같은
+    /// 무결성 수준에서 Mutex를 만들고 열게 되어 <see cref="UnauthorizedAccessException"/>이 실제로
+    /// 발생할 가능성은 낮지만, 방어적으로 <c>Local\</c> 네임스페이스로 한 번 더 시도한다(그래도
+    /// 실패하면 가드를 포기하고 기동을 계속한다 — 가드 실패가 결제 기능 자체를 막아서는 안 된다).
+    /// </summary>
+    /// <returns>이 프로세스가 유일한 인스턴스로 인정되어 계속 기동해야 하면 true.</returns>
+    private bool TryAcquireSingleInstance()
+    {
+        const string GlobalMutexName = @"Global\KFTCOneCAP_Wpf_SingleInstance";
+        const string LocalMutexName = @"Local\KFTCOneCAP_Wpf_SingleInstance";
+
+        Mutex mutex;
+        bool createdNew;
+        try
+        {
+            mutex = new Mutex(initiallyOwned: true, name: GlobalMutexName, createdNew: out createdNew);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Global\ Mutex가 다른 무결성 수준(예: 비관리자 프로세스)에서 먼저 만들어져 있으면 DACL
+            // 차이로 접근이 거부될 수 있다 — Local\로 우회한다.
+            try
+            {
+                mutex = new Mutex(initiallyOwned: true, name: LocalMutexName, createdNew: out createdNew);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // 그래도 실패하면 가드를 포기한다(기동은 계속 진행) — 단일 인스턴스 보장보다 앱이
+                // 아예 기동하지 못하는 쪽이 더 나쁘다.
+                return true;
+            }
+        }
+
+        if (!createdNew)
+        {
+            mutex.Dispose();
+            return false;
+        }
+
+        _singleInstanceMutex = mutex;
+        return true;
     }
 }
