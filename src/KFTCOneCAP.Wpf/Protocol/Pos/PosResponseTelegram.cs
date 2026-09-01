@@ -37,6 +37,10 @@ public sealed class PosResponseTelegram
 
     internal PosTelegram Telegram { get; }
 
+    /// <summary>해당 필드를 CP949로 디코딩하고 패딩을 제거해 읽는다(P22-6 로깅용 — 결과코드 <c>#7</c>/
+    /// 전문관리번호 <c>#9</c> 등, <see cref="PosRequestTelegram.Read"/>와 동일한 목적).</summary>
+    public string Read(int fieldNumber) => Telegram.Read(fieldNumber);
+
     /// <summary>VAN이 돌려준 응답 바이트를 그대로 감싼다 — 어떤 필드도 다시 쓰지 않는다(relay 경로).</summary>
     public static PosResponseTelegram Relay(PosTelegramSchema schema, byte[] vanResponseBody) =>
         new(PosTelegram.FromBytes(schema, vanResponseBody));

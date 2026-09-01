@@ -49,17 +49,22 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         /// 동일한 필드").
         /// </summary>
         internal static async Task<CardReadBroadcastResult> SendAsync(
-            IReadOnlyList<IReaderEndpoint> participants, TransactionInfoRequest request, TimeSpan timeout)
+            IReadOnlyList<IReaderEndpoint> participants, TransactionInfoRequest request, TimeSpan timeout, string txId)
         {
             if (participants.Count == 0)
             {
-                FileLogger.Warn("[카드 리딩 페일오버 전송] 참여 가능한 리더기가 없어 전송하지 않습니다");
+                FileLogger.Warn(LogCategory.Reader, "[카드 리딩 페일오버 전송] 참여 가능한 리더기가 없어 전송하지 않습니다", code: null, txId);
                 return CardReadBroadcastResult.NoParticipants();
             }
 
-            // 전원에게 동시에 SendCardReadCommandAsync를 시작한다 — 각 ReaderService가 자신의
-            // SendCommandSafe(재연결 래퍼)/단일 유효 응답 게이트를 독립적으로 수행하므로, 여기서는
-            // "누가 먼저 끝나는가"만 Task.WhenAny로 판정하면 된다.
+            // P22-6(PRD.md §1.5 경계 표 "리더기 DLL" — 명령 송신). 전원에게 동시에
+            // SendCardReadCommandAsync를 시작한다 — 각 ReaderService가 자신의 SendCommandSafe(재연결
+            // 래퍼)/단일 유효 응답 게이트를 독립적으로 수행하므로, 여기서는 "누가 먼저 끝나는가"만
+            // Task.WhenAny로 판정하면 된다.
+            // 사소 3(P22 리뷰) — 포트 표시값을 함께 남긴다. 인덱스만으로는 ObservedIdentityStore가 쓰는
+            // 포트 키(observed_identity)와 로그 상에서 연결이 안 됐다.
+            string participantPorts = string.Join(",", participants.Select(p => p.ComPortDisplay));
+            FileLogger.Info(LogCategory.Reader, $"[카드 리딩 페일오버 전송] 참여 {participants.Count}대({participantPorts})에 0x2B 명령 송신", code: null, txId);
             var tasks = participants.Select(p => p.SendCardReadCommandAsync(request, timeout)).ToArray();
 
             Task<CardReadCommandOutcome> firstDone = await Task.WhenAny(tasks).ConfigureAwait(false);
@@ -67,7 +72,8 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             IReaderEndpoint winner = participants[winnerIndex];
             CardReadCommandOutcome winnerOutcome = await firstDone.ConfigureAwait(false);
 
-            FileLogger.Info($"[카드 리딩 페일오버 전송] 리더기[{winnerIndex}] 채택 (이번 라운드 최초 응답), Kind={winnerOutcome.Kind}");
+            // 응답 수신(같은 경계, 같은 P22-6 근거).
+            FileLogger.Info(LogCategory.Reader, $"[카드 리딩 페일오버 전송] 리더기[{winnerIndex}]({winner.ComPortDisplay}) 채택 (이번 라운드 최초 응답), Kind={winnerOutcome.Kind}", code: null, txId);
 
             for (int i = 0; i < participants.Count; i++)
             {
@@ -77,7 +83,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 // 아직 응답 대기 중인 나머지 참여 리더기를 초기화(0x60)로 무효화한다(PRD §2.2.3).
                 // 결과를 기다리지 않는다(참조 구현과 동일 — Fire-and-forget이지만 로그는 남긴다).
                 int invalidateResult = participants[i].SendInvalidationInit();
-                FileLogger.Info($"[카드 리딩 페일오버 전송] 리더기[{i}]: 다른 리더기 응답 채택으로 초기화 요청(0x60) 전송해 무효화 -> result={invalidateResult}");
+                FileLogger.Info(LogCategory.Reader, $"[카드 리딩 페일오버 전송] 리더기[{i}]({participants[i].ComPortDisplay}): 다른 리더기 응답 채택으로 초기화 요청(0x60) 전송해 무효화 -> result={invalidateResult}", code: null, txId);
             }
 
             return CardReadBroadcastResult.Of(winner, winnerOutcome);

@@ -58,6 +58,11 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
     private readonly IntegrityCheckService _integrityCheckService = new();
     private readonly IntegrityCheckStore _integrityCheckStore = new();
 
+    /// <summary>Phase 22(P22-7, PRD.md §1.6) — 상태체크(0x61/0x71) 관측 지점 2곳 중 "설치·점검 시
+    /// 수동" 쪽. 파라미터 없는 생성자가 <see cref="IntegrityCheckStore.DefaultDatabasePath"/>를 그대로
+    /// 써서 <see cref="_integrityCheckStore"/>와 물리적으로 같은 DB 파일을 공유한다.</summary>
+    private readonly ObservedIdentityStore _observedIdentityStore = new();
+
     // PRD 4.13/4.12 dirty-check 스냅샷(취소 시 비교용) — Load() 직후 값을 기준으로 잡는다.
     private string _snapshotReader1Port = ComPortFormat.Unused;
     private string _snapshotReader2Port = ComPortFormat.Unused;
@@ -224,10 +229,18 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
     /// 동일한 이유(2026-08-20).</summary>
     private async Task ExecuteStatusAsync(ReaderService reader, string readerLabel, Func<string> portAccessor)
     {
-        _connectionManager.EnsureOpenForSelection(reader, readerLabel, ComPortFormat.StripUnavailableSuffix(portAccessor()));
+        string comPort = ComPortFormat.StripUnavailableSuffix(portAccessor());
+        _connectionManager.EnsureOpenForSelection(reader, readerLabel, comPort);
 
         var outcome = await reader.SendStatusCommandAsync(CommandTimeout);
         LogOutcome(readerLabel, "상태체크", outcome.Kind, outcome.ResponseCode, outcome.DllResultName, outcome.DllResult, outcome.Detail);
+
+        if (outcome.Kind == ReaderCommandOutcomeKind.Success)
+        {
+            // P22-7(PRD.md §1.6 관측 지점 "상태체크 — 설치·점검 시, 수동"). 값 자체는 로그에 남기지
+            // 않는다(ObservedIdentityStore 클래스 요약).
+            _observedIdentityStore.Upsert(comPort, ObservedIdentityStore.ReaderAuthIdKey, outcome.ReaderAuthId);
+        }
 
         string? successExtra = outcome.Kind == ReaderCommandOutcomeKind.Success
             ? $"리더기 인증 식별번호 : {outcome.ReaderAuthId}\n모듈 ID : {outcome.ModuleId}"

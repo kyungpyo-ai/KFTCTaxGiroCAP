@@ -39,6 +39,14 @@ internal sealed class PosSocketServer
     private const int MaxConcurrentConnections = 16;
     private const int ReceiveBufferSize = 4096;
 
+    /// <summary>P22-6(PRD.md §1.5 경계 표 "POS 소켓") — 요청/응답 공통부의 전문관리번호(<c>#9</c>,
+    /// <c>PaymentOrchestrator.LogTxId</c>와 동일한 필드, 3전문 공통 POSITION/길이)와 결과코드
+    /// (<c>#7</c>). 요청 수신·응답 송신 로그의 카테고리·코드·거래ID를 채우는 데만 쓴다 — 전문 본문을
+    /// 해석하지 않는다(§1.5 "전문 본문 전체는 남기지 않는다"와 별개로, 식별 필드 2개만 읽는다).</summary>
+    private const int ManagementNumberFieldNumber = 9;
+
+    private const int ResultCodeFieldNumber = 7;
+
     /// <summary>
     /// 응답 전송(<see cref="SendResponse"/>)의 최대 대기 시간(ms). (Opus 검증 리뷰 2026-08-24, H-1)
     /// <see cref="SendResponse"/>는 <see cref="TransactionQueue"/>의 **유일한 워커 스레드에서 동기
@@ -173,7 +181,7 @@ internal sealed class PosSocketServer
     private void HandleConnection(TcpClient client, CancellationToken token)
     {
         string remote = SafeRemoteEndPoint(client);
-        FileLogger.Info($"[PosSocketServer] 연결 수락: {remote}");
+        FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] 연결 수락: {remote}");
 
         var framer = new PosMessageFramer();
         var writeLock = new object();
@@ -250,7 +258,7 @@ internal sealed class PosSocketServer
         finally
         {
             Interlocked.Decrement(ref _connectionCount);
-            FileLogger.Info($"[PosSocketServer] 연결 종료: {remote}");
+            FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] 연결 종료: {remote}");
         }
     }
 
@@ -274,7 +282,7 @@ internal sealed class PosSocketServer
             // 프레임 경계는 이미 지켜졌으므로(형식 오류와 다름) 이 프레임만 버리고 연결은 유지한다.
             // #4(거래 구분 코드)조차 읽을 수 없을 만큼 짧은 본문만 여기 온다(P17-3) — 이 경우는
             // 응답을 만들 스키마 근거가 전혀 없어 침묵 외에 대안이 없다.
-            FileLogger.Warn($"[PosSocketServer] {remote} 요청 파싱 오류(이 프레임만 폐기): {ex.Message}");
+            FileLogger.Warn(LogCategory.Pos, $"[PosSocketServer] {remote} 요청 파싱 오류(이 프레임만 폐기): {ex.Message}");
             return false;
         }
 
@@ -282,14 +290,18 @@ internal sealed class PosSocketServer
         {
             // E40(길이 불일치)/E41(알 수 없는 거래구분) — 전문 계층(P17-3)이 이미 완성된 응답 프레임을
             // 만들어 뒀다. Flow(큐)를 거칠 이유가 없는 순수 프로토콜 오류이므로 여기서 바로 써 보낸다.
-            FileLogger.Warn($"[PosSocketServer] {remote} 전문 오류({outcome.ErrorCode}) — 큐를 거치지 않고 즉시 응답");
+            // 개선권장 B(P22 리뷰) — 이 두 응답은 SendResponse를 거치지 않아 "응답 송신" 구조화 로그가
+            // 없었다. 여기서 코드 슬롯을 채운 로그를 한 줄 남긴 뒤 WriteFrame으로 보낸다(응답 관리번호는
+            // 파싱 자체가 실패한 경우가 대부분이라 알 수 없다 — txId는 null).
+            FileLogger.Warn(LogCategory.Pos, $"[PosSocketServer] {remote} 전문 오류 — 큐를 거치지 않고 즉시 응답", outcome.ErrorCode, transactionId: null);
             WriteFrame(outcome.ErrorResponseFrame!, stream, writeLock, remote, "전문 오류");
             responseSent.Set();
             return true;
         }
 
         PosRequestTelegram request = outcome.Telegram!;
-        FileLogger.Info($"[PosSocketServer] {remote} 요청 수신 전문={request.TransactionTypeCode}");
+        string requestTxId = request.Read(ManagementNumberFieldNumber);
+        FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] {remote} 요청 수신 전문={request.TransactionTypeCode}", code: null, requestTxId);
 
         _queue.Enqueue(request, response =>
         {
@@ -323,9 +335,16 @@ internal sealed class PosSocketServer
         }
         catch (Exception ex)
         {
-            FileLogger.Error($"[PosSocketServer] 응답 직렬화 실패: {ex}");
+            FileLogger.Error(LogCategory.Pos, $"[PosSocketServer] 응답 직렬화 실패: {ex}");
             return;
         }
+
+        // #9(전문관리번호)는 요청 수신 로그와 같은 필드다(request.Read(9)가 비어 있지 않은 정상
+        // 케이스라면 PaymentOrchestrator.LogTxId와 값이 같다) — 요청/응답 두 줄이 같은 거래ID로
+        // 남는다(P22-6 완료 조건).
+        string responseTxId = response.Read(ManagementNumberFieldNumber);
+        string resultCode = response.Read(ResultCodeFieldNumber);
+        FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] {remote} 응답 송신", resultCode, responseTxId);
 
         WriteFrame(frame, stream, writeLock, remote, "응답");
     }
@@ -342,7 +361,7 @@ internal sealed class PosSocketServer
             }
             catch (Exception ex)
             {
-                FileLogger.Warn($"[PosSocketServer] {remote} {logLabel} 전송 실패(연결 끊김 또는 {SendTimeoutMilliseconds}ms 내 미수신으로 추정) — 폐기: {ex.Message}");
+                FileLogger.Warn(LogCategory.Pos, $"[PosSocketServer] {remote} {logLabel} 전송 실패(연결 끊김 또는 {SendTimeoutMilliseconds}ms 내 미수신으로 추정) — 폐기: {ex.Message}");
             }
         }
     }

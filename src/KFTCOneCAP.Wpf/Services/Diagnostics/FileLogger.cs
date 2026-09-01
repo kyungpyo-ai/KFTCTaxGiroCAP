@@ -54,26 +54,50 @@ public static class FileLogger
         _sinks = (ILogSink[])sinks.Clone();
     }
 
-    public static void Info(string message) => Write(LogLevel.Info, category: null, message);
+    public static void Info(string message) => Write(LogLevel.Info, category: null, code: null, transactionId: null, message);
 
-    public static void Warn(string message) => Write(LogLevel.Warn, category: null, message);
+    public static void Warn(string message) => Write(LogLevel.Warn, category: null, code: null, transactionId: null, message);
 
-    public static void Error(string message) => Write(LogLevel.Error, category: null, message);
+    public static void Error(string message) => Write(LogLevel.Error, category: null, code: null, transactionId: null, message);
 
     /// <summary>
-    /// Phase 22(docs/operations/development_plan.md P22-5) — 카테고리를 싣는 첫 오버로드.
-    /// 기존 151곳의 호출부를 건드리지 않기 위해 위 3개는 그대로 두고, 카테고리가 필요한 새 호출
-    /// (지금은 <see cref="LogRetentionCleaner"/> 하나)만 이 오버로드를 쓴다. 코드/거래ID까지 함께
-    /// 싣는 배선은 P22-6에서 결제 Flow 경계를 따라가며 확장한다.
+    /// Phase 22(docs/operations/development_plan.md P22-5) — 카테고리를 싣는 오버로드.
+    /// 기존 151곳의 호출부를 건드리지 않기 위해 위 3개(<see cref="Info(string)"/> 등)는 그대로 두고,
+    /// 카테고리만 필요한 호출이 이 3개(<see cref="Info(LogCategory, string)"/>/
+    /// <see cref="Warn(LogCategory, string)"/>/<see cref="Error(LogCategory, string)"/>)를 쓴다. 코드·
+    /// 거래ID까지 함께 싣는 4-인자 오버로드는 아래 P22-6에서 추가했다.
+    ///
+    /// <b>2/4-인자 오버로드로 나눈 이유(CS0121 회피)</b>: 코드·거래ID를 <c>string? code = null,
+    /// string? transactionId = null</c> 같은 선택적 인자로 4-인자 시그니처 하나에 합치면
+    /// <c>Info(LogCategory.App, "msg")</c> 호출이 이 오버로드와도, 2-인자 오버로드와도 똑같이
+    /// 일치해 모호성 컴파일 오류가 난다 — 그래서 인자 개수가 다른 두 오버로드로 명시적으로
+    /// 나눴다(P22-6 development_plan.md 경고 반영).
     /// </summary>
-    public static void Info(LogCategory category, string message) => Write(LogLevel.Info, category, message);
+    public static void Info(LogCategory category, string message) => Write(LogLevel.Info, category, code: null, transactionId: null, message);
 
-    private static void Write(LogLevel level, LogCategory? category, string message)
+    public static void Warn(LogCategory category, string message) => Write(LogLevel.Warn, category, code: null, transactionId: null, message);
+
+    public static void Error(LogCategory category, string message) => Write(LogLevel.Error, category, code: null, transactionId: null, message);
+
+    /// <summary>
+    /// Phase 22(docs/operations/development_plan.md P22-6, PRD.md §1.5 경계 표) — 카테고리·코드(SPEC
+    /// 3자리 결과 코드, <see cref="PosResultCodeMapper"/>가 만든 값)·거래ID(<see
+    /// cref="Services.Payment.PaymentOrchestrator"/>가 만드는 전문관리번호, <c>LogTxId</c>)까지 싣는
+    /// 오버로드. 결제 1건의 흐름을 따라가며 필요한 경계(POS/READER/VAN/PAYMENT)에서만 쓴다 — 기존
+    /// 151곳을 일괄 개조하지 않는다.
+    /// </summary>
+    public static void Info(LogCategory category, string message, string? code, string? transactionId) => Write(LogLevel.Info, category, code, transactionId, message);
+
+    public static void Warn(LogCategory category, string message, string? code, string? transactionId) => Write(LogLevel.Warn, category, code, transactionId, message);
+
+    public static void Error(LogCategory category, string message, string? code, string? transactionId) => Write(LogLevel.Error, category, code, transactionId, message);
+
+    private static void Write(LogLevel level, LogCategory? category, string? code, string? transactionId, string message)
     {
         try
         {
             string masked = LogMessageMasker.Mask(message);
-            var record = new LogRecord(DateTime.Now, level, category, code: null, transactionId: null, message: masked);
+            var record = new LogRecord(DateTime.Now, level, category, code, transactionId, message: masked);
             Dispatch(record);
         }
         catch

@@ -78,6 +78,7 @@ internal sealed class PaymentOrchestrator
     private readonly IReadOnlyList<IReaderEndpoint> _readerEndpoints;
     private readonly Func<ReaderSettings> _loadSettings;
     private readonly IntegrityCheckStore _integrityStore;
+    private readonly ObservedIdentityStore _observedIdentityStore;
     private readonly IPaymentNoticePresenter _presenter;
     private readonly IReaderSetupGate _readerSetupGate;
     private readonly IVanRelayService _vanRelay;
@@ -86,6 +87,7 @@ internal sealed class PaymentOrchestrator
     internal PaymentOrchestrator(
         IReadOnlyList<IReaderEndpoint> readerEndpoints,
         IntegrityCheckStore integrityStore,
+        ObservedIdentityStore observedIdentityStore,
         IPaymentNoticePresenter presenter,
         IReaderSetupGate readerSetupGate,
         IVanRelayService vanRelay,
@@ -95,6 +97,7 @@ internal sealed class PaymentOrchestrator
         _readerEndpoints = readerEndpoints;
         _loadSettings = loadSettings ?? new ReaderSettingsService().Load;
         _integrityStore = integrityStore;
+        _observedIdentityStore = observedIdentityStore;
         _presenter = presenter;
         _readerSetupGate = readerSetupGate;
         _vanRelay = vanRelay;
@@ -110,19 +113,45 @@ internal sealed class PaymentOrchestrator
         // ===== 공통 1단계 — 설정 화면 게이트(모든 전문 공통, 2026-08-25 확정 P15-4/2026-08-26 P17-5) =====
         if (_readerSetupGate.IsReaderSetupOpen)
         {
-            FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 리더기 설정 화면이 열려 있어 거부");
-            return PosResponseTelegram.Failure(request, PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.ReaderSetupInProgress));
+            // 개선권장 A-1(P22 리뷰) — 이 분기는 아래 switch 이전에 return하므로 133행 근처의 중앙화된
+            // "거래 확정" 로그를 우회한다. 여기서 구조화 로그로 직접 남긴다(레거시 Warn(string) 호출은
+            // 정보 중복이라 이 구조화 버전으로 대체했다).
+            string gateRejectCode = PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.ReaderSetupInProgress);
+            FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 거래 확정 — 리더기 설정 화면 점유로 거부", gateRejectCode, txId);
+            return PosResponseTelegram.Failure(request, gateRejectCode);
         }
 
-        return request.TransactionTypeCode switch
+        try
         {
-            NoticeInquirySchema.FixedTransactionType => await HandleNoticeInquiryAsync(request, txId).ConfigureAwait(false),
-            CardInfoInquirySchema.FixedTransactionType => await HandleCardInfoInquiryAsync(request, txId).ConfigureAwait(false),
-            CardApprovalSchema.FixedTransactionType => await HandleCardApprovalAsync(request, txId).ConfigureAwait(false),
-            _ => throw new InvalidOperationException(
-                $"txId={txId} PosSchemaRegistry가 인식하는 전문만 여기 도달해야 함(라우팅은 P17-3 PosRequestTelegram.Parse가 이미 끝냄): '{request.TransactionTypeCode}'"),
-        };
+            PosResponseTelegram response = request.TransactionTypeCode switch
+            {
+                NoticeInquirySchema.FixedTransactionType => await HandleNoticeInquiryAsync(request, txId).ConfigureAwait(false),
+                CardInfoInquirySchema.FixedTransactionType => await HandleCardInfoInquiryAsync(request, txId).ConfigureAwait(false),
+                CardApprovalSchema.FixedTransactionType => await HandleCardApprovalAsync(request, txId).ConfigureAwait(false),
+                _ => throw new InvalidOperationException(
+                    $"txId={txId} PosSchemaRegistry가 인식하는 전문만 여기 도달해야 함(라우팅은 P17-3 PosRequestTelegram.Parse가 이미 끝냄): '{request.TransactionTypeCode}'"),
+            };
+
+            // P22-6(PRD.md §1.5 경계 표 "거래 수명" — 거래 확정). 모든 분기(정상 relay/자체 실패)가
+            // PosResponseTelegram 한 개로 수렴하는 이 지점에서 한 번만 남긴다 — 분기마다 흩어 찍지 않는다
+            // (§1.5 "분량 감각" 위반 방지). 결과코드는 #7(응답 전문 공통부, 3전문 동일 POSITION)을 그대로
+            // 읽는다 — PosResultCodeMapper가 이미 만든 값이라 여기서 새로 매핑하지 않는다.
+            FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 거래 확정", response.Read(ResultCodeFieldNumber), txId);
+            return response;
+        }
+        catch (Exception)
+        {
+            // 개선권장 A-2(P22 리뷰) — 예외 경로는 InternalError로 POS에 응답이 나가지만(TransactionQueue
+            // 워커 루프가 처리) 이 지점의 중앙 확정 로그를 우회한다. 응답/워커 루프 동작은 바꾸지 않고
+            // 로그 한 줄만 남긴 뒤 그대로 다시 던진다.
+            FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 거래 확정 — 내부 오류(InternalError)", code: null, txId);
+            throw;
+        }
     }
+
+    /// <summary>SPEC 응답 공통부 <c>#7</c>(처리결과코드) — P22-6 로깅 전용. 필드 위치는 3전문 공통
+    /// (<c>PosSocketServer.ResultCodeFieldNumber</c>와 동일한 값).</summary>
+    private const int ResultCodeFieldNumber = 7;
 
     /// <summary>
     /// 501008 — 카드리딩이 없는 순수 중계(P17-5 확정 사항 4). 무결성 선행 판정도, 카드입력 데드라인도
@@ -355,6 +384,10 @@ internal sealed class PaymentOrchestrator
         using var deadline = new PaymentDeadline(_initialCardReadDeadline);
         _ = MonitorDeadlineAsync(deadline, scope);
 
+        // P22-6(PRD.md §1.5 경계 표 "거래 수명" — 거래 시작). 501008은 카드입력 데드라인이 없어(클래스
+        // 요약 참고) 이 로그가 없다 — 800000/902614만 여기를 지난다.
+        FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 거래 시작 — 카드입력 데드라인 {_initialCardReadDeadline.TotalSeconds:F0}초", code: null, txId);
+
         string transactionDateTime = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
         string amount = request.Read(amountFieldNumber);
 
@@ -505,7 +538,7 @@ internal sealed class PaymentOrchestrator
             TimeSpan roundTimeout = ClampCommandTimeout(deadline.Remaining);
             FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round}/{MaxCardReadRounds} 시작 — 참여 {roundParticipants.Count}대, 거래구분={transactionTypeCode}, 남은데드라인={roundTimeout.TotalSeconds:F1}s");
 
-            Task<CardReadBroadcastResult> broadcastTask = CardReadBroadcaster.SendAsync(roundParticipants, infoRequest, roundTimeout);
+            Task<CardReadBroadcastResult> broadcastTask = CardReadBroadcaster.SendAsync(roundParticipants, infoRequest, roundTimeout, txId);
             Task interruptTask = gate.Interrupted;
             Task firstCompleted = await Task.WhenAny(broadcastTask, interruptTask).ConfigureAwait(false);
 
@@ -552,6 +585,11 @@ internal sealed class PaymentOrchestrator
                     }
 
                     FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 성공(라운드 {round}) — 필드 채움 단계로");
+
+                    // P22-7(PRD.md §1.6 관측 지점 "카드리딩 응답 — 거래마다, 자동"). 값 자체는 로그에
+                    // 남기지 않는다(ObservedIdentityStore 클래스 요약) — DB에만 원문 저장.
+                    _observedIdentityStore.Upsert(winner.ComPortDisplay, ObservedIdentityStore.ReaderAuthIdKey, outcome.CardData.ReaderAuthId);
+
                     return CardReadRoundResult.Success(winner, outcome.CardData);
 
                 case ReaderCommandOutcomeKind.BusinessFailure when outcome.IsFallback:

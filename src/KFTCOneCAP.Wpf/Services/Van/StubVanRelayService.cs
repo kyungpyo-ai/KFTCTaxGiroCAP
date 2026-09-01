@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using KFTCOneCAP.Wpf.Protocol.Pos;
+using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Payment;
 
 namespace KFTCOneCAP.Wpf.Services.Van;
@@ -35,6 +36,12 @@ internal sealed class StubVanRelayService : IVanRelayService
 {
     private static readonly TimeSpan FixedDelay = TimeSpan.FromSeconds(1);
 
+    /// <summary>SPEC <c>#9</c> 전문관리번호 — P22-6 로깅용(<see cref="VanService"/>의 같은 이름
+    /// 상수와 동일한 목적). App.xaml.cs가 Phase 20 이후에도 아직 이 스텁을 실제 배선으로 쓰고
+    /// 있으므로(클래스 주석 "Phase 21 P21-1 정정" 참고), VAN 경계 로그는 여기서도 남겨야 실제로
+    /// 흐르는 결제 1건에서 관측된다.</summary>
+    private const int ManagementNumberFieldNumber = 9;
+
     private readonly object _lock = new();
     private VanRelayOutcome? _nextOutcome;
 
@@ -50,18 +57,27 @@ internal sealed class StubVanRelayService : IVanRelayService
 
     public async Task<VanRelayOutcome> RelayAsync(PosRequestTelegram populatedRequest)
     {
+        string txId = populatedRequest.Read(ManagementNumberFieldNumber);
+        FileLogger.Info(LogCategory.Van, $"[StubVanRelayService] 거래구분={populatedRequest.TransactionTypeCode} FNAISCRDVAN 호출(스텁)", code: null, txId);
+
         await Task.Delay(FixedDelay).ConfigureAwait(false);
 
+        VanRelayOutcome outcome;
         lock (_lock)
         {
             if (_nextOutcome is { } injected)
             {
                 _nextOutcome = null; // 소비 후 기본값 복귀.
-                return injected;
+                outcome = injected;
             }
-
-            return BuildFakeSuccess(populatedRequest);
+            else
+            {
+                outcome = BuildFakeSuccess(populatedRequest);
+            }
         }
+
+        FileLogger.Info(LogCategory.Van, $"[StubVanRelayService] 거래구분={populatedRequest.TransactionTypeCode} 반환(Kind={outcome.Kind}, 스텁)", code: null, txId);
+        return outcome;
     }
 
     /// <summary><c>#51</c> 암호화된 비밀번호 정보 — 902614에만 있는 필드. clone 기반 흉내 응답이

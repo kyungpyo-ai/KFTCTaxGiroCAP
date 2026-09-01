@@ -25,10 +25,17 @@ namespace KFTCOneCAP.Wpf.Services.Van;
 /// </summary>
 internal sealed class VanService : IVanRelayService
 {
+    /// <summary>SPEC <c>#9</c> 전문관리번호(<c>PosSocketServer.ManagementNumberFieldNumber</c>,
+    /// <c>PaymentOrchestrator.LogTxId</c>와 동일한 필드) — P22-6 로깅용.</summary>
+    private const int ManagementNumberFieldNumber = 9;
+
     public async Task<VanRelayOutcome> RelayAsync(PosRequestTelegram populatedRequest)
     {
         string transactionTypeCode = populatedRequest.TransactionTypeCode;
         int bodyLength = populatedRequest.Schema.TotalLength;
+        // #9(전문관리번호) — PaymentOrchestrator.LogTxId와 같은 필드(값이 비어 있지 않은 정상 케이스라면
+        // 동일한 값)라 POS/READER 경계 로그와 같은 거래ID로 남는다(P22-6 완료 조건).
+        string txId = populatedRequest.Read(ManagementNumberFieldNumber);
 
         try
         {
@@ -50,6 +57,9 @@ internal sealed class VanService : IVanRelayService
 
             var stopwatch = Stopwatch.StartNew();
 
+            // P22-6(PRD.md §1.5 경계 표 "VAN") — FNAISCRDVAN 호출 직전.
+            FileLogger.Info(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} FNAISCRDVAN 호출", code: null, txId);
+
             // FNAISCRDVAN은 블로킹 호출이다(타임아웃 인자를 받는 것 자체가 근거) — RelayAsync가
             // async인데 그냥 호출하면 호출 스레드를 최대 타임아웃 시간만큼 붙잡는다. Task.Run으로
             // 감싸 그 블로킹을 별도 스레드로 밀어낸다.
@@ -61,10 +71,12 @@ internal sealed class VanService : IVanRelayService
             string retCodeText = DecodeNulTerminated(outRetCode);
 
             // 전문 본문(카드번호/PIN 등)은 절대 로그에 남기지 않는다 — 길이와 종별만 남긴다
-            // (Phase 18 H-2: PIN이 스텁 응답에 실려 로그/화면에 노출된 전례).
+            // (Phase 18 H-2: PIN이 스텁 응답에 실려 로그/화면에 노출된 전례). P22-6 — FNAISCRDVAN 반환.
             FileLogger.Info(
+                LogCategory.Van,
                 $"[VanService] 거래구분={transactionTypeCode} nRet={nRet} out_szRetCode='{retCodeText}' " +
-                $"본문길이={bodyLength} 소요={stopwatch.ElapsedMilliseconds}ms");
+                $"본문길이={bodyLength} 소요={stopwatch.ElapsedMilliseconds}ms",
+                code: null, txId);
 
             if (nRet == 0)
             {
@@ -74,8 +86,10 @@ internal sealed class VanService : IVanRelayService
                     // 작아야 하지만, 어긋나면 Buffer.BlockCopy가 던지는 예외가 아래 generic catch에
                     // 삼켜져 원인 불명의 D02로만 남는다. 여기서 먼저 걸러 진단 가능한 사유를 남긴다.
                     FileLogger.Error(
+                        LogCategory.Van,
                         $"[VanService] 거래구분={transactionTypeCode} bodyLength({bodyLength})가 outData 버퍼" +
-                        $"({outData.Length})보다 큼 — 응답을 자를 수 없음");
+                        $"({outData.Length})보다 큼 — 응답을 자를 수 없음",
+                        code: null, txId);
                     return VanRelayOutcome.CommunicationFailure(
                         VanFailureKind.CommunicationFailure,
                         $"응답 버퍼 부족(bodyLength={bodyLength}, bufferSize={outData.Length})");
@@ -93,8 +107,10 @@ internal sealed class VanService : IVanRelayService
                     // 몇 바이트만 채우고 나머지는 0x00)는 걸러지지 않아 NUL이 섞인 응답이 그대로 POS에
                     // relay됐다. relay 원칙(필드 내용 미해석)은 지키면서 구조적 무결성만 검사한다.
                     FileLogger.Warn(
+                        LogCategory.Van,
                         $"[VanService] 거래구분={transactionTypeCode} nRet=0인데 응답 본문에 0x00 바이트 포함 — " +
-                        "통신 실패로 처리");
+                        "통신 실패로 처리",
+                        code: null, txId);
                     return VanRelayOutcome.CommunicationFailure(
                         VanFailureKind.CommunicationFailure, "nRet=0이지만 응답 본문이 불완전함(0x00 포함, 방어적 처리)");
                 }
@@ -111,19 +127,21 @@ internal sealed class VanService : IVanRelayService
             // PRD에 정의되지 않은 반환값 — 성공으로 취급하지 않는다. 실제 값을 남겨 발주처에 물어볼
             // 근거를 만든다.
             FileLogger.Warn(
-                $"[VanService] 거래구분={transactionTypeCode} FNAISCRDVAN이 PRD에 정의되지 않은 값을 반환: nRet={nRet}");
+                LogCategory.Van,
+                $"[VanService] 거래구분={transactionTypeCode} FNAISCRDVAN이 PRD에 정의되지 않은 값을 반환: nRet={nRet}",
+                code: null, txId);
             return VanRelayOutcome.CommunicationFailure(
                 VanFailureKind.CommunicationFailure, $"FNAISCRDVAN이 알 수 없는 값을 반환(nRet={nRet})");
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
-            FileLogger.Error($"[VanService] 거래구분={transactionTypeCode} DLL 로드 실패: {ex.GetType().Name}: {ex.Message}");
+            FileLogger.Error(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} DLL 로드 실패: {ex.GetType().Name}: {ex.Message}", code: null, txId);
             return VanRelayOutcome.CommunicationFailure(VanFailureKind.DllLoadFailure, $"{ex.GetType().Name}: {ex.Message}");
         }
         catch (Exception ex)
         {
             // DLL 호출 실패로 앱이 죽으면 안 된다(PRD §9) — 어떤 예외도 밖으로 던지지 않는다.
-            FileLogger.Error($"[VanService] 거래구분={transactionTypeCode} 예상치 못한 예외: {ex.GetType().Name}: {ex.Message}");
+            FileLogger.Error(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} 예상치 못한 예외: {ex.GetType().Name}: {ex.Message}", code: null, txId);
             return VanRelayOutcome.CommunicationFailure(VanFailureKind.CommunicationFailure, $"{ex.GetType().Name}: {ex.Message}");
         }
     }

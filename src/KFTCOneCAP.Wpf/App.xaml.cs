@@ -79,7 +79,7 @@ public partial class App : Application
         // Phase 8(docs/payment_relay/development_plan.md P8-4): 앱 기동 시 두 네이티브 DLL의 로드
         // 가능 여부를 미리 확인해 로그로 남긴다. 실제 함수 호출은 Phase 9/17 몫이며, 여기서는 로드
         // 실패해도 앱 기동을 막지 않는다(PRD §9).
-        FileLogger.Info("애플리케이션 기동 시작");
+        FileLogger.Info(LogCategory.App, "애플리케이션 기동 시작");
         string baseDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? AppDomain.CurrentDomain.BaseDirectory;
         NativeDllLoadSmokeTest.RunAll(baseDirectory);
 
@@ -134,6 +134,7 @@ public partial class App : Application
         // 공유시킨다(App.ReaderConnections의 Reader1/Reader2 순서를 그대로 따름 — PaymentOrchestrator
         // 클래스 주석의 "인덱스 0=리더기1" 전제). VAN은 아직 스텁(실제 FNAISCRDVAN은 Phase 20).
         var integrityStore = new IntegrityCheckStore();
+        var observedIdentityStore = new ObservedIdentityStore();
         var integrityCheckService = new IntegrityCheckService(integrityStore);
         var readerEndpoints = new IReaderEndpoint[]
         {
@@ -147,7 +148,7 @@ public partial class App : Application
         // 로그만 보는 사람이 실거래 승인으로 오해하지 않도록 기동 시점에 명시적으로 남긴다. Phase 20이
         // 이 스텁을 실제 FNAISCRDVAN 구현으로 교체하면 이 로그도 함께 제거한다.
         FileLogger.Warn("[PaymentOrchestrator] VAN 서비스가 스텁(StubVanRelayService)입니다 — 실제 승인이 아닙니다(Phase 20에서 FNAISCRDVAN으로 교체 예정)");
-        Orchestrator = new PaymentOrchestrator(readerEndpoints, integrityStore, paymentPresenter, ReaderSetupGate, vanRelay);
+        Orchestrator = new PaymentOrchestrator(readerEndpoints, integrityStore, observedIdentityStore, paymentPresenter, ReaderSetupGate, vanRelay);
 
         // Phase 14(P14-2/P14-3): 소켓 서버 + 단일 워커 Queue 기동. 8002 포트가 이미 사용 중이어도
         // (PRD §9) 앱 기동은 막지 않는다 — PosServer.Start()가 실패를 로그로만 남기고 넘어간다.
@@ -332,9 +333,12 @@ public partial class App : Application
     /// <summary>Phase 12(P12-1)/Phase 14(P14-2/P14-3) — 앱 종료 시 리소스를 정리한다(PRD §9).</summary>
     protected override void OnExit(ExitEventArgs e)
     {
+        // P22-6(PRD.md §1.5 경계 표 "앱 수명" — 종료).
+        FileLogger.Info(LogCategory.App, "애플리케이션 종료 시작");
         PosServer?.Stop();
         PaymentQueue?.Stop(TimeSpan.FromSeconds(5));
         ReaderConnections?.CloseAll();
+        FileLogger.Info(LogCategory.App, "애플리케이션 종료 완료");
         base.OnExit(e);
     }
 }

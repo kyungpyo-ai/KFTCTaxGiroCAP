@@ -32,8 +32,13 @@ public sealed class IntegrityCheckStore
     /// <summary>
     /// 저장 형식 "yyyy-MM-dd HH:mm:ss.fff"(로컬 시각) — 문자열 그대로 사전식 정렬해도 시간순
     /// 정렬/범위 비교가 성립하도록 고정 자리수 ISO 8601 스타일로 통일한다(P11-2).
+    ///
+    /// Phase 22(P22-7, PRD.md §1.6) — <see cref="ObservedIdentityStore"/>가 같은 DB 파일에 다른 테이블
+    /// (<c>observed_identity</c>)을 추가하면서 이 상수를 그대로 재사용하도록 internal로 열었다(같은
+    /// DB 안에서 타임스탬프 형식이 두 가지면 나중에 반드시 헷갈린다는 PRD 경고 반영) — 값 자체는
+    /// 바뀌지 않았다.
     /// </summary>
-    private const string TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff";
+    internal const string TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff";
 
     private readonly string _connectionString;
 
@@ -51,7 +56,12 @@ public sealed class IntegrityCheckStore
         }.ToString();
     }
 
-    private static string DefaultDatabasePath()
+    /// <summary>
+    /// Phase 22(P22-7, PRD.md §1.6 "기존 SQLite DB(IntegrityCheckStore와 같은 파일)")가 <see
+    /// cref="ObservedIdentityStore"/>의 기본 경로로 그대로 재사용하도록 internal로 열었다 — 경로 정의를
+    /// 이 한 곳에만 두어 두 스토어가 물리적으로 항상 같은 파일을 가리키게 한다.
+    /// </summary>
+    internal static string DefaultDatabasePath()
     {
         string dir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

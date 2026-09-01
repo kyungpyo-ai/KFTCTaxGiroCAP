@@ -84,11 +84,15 @@ internal static class PaymentFlowTestScenarios
         presenter = new FakePaymentNoticePresenter();
         gate = new FakeReaderSetupGate();
         vanRelay = new CapturingVanRelayService();
-        var integrityStore = new IntegrityCheckStore(Path.Combine(Path.GetTempPath(), $"p17-test-{Guid.NewGuid():N}.db"));
+        string dbPath = Path.Combine(Path.GetTempPath(), $"p17-test-{Guid.NewGuid():N}.db");
+        var integrityStore = new IntegrityCheckStore(dbPath);
+        // P22-7 — 같은 파일을 가리키게 한다(프로덕션과 동일한 전제, App.xaml.cs 참고).
+        var observedIdentityStore = new ObservedIdentityStore(dbPath);
 
         return new PaymentOrchestrator(
             new IReaderEndpoint[] { reader1, reader2 },
             integrityStore,
+            observedIdentityStore,
             presenter,
             gate,
             vanRelay,
