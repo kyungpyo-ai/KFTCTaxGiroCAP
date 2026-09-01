@@ -58,7 +58,9 @@ internal sealed class StubVanRelayService : IVanRelayService
     public async Task<VanRelayOutcome> RelayAsync(PosRequestTelegram populatedRequest)
     {
         string txId = populatedRequest.Read(ManagementNumberFieldNumber);
-        FileLogger.Info(LogCategory.Van, $"[StubVanRelayService] 거래구분={populatedRequest.TransactionTypeCode} FNAISCRDVAN 호출(스텁)", code: null, txId);
+        // 사용자 요청(2026-09-01) — 전문 원문(위치기반 마스킹, TelegramLogRedactor 클래스 요약 참고).
+        string redactedRequestBody = TelegramLogRedactor.Redact(populatedRequest.TransactionTypeCode, populatedRequest.Telegram.ToBody());
+        FileLogger.Info(LogCategory.Van, $"[StubVanRelayService] 거래구분={populatedRequest.TransactionTypeCode} FNAISCRDVAN 호출(스텁) 원문={redactedRequestBody}", code: null, txId);
 
         await Task.Delay(FixedDelay).ConfigureAwait(false);
 
@@ -76,7 +78,10 @@ internal sealed class StubVanRelayService : IVanRelayService
             }
         }
 
-        FileLogger.Info(LogCategory.Van, $"[StubVanRelayService] 거래구분={populatedRequest.TransactionTypeCode} 반환(Kind={outcome.Kind}, 스텁)", code: null, txId);
+        string redactedResponseBody = outcome.ResponseBody is { } responseBody
+            ? TelegramLogRedactor.Redact(populatedRequest.TransactionTypeCode, responseBody)
+            : "(응답 본문 없음)";
+        FileLogger.Info(LogCategory.Van, $"[StubVanRelayService] 거래구분={populatedRequest.TransactionTypeCode} 반환(Kind={outcome.Kind}, 스텁) 원문={redactedResponseBody}", code: null, txId);
         return outcome;
     }
 

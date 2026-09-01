@@ -41,6 +41,12 @@ internal sealed class VanService : IVanRelayService
         {
             byte[] body = populatedRequest.Telegram.ToBody();
 
+            // 사용자 요청(2026-09-01) — 전문 원문(위치기반 마스킹, TelegramLogRedactor 클래스 요약
+            // 참고)을 로그에 남긴다. 아래 "전문 본문(카드번호/PIN 등)은 절대 로그에 남기지 않는다"는
+            // 예전 방침(길이/종별만 남김)을 대체한다 — 이제는 902614 #46(암호화된 카드정보)만 마스킹
+            // 하고 나머지 필드는 원문 그대로 남긴다.
+            string redactedRequestBody = TelegramLogRedactor.Redact(transactionTypeCode, body);
+
             // NUL 종단 — char*는 C 문자열이므로 DLL이 strlen으로 길이를 잴 가능성이 있다. 본문은
             // 공백 패딩된 고정 길이이고 내부에 0x00이 없으므로, "본문 길이 + 1" 크기로 배열을 잡고
             // 마지막 바이트를 0으로 남겨 두면 고정 길이/NUL 종단 두 해석 모두에서 안전하다.
@@ -58,7 +64,7 @@ internal sealed class VanService : IVanRelayService
             var stopwatch = Stopwatch.StartNew();
 
             // P22-6(PRD.md §1.5 경계 표 "VAN") — FNAISCRDVAN 호출 직전.
-            FileLogger.Info(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} FNAISCRDVAN 호출", code: null, txId);
+            FileLogger.Info(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} FNAISCRDVAN 호출 원문={redactedRequestBody}", code: null, txId);
 
             // FNAISCRDVAN은 블로킹 호출이다(타임아웃 인자를 받는 것 자체가 근거) — RelayAsync가
             // async인데 그냥 호출하면 호출 스레드를 최대 타임아웃 시간만큼 붙잡는다. Task.Run으로
@@ -70,8 +76,9 @@ internal sealed class VanService : IVanRelayService
 
             string retCodeText = DecodeNulTerminated(outRetCode);
 
-            // 전문 본문(카드번호/PIN 등)은 절대 로그에 남기지 않는다 — 길이와 종별만 남긴다
-            // (Phase 18 H-2: PIN이 스텁 응답에 실려 로그/화면에 노출된 전례). P22-6 — FNAISCRDVAN 반환.
+            // Phase 18 H-2(PIN이 스텁 응답에 실려 로그/화면에 노출된 전례)를 반영해, 응답 본문 자체는
+            // 여기서 남기지 않고 nRet/길이/소요시간만 남긴다 — 응답 전문 원문(마스킹 적용)은 아래
+            // responseBody 확보 시점에 별도로 남긴다(TelegramLogRedactor). P22-6 — FNAISCRDVAN 반환.
             FileLogger.Info(
                 LogCategory.Van,
                 $"[VanService] 거래구분={transactionTypeCode} nRet={nRet} out_szRetCode='{retCodeText}' " +
@@ -114,6 +121,11 @@ internal sealed class VanService : IVanRelayService
                     return VanRelayOutcome.CommunicationFailure(
                         VanFailureKind.CommunicationFailure, "nRet=0이지만 응답 본문이 불완전함(0x00 포함, 방어적 처리)");
                 }
+
+                // 사용자 요청(2026-09-01) — 응답 전문 원문(위치기반 마스킹, TelegramLogRedactor 클래스
+                // 요약 참고).
+                string redactedResponseBody = TelegramLogRedactor.Redact(transactionTypeCode, responseBody);
+                FileLogger.Info(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} 응답 원문={redactedResponseBody}", code: null, txId);
 
                 return VanRelayOutcome.Success(responseBody);
             }

@@ -65,11 +65,11 @@ internal static class PosClientTestScenarios
                 WriteRequestFrame(stream, txId);
                 string? body = ReadResponseFrame(stream, TimeSpan.FromSeconds(10));
                 string correlation = body != null ? ReadCorrelationId(body) : "(타임아웃)";
-                FileLogger.Info($"[pos-client-test][1] 응답 수신 txId={txId} #9(전문관리번호)={correlation}");
+                FileLogger.Info(LogCategory.App, $"[pos-client-test][1] 응답 수신 #9(전문관리번호)={correlation}", code: null, txId);
                 if (body != null)
                 {
                     if (correlation != txId)
-                        FileLogger.Error($"[pos-client-test][1] ★ 상관관계 불일치: 요청 txId={txId}인데 응답 #9={correlation}");
+                        FileLogger.Error(LogCategory.App, $"[pos-client-test][1] ★ 상관관계 불일치: 요청 txId인데 응답 #9={correlation}", code: null, txId);
 
                     lock (responseOrderLock) { responseOrder.Add(txId); }
                 }
@@ -105,7 +105,7 @@ internal static class PosClientTestScenarios
             string txId = $"PERSIST-{i}";
             WriteRequestFrame(stream, txId);
             string? body = ReadResponseFrame(stream, TimeSpan.FromSeconds(10));
-            FileLogger.Info($"[pos-client-test][2] {i}번째 요청 응답 txId={txId} body={body ?? "(타임아웃)"}");
+            FileLogger.Info(LogCategory.App, $"[pos-client-test][2] {i}번째 요청 응답 {DescribeBody(body)}", code: null, txId);
         }
 
         FileLogger.Info("[pos-client-test][2] 완료 — 3건 모두 응답이 왔으면 성공");
@@ -153,7 +153,7 @@ internal static class PosClientTestScenarios
         using var recoverStream = recoverClient.GetStream();
         WriteRequestFrame(recoverStream, "AFTER-ABRUPT");
         string? body = ReadResponseFrame(recoverStream, TimeSpan.FromSeconds(10));
-        FileLogger.Info($"[pos-client-test][4] 완료 — 강제 종료 뒤 다음 요청 응답: {body ?? "(타임아웃 — ★ 큐가 막혔을 가능성)"}");
+        FileLogger.Info($"[pos-client-test][4] 완료 — 강제 종료 뒤 다음 요청 응답: {(body != null ? DescribeBody(body) : "(타임아웃 — ★ 큐가 막혔을 가능성)")}");
     }
 
     /// <summary>
@@ -176,7 +176,7 @@ internal static class PosClientTestScenarios
             using NetworkStream stream = client.GetStream();
             WriteRequestFrame(stream, "SEQ-1");
             string? body = ReadResponseFrame(stream, TimeSpan.FromSeconds(10));
-            FileLogger.Info($"[pos-client-test][5] 1번째 요청 응답: {body ?? "(타임아웃)"}");
+            FileLogger.Info($"[pos-client-test][5] 1번째 요청 응답: {DescribeBody(body)}");
         }
 
         using var followUpClient = new TcpClient();
@@ -184,7 +184,7 @@ internal static class PosClientTestScenarios
         using var followUpStream = followUpClient.GetStream();
         WriteRequestFrame(followUpStream, "SEQ-2");
         string? followUpBody = ReadResponseFrame(followUpStream, TimeSpan.FromSeconds(10));
-        FileLogger.Info($"[pos-client-test][5] 완료 — 2번째 요청 응답: {followUpBody ?? "(타임아웃 — ★ 워커가 멈췄을 가능성)"}");
+        FileLogger.Info($"[pos-client-test][5] 완료 — 2번째 요청 응답: {(followUpBody != null ? DescribeBody(followUpBody) : "(타임아웃 — ★ 워커가 멈췄을 가능성)")}");
     }
 
     /// <summary>
@@ -242,7 +242,7 @@ internal static class PosClientTestScenarios
             }
             else
             {
-                FileLogger.Info($"[pos-client-test][6] 완료 — {stopwatch.ElapsedMilliseconds}ms 만에 응답 수신: {body} " +
+                FileLogger.Info($"[pos-client-test][6] 완료 — {stopwatch.ElapsedMilliseconds}ms 만에 응답 수신: {DescribeBody(body)} " +
                     "(수 초 이내면 정상. OS 버퍼가 응답을 그냥 흡수했다면 실제 블로킹은 재현되지 않았을 수 있음 — 그래도 정상)");
             }
         }
@@ -266,7 +266,7 @@ internal static class PosClientTestScenarios
 
         WriteRequestFrame(stream, "IDLE-TEST-1");
         string? body = ReadResponseFrame(stream, TimeSpan.FromSeconds(10));
-        FileLogger.Info($"[pos-client-test][7] 첫 응답 수신: {body ?? "(타임아웃 — ★ 확인 필요)"}, 이제 12초간 아무것도 안 보내고 대기");
+        FileLogger.Info($"[pos-client-test][7] 첫 응답 수신: {(body != null ? DescribeBody(body) : "(타임아웃 — ★ 확인 필요)")}, 이제 12초간 아무것도 안 보내고 대기");
 
         Thread.Sleep(12000); // 서버 쪽 유휴 타이머(10초)보다 여유 있게 기다린다.
 
@@ -275,6 +275,13 @@ internal static class PosClientTestScenarios
             ? "[pos-client-test][7] 완료 — 서버가 유휴 연결을 먼저 닫음(기대한 동작)"
             : "[pos-client-test][7] 완료 — ★ 실패: 12초가 지나도 서버가 연결을 닫지 않음");
     }
+
+    /// <summary>P22-8(PRD.md §1.5 금지 항목 — "전문 본문 전체") 대응: 응답 원문을 로그에 그대로
+    /// 찍지 않고 길이만 남긴다. 501008은 카드 데이터를 담지 않는 전문이라 보안 위반은 아니었지만,
+    /// 이 하네스가 실제 <c>FileLogger</c> 파이프라인(프로덕션 로그 파일)을 그대로 쓰기 때문에
+    /// "전문 본문 전체 금지" 규칙은 진단 코드에도 동일하게 적용한다.</summary>
+    private static string DescribeBody(string? body) =>
+        body != null ? $"수신 완료(길이={body.Length})" : "(타임아웃)";
 
     // ---- 공용 헬퍼 — Phase 17(P17-7)부터 실제 SPEC 전문(501008)을 보낸다. 501008은 카드리딩이 없어
     // 리더기 하드웨어/설정 여부와 무관하게 결정적으로 동작하므로, 소켓/큐 배관 자체를 검증하는 이

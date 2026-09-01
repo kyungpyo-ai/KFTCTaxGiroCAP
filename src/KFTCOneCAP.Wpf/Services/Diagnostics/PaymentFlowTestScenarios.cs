@@ -49,6 +49,7 @@ internal static class PaymentFlowTestScenarios
             await Scenario11_TimeoutDuringPinEntryYieldsE02().ConfigureAwait(false);
             await Scenario12_PinEnteredBeforeSubscriptionIsNotLost().ConfigureAwait(false);
             await Scenario13_ConsecutiveTransactionsDoNotLeakCardOrPinData().ConfigureAwait(false);
+            Scenario14_MalformedTelegramFallsBackToGenericMasking();
 
             FileLogger.Info($"[payment-flow-test] 완료 — 통과 {_passCount}건, 실패 {_failCount}건");
         }
@@ -128,14 +129,23 @@ internal static class PaymentFlowTestScenarios
         return outcome.Telegram!;
     }
 
-    private static CardReadCommandOutcome SuccessOutcome(string cardNumber = "9412345678901234", string wcc = "I") =>
-        CardReadCommandOutcome.Success("00", new CardReadData(
+    private static CardReadCommandOutcome SuccessOutcome(string cardNumber = "9412345678901234", string wcc = "I")
+    {
+        // #46 검증용(2026-09-01, PaymentOrchestrator.FillCardApprovalFields 참고) — 실제 파서는 리더기가
+        // 보낸 길이필드를 읽은 payload 길이로 재구성한다. 하네스도 같은 전제를 지키도록 payload 길이로부터
+        // 3자리 zero-padded 길이 텍스트를 계산한다(하드코딩하면 실제 파싱 경로와 어긋날 수 있다).
+        const string encryptedData = "ENCRYPTEDDATA0001";
+        string encryptedDataLengthText = encryptedData.Length.ToString("D3");
+
+        return CardReadCommandOutcome.Success("00", new CardReadData(
             transactionType: "A", keyVersion: "01", tc: "TC0001", moduleId: "MODULE0001",
             fallbackCode: "0", amount: "000000000001000", cardNumber: cardNumber,
-            encryptionMarker: "ENC", wcc: wcc, encryptedData: "ENCRYPTEDDATA0001",
+            encryptionMarker: "ENC", wcc: wcc, encryptedData: encryptedData,
+            encryptedDataLengthText: encryptedDataLengthText,
             emvEncodingMethod: "B", emvEncodedData: "EMV0001", readerAuthId: "READERAUTH000001",
             readerSerialEncryptionMarker: "NOE", readerSerial: "SERIAL0001",
             readerEncryptionInfo: "READERENCRYPTINFO001", tc3: "TC30001", payOnCertifyCode: "PAYONCERT00000000000000000001"));
+    }
 
     // ===== 시나리오 =====
 
@@ -187,7 +197,17 @@ internal static class PaymentFlowTestScenarios
         // H-1 수정(체크포인트 1) 이후 N 필드 Read()는 패딩을 보존한다 — "0" -> "00"이 정답이다.
         Check("902614: #44 FALLBACK CODE 좌측0패딩(0 -> 00)", vanRelay.LastRequest.Read(44) == "00");
         Check("902614: #45 = KeyVersion+Tc+ModuleId(18바이트)", vanRelay.LastRequest.Read(45) == "01TC0001MODULE0001");
-        Check("902614: #46 = EncryptedData", vanRelay.LastRequest.Read(46) == "ENCRYPTEDDATA0001");
+        // 2026-09-01 사용자 확정(PaymentOrchestrator.FillCardApprovalFields #46 주석 참고) — "0"+3자리
+        // 길이값(리더기 원문, 재구성값)+페이로드. SuccessOutcome()의 encryptedData="ENCRYPTEDDATA0001"(17자)
+        // 이므로 길이값은 "017".
+        Check("902614: #46 = \"0\"+3자리길이(017)+EncryptedData", vanRelay.LastRequest.Read(46) == "0017ENCRYPTEDDATA0001");
+        // 위 Read()는 AN 타입 우측 공백 패딩을 TrimEnd로 제거해서 돌려주므로, 실제 전문 바이트가
+        // 정확히 196바이트(POSITION 407)를 채우고 나머지가 진짜 ' '(0x20)로 패딩됐는지는 별도로
+        // 원문 바이트를 직접 읽어 확인한다(2026-09-01 사용자 확정 검증 — "바이트 단위로 확인").
+        byte[] rawBody = vanRelay.LastRequest.Telegram.ToBody();
+        string raw46 = System.Text.Encoding.ASCII.GetString(rawBody, 407, 196);
+        Check("902614: #46 원문 바이트 길이 196, 헤더 \"0017\"로 시작", raw46.Length == 196 && raw46.StartsWith("0017ENCRYPTEDDATA0001", StringComparison.Ordinal));
+        Check("902614: #46 나머지 175바이트(196-21)는 공백 패딩", raw46.Substring("0017ENCRYPTEDDATA0001".Length).TrimEnd(' ').Length == 0);
         Check("902614: #48 WCC 'I' -> '5'(IC)", vanRelay.LastRequest.Read(48) == "5");
         Check("902614: #50 고정값 '2'", vanRelay.LastRequest.Read(50) == "2");
         Check("902614: #53 EMV DATA = 0600(고정 길이 서브필드) + EmvEncodedData", vanRelay.LastRequest.Read(53) == "0600EMV0001");
@@ -489,5 +509,73 @@ internal static class PaymentFlowTestScenarios
 
         Check("연속거래: 두 거래의 알림창 History가 각자 독립적으로 IcCardRequest로 시작함(이전 거래 상태 잔존 없음)",
             presenter.History.Count(h => h == "Show:IcCardRequest") == 2);
+    }
+
+    /// <summary>
+    /// <see cref="TelegramLogRedactor"/>의 "기형 전문(길이 불일치) 폴백" 경로를 실제로 실행해 검증한다
+    /// (2026-09-01, TelegramLogRedactor 클래스 요약 "정상/기형 분기" 절 — 지금까지 코드 리뷰로만
+    /// 확인했고 실행 검증이 없었다). <c>PaymentOrchestrator</c>를 거치지 않고
+    /// <see cref="TelegramLogRedactor.Redact"/>를 직접 호출한다 — 실제 POS 요청 경로(<see
+    /// cref="PosRequestTelegram.Parse"/>)는 본문 길이가 스키마와 다르면 E40으로 요청 자체를 거부하므로
+    /// (닿을 수 없는 malformed body를 만들 방법이 없다), 이 시나리오는 로그 유틸 자체를 순수하게
+    /// 단위 검증하는 것이다 — 프로덕션 경로(Orchestrator/PosSocketServer/VanService)는 전혀 건드리지
+    /// 않는다.
+    ///
+    /// 확인하는 것 2가지(development_plan.md "P22-6부속" 지시):
+    /// <list type="number">
+    /// <item>길이가 어긋나면 <c>Redact</c>가 위치 기반 마스킹(#46 부분 마스킹)을 시도하지 않고 원문을
+    /// 그대로 돌려주는지 — #46 자리에 심어 둔 16자리 숫자열이 마스킹 없이 그대로 나오는지로 확인.</item>
+    /// <item>그 원문이 파이프라인의 다음 단계인 <see cref="LogMessageMasker.Mask"/>(13~19자리 숫자
+    /// 범용 마스킹)를 거치면, 카드번호처럼 보이는 그 숫자열이 최소한 그때는 마스킹되는지.</item>
+    /// </list>
+    /// 대조군으로 길이가 올바른 정상 본문도 같이 돌려, 정상 경로에서는 위치 기반 마스킹이 그대로
+    /// 동작함을(회귀 없음) 같은 시나리오 안에서 확인한다.
+    /// </summary>
+    private static void Scenario14_MalformedTelegramFallsBackToGenericMasking()
+    {
+        if (!PosSchemaRegistry.TryResolve("902614", out PosTelegramSchema? schema) || schema is null)
+        {
+            Check("기형전문: 902614 스키마 해석(전제조건)", false);
+            return;
+        }
+
+        // #46(암호화된 카드정보, AN 196)에 카드번호처럼 보이는 16자리 숫자열을 심는다 — 실제로는
+        // 암호화된 데이터가 들어갈 자리지만, 이 시나리오는 "일반 마스킹 패턴에 걸리는 숫자열"이
+        // 어떻게 되는지가 관심사라 의도적으로 숫자열을 쓴다.
+        const string decoyDigits = "9412345678901234"; // 16자리 — 범용 카드번호 패턴(13~19자리)에 해당.
+        var telegram = PosTelegram.CreateEmpty(schema);
+        telegram.Write(46, decoyDigits);
+        byte[] wellFormedBody = telegram.ToBody();
+        Check("기형전문: 대조군 본문 길이가 스키마 TotalLength와 일치(전제조건)", wellFormedBody.Length == schema.TotalLength);
+
+        // --- 대조군: 정상 길이 — 위치 기반 마스킹이 그대로 동작해야 한다(회귀 확인). ---
+        string wellFormedRedacted = TelegramLogRedactor.Redact("902614", wellFormedBody);
+        Check("기형전문(대조군): 정상 길이는 위치 기반 마스킹이 적용되어 #46 숫자열이 그대로 노출되지 않음",
+            !wellFormedRedacted.Contains(decoyDigits));
+        Check("기형전문(대조군): 정상 길이는 #46 앞 6바이트만 노출(부분 마스킹)",
+            wellFormedRedacted.Contains(decoyDigits.Substring(0, 6) + new string('*', decoyDigits.Length - 6)));
+
+        // --- 본 시나리오: 본문 끝에 1바이트를 덧붙여 길이를 스키마와 어긋나게 만든다(기형 전문). ---
+        byte[] malformedBody = new byte[wellFormedBody.Length + 1];
+        Array.Copy(wellFormedBody, malformedBody, wellFormedBody.Length);
+        malformedBody[wellFormedBody.Length] = (byte)'X';
+        Check("기형전문: 조작한 본문 길이가 스키마 TotalLength와 다름(전제조건)", malformedBody.Length != schema.TotalLength);
+
+        string malformedRedacted = TelegramLogRedactor.Redact("902614", malformedBody);
+
+        // 확인 1 — 위치 기반 마스킹을 시도하지 않고 원문을 그대로 돌려줬는지: #46 자리의 원래 값(16자리
+        // 숫자열)이 마스킹 없이 그대로 남아 있어야 한다(위치 기반 마스킹이 적용됐다면 정상 케이스처럼
+        // 앞 6자리만 남고 나머지가 '*'로 바뀌었을 것).
+        Check("기형전문: 길이 불일치 시 위치 기반 마스킹을 시도하지 않고 원문을 그대로 반환(#46 숫자열이 마스킹 없이 그대로 남음)",
+            malformedRedacted.Contains(decoyDigits));
+
+        // 확인 2 — 그 원문이 파이프라인의 다음 단계(LogMessageMasker.Mask, 실제 FileLogger 호출부가
+        // 모든 메시지에 자동으로 거는 범용 마스킹)를 거치면, 최소한 카드번호로 보이는 숫자열은
+        // 마스킹돼야 한다(클래스 요약이 말하는 "최소한의 방어").
+        string genericMasked = LogMessageMasker.Mask(malformedRedacted);
+        Check("기형전문: 범용 마스킹(LogMessageMasker)을 거치면 #46 숫자열이 마스킹됨(최소한의 방어 확인)",
+            !genericMasked.Contains(decoyDigits));
+        Check("기형전문: 범용 마스킹 결과가 카드번호 마스킹 형식(앞6+뒤4, 가운데 '*')을 따름",
+            genericMasked.Contains(decoyDigits.Substring(0, 6) + new string('*', decoyDigits.Length - 10) + decoyDigits.Substring(decoyDigits.Length - 4)));
     }
 }

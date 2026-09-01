@@ -37,8 +37,24 @@ public sealed class FileLogSink : ILogSink
         LogRetentionCleaner.NotifyLogWritten(record.Timestamp.Date);
 
         string line = LogLineRenderer.Render(record) + Environment.NewLine;
+
+        // 사용자 요청(2026-09-01) — 거래 구분선. PaymentOrchestrator.ProcessAsync가 거래 1건의 수명
+        // 끝에서 남기는 중앙화된 "거래 확정" 로그(P22-6, PAYMENT 카테고리) 뒤에 빈 줄 하나를 추가로
+        // 써서, 사람이 파일을 눈으로 볼 때 거래 단위 경계를 알아볼 수 있게 한다.
+        //
+        // 이 지점을 고른 이유: "거래ID가 바뀔 때마다 구분선"은 거래ID가 아예 없는(레거시 151곳 다수)
+        // 줄이 많아 오히려 애매해진다 — 반면 "거래 확정" 로그는 P22-6에서 이미 거래 수명의 끝을
+        // 나타내는 유일한 지점으로 확정돼 있으므로(클래스 요약, "모든 분기가 PosResponseTelegram
+        // 한 개로 수렴하는 이 지점에서 한 번만 남긴다") 애매함이 없다.
+        //
+        // 빈 줄은 파싱 정규식(PRD.md §1.3-b, `^\[([^\]]*)\] ...`)에 매치되지 않으므로 장래 서버/분석
+        // 도구가 그냥 건너뛰면 된다 — 기계 파싱에 영향을 주지 않는다.
+        bool appendBlankLineAfter =
+            record.Category == LogCategory.Payment
+            && record.Message.StartsWith("[PaymentOrchestrator] 거래 확정", StringComparison.Ordinal);
+
         string filePath = Path.Combine(LogPaths.LogDirectory, $"{record.Timestamp:yyyy-MM-dd}.log");
-        byte[] bytes = Encoding.UTF8.GetBytes(line);
+        byte[] bytes = Encoding.UTF8.GetBytes(appendBlankLineAfter ? line + Environment.NewLine : line);
 
         lock (SyncRoot)
         {

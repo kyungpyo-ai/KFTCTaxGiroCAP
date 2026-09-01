@@ -301,7 +301,10 @@ internal sealed class PosSocketServer
 
         PosRequestTelegram request = outcome.Telegram!;
         string requestTxId = request.Read(ManagementNumberFieldNumber);
-        FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] {remote} 요청 수신 전문={request.TransactionTypeCode}", code: null, requestTxId);
+        // 사용자 요청(2026-09-01) — 전문 원문(위치기반 마스킹 적용, TelegramLogRedactor 클래스 요약
+        // 참고)을 로그에 남긴다. 902614 #46(암호화된 카드정보)만 마스킹되고 나머지는 원문 그대로다.
+        string redactedRequestBody = TelegramLogRedactor.Redact(request.TransactionTypeCode, request.Telegram.ToBody());
+        FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] {remote} 요청 수신 전문={request.TransactionTypeCode} 원문={redactedRequestBody}", code: null, requestTxId);
 
         _queue.Enqueue(request, response =>
         {
@@ -344,7 +347,9 @@ internal sealed class PosSocketServer
         // 남는다(P22-6 완료 조건).
         string responseTxId = response.Read(ManagementNumberFieldNumber);
         string resultCode = response.Read(ResultCodeFieldNumber);
-        FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] {remote} 응답 송신", resultCode, responseTxId);
+        // 사용자 요청(2026-09-01) — 요청 로그와 동일 원칙(TelegramLogRedactor).
+        string redactedResponseBody = TelegramLogRedactor.Redact(response.Telegram.Schema.TransactionTypeCode, response.Telegram.ToBody());
+        FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] {remote} 응답 송신 원문={redactedResponseBody}", resultCode, responseTxId);
 
         WriteFrame(frame, stream, writeLock, remote, "응답");
     }

@@ -160,7 +160,7 @@ internal sealed class PaymentOrchestrator
     /// </summary>
     private async Task<PosResponseTelegram> HandleNoticeInquiryAsync(PosRequestTelegram request, string txId)
     {
-        FileLogger.Info($"[PaymentOrchestrator] txId={txId} 501008(고지내역조회) — 카드리딩 없이 즉시 중계");
+        FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 501008(고지내역조회) — 카드리딩 없이 즉시 중계", code: null, txId);
 
         _presenter.Show(PaymentNoticeState.VanProcessing);
         try
@@ -180,7 +180,7 @@ internal sealed class PaymentOrchestrator
     /// </summary>
     private async Task<PosResponseTelegram> HandleCardInfoInquiryAsync(PosRequestTelegram request, string txId)
     {
-        FileLogger.Info($"[PaymentOrchestrator] txId={txId} 800000(카드정보조회) 시작");
+        FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 800000(카드정보조회) 시작", code: null, txId);
 
         return await RunCardTransactionAsync(
             request, txId,
@@ -192,13 +192,13 @@ internal sealed class PaymentOrchestrator
                 if (cardNumber.Length < 8)
                 {
                     winner.SendInvalidationInit();
-                    FileLogger.Error($"[PaymentOrchestrator] txId={txId} 카드번호가 8자리 미만이라 BIN을 추출할 수 없음: 길이={cardNumber.Length}");
+                    FileLogger.Error(LogCategory.Payment, $"[PaymentOrchestrator] 카드번호가 8자리 미만이라 BIN을 추출할 수 없음: 길이={cardNumber.Length}", code: null, txId);
                     return PosResponseTelegram.Failure(request, PosResultCodeMapper.ReaderNoCardDataDefensiveCode);
                 }
 
                 string bin = cardNumber.Substring(0, 8);
                 request.Telegram.Write(14, bin); // #14 BIN
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} BIN 채움 완료 — VAN 중계로");
+                FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] BIN 채움 완료 — VAN 중계로", code: null, txId);
                 return null; // null = 실패 아님, VAN 중계로 진행
             }).ConfigureAwait(false);
     }
@@ -211,7 +211,7 @@ internal sealed class PaymentOrchestrator
     /// </summary>
     private async Task<PosResponseTelegram> HandleCardApprovalAsync(PosRequestTelegram request, string txId)
     {
-        FileLogger.Info($"[PaymentOrchestrator] txId={txId} 902614(신용카드 승인요청) 시작");
+        FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 902614(신용카드 승인요청) 시작", code: null, txId);
 
         return await RunCardTransactionAsync(
             request, txId,
@@ -226,7 +226,7 @@ internal sealed class PaymentOrchestrator
                 }
 
                 FillCardApprovalFields(request, cardData, pin);
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 승인요청 필드 8종 채움 완료(#43~#46,#48,#50,#51,#53) — VAN 중계로");
+                FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 승인요청 필드 8종 채움 완료(#43~#46,#48,#50,#51,#53) — VAN 중계로", code: null, txId);
                 return null;
             }).ConfigureAwait(false);
     }
@@ -244,9 +244,18 @@ internal sealed class PaymentOrchestrator
     /// cref="CardReadData.Tc"/>(6) + <see cref="CardReadData.ModuleId"/>(10) = 18바이트(2026-08-27
     ///   사용자 확정 — 리더기 SPEC의 "리더기 암호화 정보"(X20)는 후보였으나 길이가 20으로 2바이트
     ///   초과해 채택하지 않았다).</item>
-    /// <item><c>#46</c> 암호화된 카드정보(AN196) = <see cref="CardReadData.EncryptedData"/>(가변길이) —
-    ///   196바이트를 초과하면 <see cref="PosField.Pad"/>가 예외를 던진다(조용히 잘리지 않는다). 실제로
-    ///   초과하는지는 실장비 검증(P17-7) 대상.</item>
+    /// <item><c>#46</c> 암호화된 카드정보(AN196) = <b>"0" + 리더기가 준 3자리 길이값(zero-padded) +
+    ///   페이로드</b>(<see cref="CardReadData.EncryptedDataLengthText"/> + <see
+    ///   cref="CardReadData.EncryptedData"/>). <b>2026-09-01 사용자 확정 — SPEC 문서 근거 아님</b>(SPEC은
+    ///   이 필드를 단순히 "암호화된 카드정보"로만 정의하고 내부에 길이 헤더를 요구한다고 명시하지 않는다.
+    ///   사용자가 실제 리더기 캡처 데이터로 직접 확인해 정한 구성이다 — 상세 근거는
+    ///   <c>docs/payment_relay/PRD.md</c>의 "#46 필드 구성 — 2026-09-01 사용자 확정" 항목 참고). 리더기
+    ///   응답(0x3B)의 "암호화데이터 길이" 필드(3자리)+payload 중 <b>마커(ENC/PON)와 WCC는 포함하지
+    ///   않는다</b> — 길이필드 앞에 "0"을 붙여 4자리로 맞춘 뒤 payload를 그대로 이어붙인다. 리더기
+    ///   SPEC이 정의하는 암호화 데이터 최대 길이(192바이트) 기준으로 4+192=196이 정확히 필드 길이(196)와
+    ///   맞아떨어진다 — 페이로드가 이보다 짧으면 <see cref="PosField.Pad"/>가 기존 로직대로(AN, 좌측정렬+
+    ///   우측 공백패딩) 나머지를 자동으로 채운다(별도 구현 불필요). 196바이트를 초과하면 <see
+    ///   cref="PosField.Pad"/>가 예외를 던진다(조용히 잘리지 않는다).</item>
     /// <item><c>#48</c> 거래 입력 유형(AN1, 2/4/5) = <see cref="CardReadData.Wcc"/> 매핑(2026-08-27
     ///   사용자 확정): <c>I</c>(IC)→"5", <c>;</c>(Swipe)→"2", <c>P</c>(Pay-On)→"4". 그 외 값(RF/QR/
     ///   Key-IN 등, 이 결제 Flow가 다루는 IC/FALLBACK 범위 밖)은 예외.</item>
@@ -277,7 +286,9 @@ internal sealed class PaymentOrchestrator
         request.Telegram.Write(43, readerAuthId + programId); // 보안단말기 인증번호 = 리더기(16)+프로그램(16)
         request.Telegram.Write(44, cardData.FallbackCode);
         request.Telegram.Write(45, cardData.KeyVersion + cardData.Tc + cardData.ModuleId); // 2+6+10=18
-        request.Telegram.Write(46, cardData.EncryptedData);
+        // "0"+3자리 길이값(리더기 원문)+페이로드 = 4자리 길이 헤더+최대192바이트 = 196바이트(2026-09-01
+        // 사용자 확정, 위 클래스 주석 참고). 마커/WCC는 포함하지 않는다.
+        request.Telegram.Write(46, "0" + cardData.EncryptedDataLengthText + cardData.EncryptedData);
         request.Telegram.Write(48, MapTransactionInputType(cardData.Wcc));
         request.Telegram.Write(50, "2"); // 신용카드 승인 인증방식 고정값(SPEC p.17)
         request.Telegram.Write(51, PinFieldEncoder.ToTelegramValue(pin)); // 값 자체는 로그에 남기지 않는다
@@ -341,7 +352,7 @@ internal sealed class PaymentOrchestrator
 
         if (candidates.Count == 0)
         {
-            FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 설정된 리더기가 없음(양쪽 미사용) — 카드 리딩 시도 안 함");
+            FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 설정된 리더기가 없음(양쪽 미사용) — 카드 리딩 시도 안 함", code: null, txId);
             return PosResponseTelegram.Failure(request, PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.NoReaderConfigured));
         }
 
@@ -353,7 +364,7 @@ internal sealed class PaymentOrchestrator
 
             if (_integrityStore.HasSuccessToday(comPortDisplay))
             {
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} {comPortDisplay} 금일 무결성 성공 이력 있음 — 재검사 생략, 참여");
+                FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] {comPortDisplay} 금일 무결성 성공 이력 있음 — 재검사 생략, 참여", code: null, txId);
                 participants.Add(candidate);
                 continue;
             }
@@ -364,18 +375,18 @@ internal sealed class PaymentOrchestrator
 
             if (outcome.IsSuccess)
             {
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} {comPortDisplay} 무결성 체크 성공 — 참여");
+                FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] {comPortDisplay} 무결성 체크 성공 — 참여", code: null, txId);
                 participants.Add(candidate);
             }
             else
             {
-                FileLogger.Warn($"[PaymentOrchestrator] txId={txId} {comPortDisplay} 무결성 체크 실패(Kind={outcome.Kind}) — 카드 리딩에서 제외");
+                FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] {comPortDisplay} 무결성 체크 실패(Kind={outcome.Kind}) — 카드 리딩에서 제외", code: null, txId);
             }
         }
 
         if (participants.Count == 0)
         {
-            FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 참여 가능한 리더기 없음(무결성 전원 실패)");
+            FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 참여 가능한 리더기 없음(무결성 전원 실패)", code: null, txId);
             return PosResponseTelegram.Failure(request, PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.IntegrityCheckFailure));
         }
 
@@ -422,7 +433,7 @@ internal sealed class PaymentOrchestrator
             if (!scope.Gate.TryClaim(TransactionOutcomeReason.FlowResult))
             {
                 TransactionOutcomeReason reason = scope.Gate.ClaimedReason!.Value;
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩(및 PIN 입력) 완료했으나 필드 채움 전 이미 확정됨({reason}) — 미진입");
+                FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩(및 PIN 입력) 완료했으나 필드 채움 전 이미 확정됨({reason}) — 미진입", code: null, txId);
                 roundResult.Winner?.SendInvalidationInit();
                 return PosResponseTelegram.Failure(request, InterruptCode(reason));
             }
@@ -446,7 +457,7 @@ internal sealed class PaymentOrchestrator
 
             if (scope.Gate.TryClaim(TransactionOutcomeReason.FlowResult))
             {
-                FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 결과가 확정되지 않은 채 거래가 종료됨(예외 경로로 추정) — 대기 중이던 리더기를 정리한다");
+                FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 결과가 확정되지 않은 채 거래가 종료됨(예외 경로로 추정) — 대기 중이던 리더기를 정리한다", code: null, txId);
                 FireInterruptCleanup(TransactionOutcomeReason.FlowResult, scope);
             }
         }
@@ -476,7 +487,7 @@ internal sealed class PaymentOrchestrator
     private async Task<PinCollectionResult> CollectPinAsync(TransactionScope scope, PaymentDeadline deadline, string txId)
     {
         deadline.Extend(UserInputStepExtension);
-        FileLogger.Info($"[PaymentOrchestrator] txId={txId} PIN 입력 단계 진입 — 데드라인 {UserInputStepExtension.TotalSeconds:F0}초 연장(남은데드라인={deadline.Remaining.TotalSeconds:F1}s)");
+        FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] PIN 입력 단계 진입 — 데드라인 {UserInputStepExtension.TotalSeconds:F0}초 연장(남은데드라인={deadline.Remaining.TotalSeconds:F1}s)", code: null, txId);
 
         var pinTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         EventHandler<PinEnteredEventArgs> onPinEntered = (_, e) => pinTcs.TrySetResult(e.Pin);
@@ -493,12 +504,12 @@ internal sealed class PaymentOrchestrator
             if (firstCompleted == interruptTask)
             {
                 TransactionOutcomeReason reason = scope.Gate.ClaimedReason!.Value;
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} PIN 입력 대기 중 확정됨({reason}) — 즉시 실패 응답(리더기 초기화는 FireInterruptCleanup이 이미 예약함)");
+                FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] PIN 입력 대기 중 확정됨({reason}) — 즉시 실패 응답(리더기 초기화는 FireInterruptCleanup이 이미 예약함)", code: null, txId);
                 return PinCollectionResult.Early(InterruptCode(reason));
             }
 
             string pin = await pinTask.ConfigureAwait(false);
-            FileLogger.Info($"[PaymentOrchestrator] txId={txId} PIN 4자리 입력 완료 — 통신중으로 진행(값은 로그에 남기지 않음)");
+            FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] PIN 4자리 입력 완료 — 통신중으로 진행(값은 로그에 남기지 않음)", code: null, txId);
             return PinCollectionResult.Success(pin);
         }
         finally
@@ -525,7 +536,7 @@ internal sealed class PaymentOrchestrator
         {
             if (gate.ClaimedReason is { } claimedBeforeRound)
             {
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round} 시작 전 이미 확정됨({claimedBeforeRound}) — 중단");
+                FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 라운드 {round} 시작 전 이미 확정됨({claimedBeforeRound}) — 중단", code: null, txId);
                 return CardReadRoundResult.Early(InterruptCode(claimedBeforeRound));
             }
 
@@ -536,7 +547,7 @@ internal sealed class PaymentOrchestrator
             scope.PendingParticipants = roundParticipants;
 
             TimeSpan roundTimeout = ClampCommandTimeout(deadline.Remaining);
-            FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round}/{MaxCardReadRounds} 시작 — 참여 {roundParticipants.Count}대, 거래구분={transactionTypeCode}, 남은데드라인={roundTimeout.TotalSeconds:F1}s");
+            FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 라운드 {round}/{MaxCardReadRounds} 시작 — 참여 {roundParticipants.Count}대, 거래구분={transactionTypeCode}, 남은데드라인={roundTimeout.TotalSeconds:F1}s", code: null, txId);
 
             Task<CardReadBroadcastResult> broadcastTask = CardReadBroadcaster.SendAsync(roundParticipants, infoRequest, roundTimeout, txId);
             Task interruptTask = gate.Interrupted;
@@ -545,7 +556,7 @@ internal sealed class PaymentOrchestrator
             if (firstCompleted == interruptTask)
             {
                 TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round} 대기 중 확정됨({reason}) — 리더기 응답을 기다리지 않고 즉시 처리");
+                FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 라운드 {round} 대기 중 확정됨({reason}) — 리더기 응답을 기다리지 않고 즉시 처리", code: null, txId);
                 return CardReadRoundResult.Early(InterruptCode(reason));
             }
 
@@ -556,11 +567,11 @@ internal sealed class PaymentOrchestrator
                 if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
                 {
                     TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
-                    FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round} 완료 시점에 이미 확정됨({reason}) — 우선 처리");
+                    FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 라운드 {round} 완료 시점에 이미 확정됨({reason}) — 우선 처리", code: null, txId);
                     return CardReadRoundResult.Early(InterruptCode(reason));
                 }
 
-                FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 카드 리딩 라운드 {round} — 참여 리더기 전원 송신 실패(또는 참여자 없음)");
+                FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 라운드 {round} — 참여 리더기 전원 송신 실패(또는 참여자 없음)", code: null, txId);
                 return CardReadRoundResult.Early(PosResultCodeMapper.ReaderBroadcastNoWinnerCode);
             }
 
@@ -579,12 +590,12 @@ internal sealed class PaymentOrchestrator
                             return CardReadRoundResult.Early(InterruptCode(reason));
                         }
 
-                        FileLogger.Error($"[PaymentOrchestrator] txId={txId} 응답코드 00인데 CardData가 없음 — 방어적으로 실패 처리");
+                        FileLogger.Error(LogCategory.Payment, "[PaymentOrchestrator] 응답코드 00인데 CardData가 없음 — 방어적으로 실패 처리", code: null, txId);
                         winner.SendInvalidationInit();
                         return CardReadRoundResult.Early(PosResultCodeMapper.ReaderNoCardDataDefensiveCode);
                     }
 
-                    FileLogger.Info($"[PaymentOrchestrator] txId={txId} 카드 리딩 성공(라운드 {round}) — 필드 채움 단계로");
+                    FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 성공(라운드 {round}) — 필드 채움 단계로", code: null, txId);
 
                     // P22-7(PRD.md §1.6 관측 지점 "카드리딩 응답 — 거래마다, 자동"). 값 자체는 로그에
                     // 남기지 않는다(ObservedIdentityStore 클래스 요약) — DB에만 원문 저장.
@@ -594,7 +605,7 @@ internal sealed class PaymentOrchestrator
 
                 case ReaderCommandOutcomeKind.BusinessFailure when outcome.IsFallback:
                     deadline.Extend(UserInputStepExtension);
-                    FileLogger.Info($"[PaymentOrchestrator] txId={txId} FALLBACK(07) — MS 재요청(채택된 그 리더기에만, 거래구분 F), 데드라인 {UserInputStepExtension.TotalSeconds:F0}초 연장");
+                    FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] FALLBACK(07) — MS 재요청(채택된 그 리더기에만, 거래구분 F), 데드라인 {UserInputStepExtension.TotalSeconds:F0}초 연장", code: null, txId);
                     _presenter.ChangeState(PaymentNoticeState.FallbackCardRequest);
                     roundParticipants = new[] { winner };
                     transactionTypeCode = TransactionInfoRequestBuilder.TransactionTypeFallback;
@@ -602,7 +613,7 @@ internal sealed class PaymentOrchestrator
 
                 case ReaderCommandOutcomeKind.BusinessFailure when outcome.IsRetryCode12:
                     deadline.Extend(UserInputStepExtension);
-                    FileLogger.Info($"[PaymentOrchestrator] txId={txId} 응답코드 12 — 재요청(채택된 그 리더기에만, 거래구분 유지), 데드라인 {UserInputStepExtension.TotalSeconds:F0}초 연장");
+                    FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 응답코드 12 — 재요청(채택된 그 리더기에만, 거래구분 유지), 데드라인 {UserInputStepExtension.TotalSeconds:F0}초 연장", code: null, txId);
                     roundParticipants = new[] { winner };
                     continue;
 
@@ -614,7 +625,7 @@ internal sealed class PaymentOrchestrator
                         return CardReadRoundResult.Early(InterruptCode(reason));
                     }
 
-                    FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 카드 리딩 실패 — 응답코드={outcome.ResponseCode}");
+                    FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 실패 — 응답코드={outcome.ResponseCode}", code: null, txId);
                     winner.SendInvalidationInit();
                     return CardReadRoundResult.Early(PosResultCodeMapper.ToTelegramCode(outcome));
 
@@ -630,7 +641,7 @@ internal sealed class PaymentOrchestrator
                         return CardReadRoundResult.Early(InterruptCode(reason));
                     }
 
-                    FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 리더기 명령 타임아웃(라운드 {round})");
+                    FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] 리더기 명령 타임아웃(라운드 {round})", code: null, txId);
                     winner.SendInvalidationInit();
                     return CardReadRoundResult.Early(PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.Timeout));
 
@@ -642,7 +653,7 @@ internal sealed class PaymentOrchestrator
                         return CardReadRoundResult.Early(InterruptCode(reason));
                     }
 
-                    FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 카드 리딩 DLL 연동 실패(Kind={outcome.Kind}): {outcome.Detail}");
+                    FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 DLL 연동 실패(Kind={outcome.Kind}): {outcome.Detail}", code: null, txId);
                     winner.SendInvalidationInit();
                     return CardReadRoundResult.Early(PosResultCodeMapper.ToTelegramCode(outcome));
             }
@@ -656,7 +667,7 @@ internal sealed class PaymentOrchestrator
             return CardReadRoundResult.Early(InterruptCode(reason));
         }
 
-        FileLogger.Warn($"[PaymentOrchestrator] txId={txId} 카드 리딩 재요청 상한({MaxCardReadRounds}) 초과");
+        FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 재요청 상한({MaxCardReadRounds}) 초과", code: null, txId);
         foreach (IReaderEndpoint p in roundParticipants)
             p.SendInvalidationInit();
         return CardReadRoundResult.Early(PosResultCodeMapper.ReaderRetryLimitExceededCode);
@@ -687,14 +698,14 @@ internal sealed class PaymentOrchestrator
                 // 한다"는 구분 자체가 리더기 관점에서 성립하지 않는다(Phase 15의 RunVanApprovalAsync가
                 // 거절에만 init하던 비대칭은 근거 없는 코드였다). Phase 16 실장비 검증에서 연속 4건
                 // 승인 거래를 중간 초기화 없이 수행해 다음 거래로 상태가 새지 않는 것도 실증됐다.
-                FileLogger.Info($"[PaymentOrchestrator] txId={txId} VAN 응답 수신 — relay");
+                FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] VAN 응답 수신 — relay", code: null, txId);
                 return PosResponseTelegram.Relay(request.Schema, outcome.ResponseBody!);
 
             default: // CommunicationFailure
                 // 이 경로에서만 초기화한다. 다만 근거는 "리더기가 정리를 필요로 해서"가 아니라
                 // (위 Success 주석과 같은 이유로 리더기 상태는 여기서도 동일하다) PRD §4.10의 "실패 시
                 // Reader 초기화" 문구를 문자 그대로 지키고, fire-and-forget이라 비용이 없기 때문이다.
-                FileLogger.Warn($"[PaymentOrchestrator] txId={txId} VAN DLL 통신 실패: {outcome.Detail}");
+                FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] VAN DLL 통신 실패: {outcome.Detail}", code: null, txId);
                 cardReadWinner?.SendInvalidationInit();
                 return PosResponseTelegram.Failure(request, PosResultCodeMapper.ToTelegramCode(outcome.FailureKind!.Value));
         }
@@ -707,12 +718,12 @@ internal sealed class PaymentOrchestrator
     {
         if (scope.Gate.TryClaim(TransactionOutcomeReason.UserCanceled))
         {
-            FileLogger.Info($"[PaymentOrchestrator] txId={scope.TransactionId} 사용자 취소 통지 수신 — 거래 확정(UserCanceled)");
+            FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 사용자 취소 통지 수신 — 거래 확정(UserCanceled)", code: null, scope.TransactionId);
             FireInterruptCleanup(TransactionOutcomeReason.UserCanceled, scope);
         }
         else
         {
-            FileLogger.Info($"[PaymentOrchestrator] txId={scope.TransactionId} 사용자 취소 통지 수신 — 이미 다른 사유({scope.Gate.ClaimedReason})로 확정되어 무시");
+            FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 사용자 취소 통지 수신 — 이미 다른 사유({scope.Gate.ClaimedReason})로 확정되어 무시", code: null, scope.TransactionId);
         }
     }
 
@@ -726,7 +737,7 @@ internal sealed class PaymentOrchestrator
 
         if (scope.Gate.TryClaim(TransactionOutcomeReason.Timeout))
         {
-            FileLogger.Warn($"[PaymentOrchestrator] txId={scope.TransactionId} 거래 데드라인 만료 — 거래 확정(Timeout)");
+            FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 거래 데드라인 만료 — 거래 확정(Timeout)", code: null, scope.TransactionId);
             FireInterruptCleanup(TransactionOutcomeReason.Timeout, scope);
         }
     }
@@ -736,7 +747,7 @@ internal sealed class PaymentOrchestrator
     private static void FireInterruptCleanup(TransactionOutcomeReason reason, TransactionScope scope)
     {
         IReadOnlyList<IReaderEndpoint> pending = scope.PendingParticipants;
-        FileLogger.Info($"[PaymentOrchestrator] txId={scope.TransactionId} {reason} 확정 — 대기 중인 참여 리더기 {pending.Count}대에 초기화(0x60) 전송 예약(백그라운드)");
+        FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] {reason} 확정 — 대기 중인 참여 리더기 {pending.Count}대에 초기화(0x60) 전송 예약(백그라운드)", code: null, scope.TransactionId);
 
         Task.Run(() =>
         {

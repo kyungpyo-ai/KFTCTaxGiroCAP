@@ -21,6 +21,12 @@ namespace KFTCOneCAP.Wpf.Protocol.Reader
         internal string EncryptionMarker { get; }           // 암호화 구분자 X(3), "ENC"/"PON"
         internal string Wcc { get; }                        // WCC X(1)
         internal string EncryptedData { get; }               // 암호화 데이터 V(암호화데이터길이)
+
+        /// <summary>리더기가 실제로 보낸 "암호화데이터 길이" 필드(3자리, 왼쪽 '0' 패딩) 원문.
+        /// <see cref="EncryptedData"/>를 정확히 그 길이만큼 읽었으므로 <c>EncryptedData.Length.ToString("D3")</c>와
+        /// 항상 같다 — 2026-09-01 사용자 확정(PaymentOrchestrator.FillCardApprovalFields의 #46 필드 구성용,
+        /// SPEC 문서 근거 아님. 상세는 그쪽 클래스 주석 참고).</summary>
+        internal string EncryptedDataLengthText { get; }
         internal string EmvEncodingMethod { get; }           // EMV 인코딩 방식 X(1), "B"/"E"
         internal string EmvEncodedData { get; }              // EMV 인코딩 데이터 V(EMV데이터길이)
         internal string ReaderAuthId { get; }                // 리더기 인증 식별 번호 X(16)
@@ -33,6 +39,7 @@ namespace KFTCOneCAP.Wpf.Protocol.Reader
         internal CardReadData(
             string transactionType, string keyVersion, string tc, string moduleId, string fallbackCode,
             string amount, string cardNumber, string encryptionMarker, string wcc, string encryptedData,
+            string encryptedDataLengthText,
             string emvEncodingMethod, string emvEncodedData, string readerAuthId,
             string readerSerialEncryptionMarker, string readerSerial, string readerEncryptionInfo,
             string tc3, string payOnCertifyCode)
@@ -47,6 +54,7 @@ namespace KFTCOneCAP.Wpf.Protocol.Reader
             EncryptionMarker = encryptionMarker;
             Wcc = wcc;
             EncryptedData = encryptedData;
+            EncryptedDataLengthText = encryptedDataLengthText;
             EmvEncodingMethod = emvEncodingMethod;
             EmvEncodedData = emvEncodedData;
             ReaderAuthId = readerAuthId;
@@ -130,6 +138,9 @@ namespace KFTCOneCAP.Wpf.Protocol.Reader
             if (!cursor.TryReadFixed(1, out string wcc)) return CardReadResponseResult.Failed();
 
             if (!cursor.TryReadLengthThenPayload(3, out string encryptedData)) return CardReadResponseResult.Failed();
+            // 2026-09-01 사용자 확정(PaymentOrchestrator.FillCardApprovalFields #46 주석 참고) — 방금
+            // 정확히 이 길이만큼 읽었으므로 재구성해도 안전하다(원래 3자리 길이 필드 원문과 항상 같다).
+            string encryptedDataLengthText = encryptedData.Length.ToString("D3");
 
             if (!cursor.TryReadFixed(1, out string emvEncodingMethod)) return CardReadResponseResult.Failed();
 
@@ -146,8 +157,8 @@ namespace KFTCOneCAP.Wpf.Protocol.Reader
 
             var cardData = new CardReadData(
                 transactionType, keyVersion, tc, moduleId, fallbackCode, amount, cardNumber,
-                encryptionMarker, wcc, encryptedData, emvEncodingMethod, emvEncodedData, readerAuthId,
-                readerSerialEncryptionMarker, readerSerial, readerEncryptionInfo, tc3, payOnCertifyCode);
+                encryptionMarker, wcc, encryptedData, encryptedDataLengthText, emvEncodingMethod, emvEncodedData,
+                readerAuthId, readerSerialEncryptionMarker, readerSerial, readerEncryptionInfo, tc3, payOnCertifyCode);
 
             return CardReadResponseResult.Of(code, cardData);
         }
