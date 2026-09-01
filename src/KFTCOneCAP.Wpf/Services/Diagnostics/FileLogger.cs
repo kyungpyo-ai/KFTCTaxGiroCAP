@@ -21,8 +21,9 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 ///
 /// 싱크 목록은 앱 기동 시 한 번 <see cref="ConfigureSinks"/>로 구성한다(<c>App.xaml.cs</c>). 장래
 /// 원격 싱크는 그 호출에 인자를 추가하는 것만으로 붙는다. <see cref="ConfigureSinks"/>를 호출하지
-/// 않은 상태(콘솔 하네스 등 <c>OnStartup</c>을 거치지 않는 진입점)에서도 파일 로깅이 그대로 동작하도록
-/// 기본값은 <see cref="FileLogSink"/> 하나로 초기화돼 있다.
+/// 않은 상태(콘솔 하네스 등 <c>OnStartup</c>을 거치지 않는 진입점)에서도 파일 로깅과 링버퍼 기록이
+/// 그대로 동작하도록 기본값은 <see cref="FileLogSink"/>와 <see cref="RingBufferSink"/> 두 개로
+/// 초기화돼 있다.
 /// </summary>
 public static class FileLogger
 {
@@ -31,7 +32,7 @@ public static class FileLogger
     // 원래도 원자적이라 별도 lock으로 "교체 동작"을 보호할 필요는 없었다 — 이전 lock은 동시 ConfigureSinks
     // 호출끼리의 직렬화만 보장했을 뿐(실제로는 그 호출이 기동 시 1회뿐이라 의미가 없었다) 가시성은 보장하지
     // 않았으므로 volatile로 대체한다.
-    private static volatile ILogSink[] _sinks = { new FileLogSink() };
+    private static volatile ILogSink[] _sinks = { new FileLogSink(), new RingBufferSink() };
 
     /// <summary>
     /// 로그 싱크 목록을 (교체) 구성한다. 앱 기동 시 한 번만 호출한다(<c>App.xaml.cs</c>,
@@ -53,18 +54,26 @@ public static class FileLogger
         _sinks = (ILogSink[])sinks.Clone();
     }
 
-    public static void Info(string message) => Write(LogLevel.Info, message);
+    public static void Info(string message) => Write(LogLevel.Info, category: null, message);
 
-    public static void Warn(string message) => Write(LogLevel.Warn, message);
+    public static void Warn(string message) => Write(LogLevel.Warn, category: null, message);
 
-    public static void Error(string message) => Write(LogLevel.Error, message);
+    public static void Error(string message) => Write(LogLevel.Error, category: null, message);
 
-    private static void Write(LogLevel level, string message)
+    /// <summary>
+    /// Phase 22(docs/operations/development_plan.md P22-5) — 카테고리를 싣는 첫 오버로드.
+    /// 기존 151곳의 호출부를 건드리지 않기 위해 위 3개는 그대로 두고, 카테고리가 필요한 새 호출
+    /// (지금은 <see cref="LogRetentionCleaner"/> 하나)만 이 오버로드를 쓴다. 코드/거래ID까지 함께
+    /// 싣는 배선은 P22-6에서 결제 Flow 경계를 따라가며 확장한다.
+    /// </summary>
+    public static void Info(LogCategory category, string message) => Write(LogLevel.Info, category, message);
+
+    private static void Write(LogLevel level, LogCategory? category, string message)
     {
         try
         {
             string masked = LogMessageMasker.Mask(message);
-            var record = new LogRecord(DateTime.Now, level, category: null, code: null, transactionId: null, message: masked);
+            var record = new LogRecord(DateTime.Now, level, category, code: null, transactionId: null, message: masked);
             Dispatch(record);
         }
         catch

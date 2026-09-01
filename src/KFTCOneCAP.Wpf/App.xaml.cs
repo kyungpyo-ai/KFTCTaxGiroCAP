@@ -64,10 +64,17 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        // Phase 22(docs/operations/development_plan.md P22-3, PRD.md §1.3-a): 로그 싱크 목록을 앱
-        // 기동 시 한 번 구성한다. 다른 모든 FileLogger 호출보다 먼저 실행돼야 한다 — 지금은 파일
-        // 싱크 하나뿐이지만, 장래 원격 싱크는 여기에 인자를 추가하는 것만으로 병렬 연결된다.
-        FileLogger.ConfigureSinks(new FileLogSink());
+        // Phase 22(docs/operations/development_plan.md P22-3/P22-4, PRD.md §1.3-a/§1.3-d): 로그 싱크
+        // 목록을 앱 기동 시 한 번 구성한다. 다른 모든 FileLogger 호출보다 먼저 실행돼야 한다.
+        // FileLogSink는 파일에 렌더링해 남기고, RingBufferSink는 최근 500건을 메모리에 유지한다
+        // (장래 장애 보고 기능이 LogRingBuffer 정적 메서드로 직접 조회). 장래 원격 싱크는 여기에
+        // 인자를 추가하는 것만으로 병렬 연결된다.
+        FileLogger.ConfigureSinks(new FileLogSink(), new RingBufferSink());
+
+        // Phase 22(docs/operations/development_plan.md P22-5, PRD.md §1.2): 90일 보관 정리를 앱 기동
+        // 시 1회 백그라운드로 수행한다(기동 경로를 블로킹하지 않음). 날짜가 바뀌어 새 로그 파일을
+        // 처음 만들 때의 재실행은 FileLogSink가 자체적으로 트리거한다.
+        LogRetentionCleaner.RunAtStartup();
 
         // Phase 8(docs/payment_relay/development_plan.md P8-4): 앱 기동 시 두 네이티브 DLL의 로드
         // 가능 여부를 미리 확인해 로그로 남긴다. 실제 함수 호출은 Phase 9/17 몫이며, 여기서는 로드

@@ -24,8 +24,6 @@ public sealed class FileLogSink : ILogSink
 {
     private static readonly object SyncRoot = new();
 
-    private static string LogDirectory => @"C:\KFTC_PosAgent\KFTCTaxLog";
-
     public void Write(LogRecord record)
     {
         if (record is null)
@@ -33,13 +31,18 @@ public sealed class FileLogSink : ILogSink
             throw new ArgumentNullException(nameof(record));
         }
 
+        // Phase 22(P22-5, PRD.md §1.2) "날짜가 바뀌어 새 로그 파일을 처음 만들 때" 훅. 매 기록마다
+        // 호출되지만 실제 정리는 LogRetentionCleaner 내부에서 날짜가 바뀐 경우에만 한 번 트리거된다
+        // — 여기서 블로킹 없이 즉시 반환하므로 기록 경로를 지연시키지 않는다.
+        LogRetentionCleaner.NotifyLogWritten(record.Timestamp.Date);
+
         string line = LogLineRenderer.Render(record) + Environment.NewLine;
-        string filePath = Path.Combine(LogDirectory, $"{record.Timestamp:yyyy-MM-dd}.log");
+        string filePath = Path.Combine(LogPaths.LogDirectory, $"{record.Timestamp:yyyy-MM-dd}.log");
         byte[] bytes = Encoding.UTF8.GetBytes(line);
 
         lock (SyncRoot)
         {
-            Directory.CreateDirectory(LogDirectory);
+            Directory.CreateDirectory(LogPaths.LogDirectory);
             using var stream = new FileStream(
                 filePath,
                 FileMode.Append,
