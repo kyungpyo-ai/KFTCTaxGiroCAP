@@ -293,9 +293,15 @@ namespace KFTCOneCAP.KioskSim.Protocol
                     "형식은 #22와 동일."),
                 new TelegramField(24, "납부대행 수수료 금액", TelegramRepresentation.N, 12, 250, TelegramSetLocation.InternetGiro),
                 new TelegramField(25, "합계금액", TelegramRepresentation.N, 12, 262, TelegramSetLocation.InternetGiro),
-                new TelegramField(26, "API 세부 응답코드", TelegramRepresentation.AN, 6, 274, TelegramSetLocation.InternetGiro),
-                new TelegramField(27, "예비 정보 FIELD", TelegramRepresentation.AN, 220, 280, TelegramSetLocation.InternetGiro,
-                    "SPEC 표(p.12)는 인터넷지로 열이 체크되어 있다(직접 확인) — 응답 전용."),
+                // #26 신규 추가(SPEC 20260831 개정) — 뒤따르는 #27/#28은 이 삽입으로 번호·POSITION이
+                // 한 칸씩 밀렸다(20260826판에서는 #26/#27이었음). 본 앱(Protocol/Pos/Schemas/
+                // CardInfoInquirySchema.cs)과 독립적으로 SPEC PDF를 다시 옮겨 적었다(P19-2 원칙 유지).
+                new TelegramField(26, "납부대행 수수료율", TelegramRepresentation.N, 4, 274, TelegramSetLocation.InternetGiro,
+                    "SPEC 20260831 개정판 신규 필드 — 인터넷지로 열만 체크(응답 전용, kiosk/원캡/VAN 전부 공란)."),
+                new TelegramField(27, "API 세부 응답코드", TelegramRepresentation.AN, 6, 278, TelegramSetLocation.InternetGiro),
+                new TelegramField(28, "예비 정보 FIELD", TelegramRepresentation.AN, 216, 284, TelegramSetLocation.InternetGiro,
+                    "SPEC 표(p.12)는 인터넷지로 열이 체크되어 있다(직접 확인) — 응답 전용. #26 신규 삽입으로 " +
+                    "길이가 220→216으로 축소(총 길이 500 유지)."),
             };
             return fields;
         }

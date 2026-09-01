@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
@@ -47,6 +48,7 @@ internal static class PaymentFlowTestScenarios
             await Scenario10_CancelDuringPinEntryYieldsE01().ConfigureAwait(false);
             await Scenario11_TimeoutDuringPinEntryYieldsE02().ConfigureAwait(false);
             await Scenario12_PinEnteredBeforeSubscriptionIsNotLost().ConfigureAwait(false);
+            await Scenario13_ConsecutiveTransactionsDoNotLeakCardOrPinData().ConfigureAwait(false);
 
             FileLogger.Info($"[payment-flow-test] 완료 — 통과 {_passCount}건, 실패 {_failCount}건");
         }
@@ -75,13 +77,13 @@ internal static class PaymentFlowTestScenarios
     private static PaymentOrchestrator BuildOrchestrator(
         out FakeReaderEndpoint reader1, out FakeReaderEndpoint reader2,
         out FakePaymentNoticePresenter presenter, out FakeReaderSetupGate gate,
-        out StubVanRelayService vanRelay, string port1 = "COM 05", string port2 = "미사용")
+        out CapturingVanRelayService vanRelay, string port1 = "COM 05", string port2 = "미사용")
     {
         reader1 = new FakeReaderEndpoint("COM 05");
         reader2 = new FakeReaderEndpoint("COM 03");
         presenter = new FakePaymentNoticePresenter();
         gate = new FakeReaderSetupGate();
-        vanRelay = new StubVanRelayService();
+        vanRelay = new CapturingVanRelayService();
         var integrityStore = new IntegrityCheckStore(Path.Combine(Path.GetTempPath(), $"p17-test-{Guid.NewGuid():N}.db"));
 
         return new PaymentOrchestrator(
@@ -440,5 +442,48 @@ internal static class PaymentFlowTestScenarios
             PosResponseTelegram response = await processTask.ConfigureAwait(false);
             Check("902614: 즉시발화 순서 검증 — 응답 성공(#7=000)", response.Telegram.Read(7) == "000");
         }
+    }
+
+    /// <summary>Phase 21 P21-2 — PRD §8.4 "이전 거래 데이터가 다음 거래에 영향을 주어서는 안 된다"를
+    /// 연속 실행으로 실증한다. **같은 <see cref="PaymentOrchestrator"/> 인스턴스**로 서로 다른 PIN을
+    /// 쓰는 두 902614 거래를 연달아 처리해(실제 운영과 동일하게 인스턴스를 재사용), 두 번째 거래가
+    /// VAN에 보내는 전문 원문(raw bytes) 전체에 **첫 번째 거래의 PIN이 어디에도 남아 있지 않은지**
+    /// 확인한다. <c>.Read(51)</c>처럼 필드 위치만 보는 검사로는 "엉뚱한 자리에 남는 잔존"을
+    /// 놓칠 수 있어 raw 바이트 전체를 훑는다(P18-5 raw 검사 패턴 계승).</summary>
+    private static async Task Scenario13_ConsecutiveTransactionsDoNotLeakCardOrPinData()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+
+        // 거래 A — 이 값들이 거래 B로 새면 안 된다.
+        const string pinA = "1357";
+        r1.EnqueueCardReadOutcome(SuccessOutcome(cardNumber: "1111222233334444"));
+        presenter.FirePinEnteredSynchronouslyOnChangeState = true;
+        presenter.PinToFireSynchronously = pinA;
+        var requestA = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
+        PosResponseTelegram responseA = await orchestrator.ProcessAsync(requestA).ConfigureAwait(false);
+        Check("연속거래 A: 응답 성공(#7=000)", responseA.Telegram.Read(7) == "000");
+        byte[] rawBodyA = vanRelay.LastRequest!.Telegram.ToBody();
+
+        // 거래 B — 서로 다른 카드/PIN으로, 같은 orchestrator·리더기 인스턴스를 그대로 재사용한다
+        // (실제 운영에서 앱을 껐다 켜지 않고 여러 거래를 처리하는 상황과 동일).
+        const string pinB = "2468";
+        r1.EnqueueCardReadOutcome(SuccessOutcome(cardNumber: "9999888877776666"));
+        presenter.PinToFireSynchronously = pinB;
+        var requestB = BuildRequest("902614", new Dictionary<int, string> { [29] = "2000" });
+        PosResponseTelegram responseB = await orchestrator.ProcessAsync(requestB).ConfigureAwait(false);
+        Check("연속거래 B: 응답 성공(#7=000)", responseB.Telegram.Read(7) == "000");
+        byte[] rawBodyB = vanRelay.LastRequest!.Telegram.ToBody();
+
+        string rawTextB = System.Text.Encoding.ASCII.GetString(rawBodyB);
+        Check("연속거래: 거래 B의 VAN 요청 원문에 거래 A의 PIN이 어디에도 없음(raw 바이트 전수 검사)",
+            !rawTextB.Contains(pinA));
+        Check("연속거래: 거래 B의 #51은 거래 B 자신의 PIN(정확한 위치)", requestB.Read(51) == pinB);
+
+        string rawTextA = System.Text.Encoding.ASCII.GetString(rawBodyA);
+        Check("연속거래: 거래 A의 VAN 요청 원문에 거래 B의 PIN이 없음(순서 반대 방향도 확인 — sanity)",
+            !rawTextA.Contains(pinB));
+
+        Check("연속거래: 두 거래의 알림창 History가 각자 독립적으로 IcCardRequest로 시작함(이전 거래 상태 잔존 없음)",
+            presenter.History.Count(h => h == "Show:IcCardRequest") == 2);
     }
 }

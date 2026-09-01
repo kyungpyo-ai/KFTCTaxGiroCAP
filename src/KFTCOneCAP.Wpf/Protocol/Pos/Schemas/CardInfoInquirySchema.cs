@@ -68,8 +68,14 @@ internal static class CardInfoInquirySchema
             new(23, "포인트 할부개월 LIST", PosFieldType.AN, 60, 190, I),
             new(24, "납부대행 수수료 금액", PosFieldType.N, 12, 250, I),
             new(25, "합계금액", PosFieldType.N, 12, 262, I),
-            new(26, "API 세부 응답코드", PosFieldType.AN, 6, 274, I),
-            new(27, "예비 정보 FIELD", PosFieldType.AN, 220, 280, I), // SPEC 표(p.12)는 인터넷지로 열 체크(응답 전용) — 직접 재확인
+            // #26 신규 추가(SPEC 20260831 개정, pos-onecap-spec-expert 재확인 완료). 뒤따르는 #27/#28은
+            // 이 삽입으로 번호·POSITION이 한 칸씩 밀렸다(20260826판에서는 #26/#27이었음) — #28 예비
+            // 정보 FIELD는 신규 필드가 차지한 4바이트만큼 길이가 220→216으로 줄어 총 길이 500은 그대로
+            // 유지된다. 새 필드는 SET 장소가 인터넷지로뿐이라(kiosk/원캡/VAN 전부 공란) 원캡이 채우지
+            // 않는 순수 relay 대상 — 카드리딩 로직은 손댈 필요 없음.
+            new(26, "납부대행 수수료율", PosFieldType.N, 4, 274, I),
+            new(27, "API 세부 응답코드", PosFieldType.AN, 6, 278, I),
+            new(28, "예비 정보 FIELD", PosFieldType.AN, 216, 284, I), // SPEC 표(p.12)는 인터넷지로 열 체크(응답 전용) — 직접 재확인
         };
 
         return new PosTelegramSchema(TransactionTypeCode, header.Concat(business).ToList(), totalLength: 500);

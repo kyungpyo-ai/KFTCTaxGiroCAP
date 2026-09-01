@@ -273,6 +273,14 @@ public partial class App : Application
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
             System.Threading.Tasks.Task.Run(PosClientTestScenarios.RunAll);
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--repeat-transactions-test")
+        {
+            // 개발/회귀 검증용(docs/payment_relay/development_plan.md P21-4 완료 조건, 최종 산출물
+            // 아님): 501008(카드리딩 없음)을 50회 반복 처리하며 이 프로세스의 핸들/WorkingSet 추이를
+            // 5회마다 로그에 남긴다 — PRD §9 "장시간 실행 시 메모리 누수 없음"을 확인하는 용도.
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+            System.Threading.Tasks.Task.Run(RepeatedTransactionResourceTest.Run);
+        }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--payment-flow-test")
         {
             // 개발/회귀 검증용(P15-10 완료 조건, 최종 산출물 아님): PaymentOrchestrator(P15-6~P15-9)를
@@ -281,6 +289,16 @@ public partial class App : Application
             // UI는 홈 화면을 그대로 띄워 알림창(PaymentNoticeWindow)이 정상 동작함을 같이 보여준다.
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
             System.Threading.Tasks.Task.Run(PaymentFlowTestScenarios.RunAll);
+        }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--van-call-test")
+        {
+            // 개발/회귀 검증용(docs/payment_relay/development_plan.md P20-3 완료 조건, 최종 산출물
+            // 아님): VanService(Phase 20)를 직접 만들어 FNAISCRDVAN을 실제로 호출한다. App.Orchestrator
+            // 는 여전히 StubVanRelayService를 쓰므로(결정 1) 이 테스트와 무관하다 — VAN 배선은
+            // 건드리지 않는다. VAN 서버가 아직 없어 기대 결과는 통신 실패(D01/D02)이고, 확인하는 것은
+            // 호출이 크래시 없이 성립하는가다.
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+            System.Threading.Tasks.Task.Run(VanCallTestScenarios.RunAll);
         }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--notice-demo")
         {

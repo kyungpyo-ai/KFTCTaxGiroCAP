@@ -28,7 +28,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **2차 범위는 `docs/payment_relay/` 한 폴더에 3단 문서 구성(PRD → ROADMAP → 실행계획서)으로 모아 관리한다**: `PRD.md`(무엇을) → `ROADMAP.md`(어떤 순서로 — Phase 7~18 + 계층 구조 설계 원칙) → `development_plan.md`(Task 단위 작업 지시/완료 조건, 각 Phase 착수 직전 작성). 같은 폴더에 `dll/`(KFTC_GIRO.dll)과 `images/`(결제 알림창 자산)도 있다. 코드 작성은 해당 Phase의 실행계획서가 준비된 뒤에 시작한다.
 
-**Phase 번호는 두 ROADMAP에 걸쳐 이어진다** — 1차 0~6(`docs/home_reader_setup/ROADMAP.md`), 2차 7~(`docs/payment_relay/ROADMAP.md`). 같은 앱을 계속 확장하는 것이므로 번호를 새로 시작하지 않는다.
+**3차 범위(운영 기능, Phase 22~): `docs/operations/PRD.md`가 요구사항 정본.** 세 기능을 한 문서에 §1~§3으로 묶어 관리한다 — ① 로그 출력(일자별 파일 + 90일 정리 + 장래 장애정보 서버 전송 대비 구조), ② 가맹점 설정 화면(옵션 5개, 홈 화면 "가맹점 설정" 카드에 연결), ③ 리더기 키다운로드(리더기 설정 화면의 기존 버튼에 동작 구현). 분량이 크지 않고 공통 전제(레지스트리 루트·계층 규칙·보안 원칙·화면 경합)를 공유해 폴더를 나누지 않았다. 문서 구성은 2차와 같은 3단(`PRD.md` → `ROADMAP.md` → `development_plan.md`)이다.
+
+**Phase 번호는 세 ROADMAP에 걸쳐 이어진다** — 1차 0~6(`docs/home_reader_setup/ROADMAP.md`), 2차 7~21(`docs/payment_relay/ROADMAP.md`), 3차 22~(`docs/operations/ROADMAP.md`). 같은 앱을 계속 확장하는 것이므로 번호를 새로 시작하지 않는다.
 
 ## 원본 MFC 소스 (참고용, 이 저장소 밖)
 
@@ -42,8 +44,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `.claude/agents/reader-pinpad-spec-expert.md` — 리더기/핀패드 SPEC 원문 및 `ReaderSerial.dll` API 계약 확인 전담(아래 "리더기 연동 DLL" 절 참고).
 - `.claude/agents/reader-dll-integration-developer.md` — `ReaderSerial.dll` P/Invoke 연동 개발 전담(아래 "리더기 연동 DLL" 절 참고).
 - `.claude/agents/pos-onecap-spec-expert.md` — POS ↔ KFTCOneCAP 간 전문(telegram) SPEC 확인 전담. 근거 문서는
-  `docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260826.pdf`(hwp 원본은 DRM
-  배포용 문서 래퍼라 열 수 없음, PDF가 유일하게 파싱 가능) — 501008(국고 상세 고지내역 조회), 800000(카드
+  `docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260831.pdf`(hwp 원본은 DRM
+  배포용 문서 래퍼라 열 수 없음, PDF가 유일하게 파싱 가능 — **2026-08-31 개정판이 최신 정본**, 이전
+  20260826판은 저장소에 더는 없다. 개정 내용: 800000 전문에 `#26 납부대행 수수료율`(N4) 신규 삽입,
+  기존 #26/#27이 #27/#28로 밀림) — 501008(국고 상세 고지내역 조회), 800000(카드
   정보 조회), 902614(국고 신용카드 승인요청) 3종 전문의 필드/POSITION/길이, kiosk가 채우는 필드와 원캡이
   카드리딩으로 채워야 하는 필드(800000은 #14 BIN 1개, 902614는 #43/#44/#45/#46/#48/#50/#53 7개)의 구분,
   응답코드를 담당한다. 전문 필드를 코드에 하드코딩하기 전에 반드시 이 에이전트로 확인한다 — SPEC 표를

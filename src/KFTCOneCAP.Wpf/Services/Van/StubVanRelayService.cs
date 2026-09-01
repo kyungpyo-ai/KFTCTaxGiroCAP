@@ -20,6 +20,16 @@ namespace KFTCOneCAP.Wpf.Services.Van;
 ///
 /// <see cref="SetNextOutcome"/>로 검증 하네스가 성공/통신실패를 스크립트할 수 있다(P15-5의
 /// <c>StubVanService</c> 패턴 계승 — 소비 후 기본값 복귀).
+///
+/// <b>Phase 21 P21-1 정정(2026-08-31)</b>: 예전에는 이 클래스가 <c>LastRequest</c> 프로퍼티로 가장
+/// 최근 요청 전문(카드번호·PIN 등 원캡이 채운 필드 전부 포함)을 무기한 들고 있었다 — 대입만 있고
+/// 비우는 코드가 없어, 다음 거래가 올 때까지(또는 그날 마지막 거래라면 앱 종료 때까지) 이전 거래
+/// 데이터가 메모리에 남는 PRD §8.4 위반이었다. 이 클래스는 <b>지금도 `App.xaml.cs`가 실제로 배선해
+/// 쓰는 구현체</b>(Phase 20 결정 1 — 서버 준비 전까지 스텁 유지)이므로, 검증 하네스 전용 필드가
+/// 프로덕션 경로에 그대로 노출돼 있던 셈이다. 그 필드를 완전히 제거했다 — 검증 하네스가 필요로
+/// 하는 "가장 최근 요청 캡처" 기능은 테스트 전용 래퍼
+/// (<see cref="Diagnostics.CapturingVanRelayService"/>)로 분리해, 프로덕션 경로는 아예 전문을
+/// 붙들지 않는다.
 /// </summary>
 internal sealed class StubVanRelayService : IVanRelayService
 {
@@ -27,10 +37,6 @@ internal sealed class StubVanRelayService : IVanRelayService
 
     private readonly object _lock = new();
     private VanRelayOutcome? _nextOutcome;
-
-    /// <summary>가장 최근 <see cref="RelayAsync"/> 호출의 인자 — 검증 하네스가 "원캡 필드가 실제로
-    /// VAN 요청까지 채워져 도달했는가"를 확인하는 용도(P15-5의 <c>LastRequest</c> 패턴 계승).</summary>
-    internal PosRequestTelegram? LastRequest { get; private set; }
 
     /// <summary>다음 호출이 반환할 결과를 미리 지정한다(검증 하네스 전용). 소비 후 기본값(성공 흉내)
     /// 으로 되돌아간다.</summary>
@@ -48,8 +54,6 @@ internal sealed class StubVanRelayService : IVanRelayService
 
         lock (_lock)
         {
-            LastRequest = populatedRequest;
-
             if (_nextOutcome is { } injected)
             {
                 _nextOutcome = null; // 소비 후 기본값 복귀.

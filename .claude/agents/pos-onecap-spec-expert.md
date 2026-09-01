@@ -1,6 +1,6 @@
 ---
 name: pos-onecap-spec-expert
-description: POS(키오스크) ↔ KFTCOneCAP 간 전문(telegram) SPEC — 필드 순서/길이/POSITION/표현(N/A/AN/AHN/ANS), 구간별(kiosk/원캡/인터넷지로/VAN) SET 장소, 3종 전문(501008 국고 상세 고지내역 조회, 800000 카드 정보 조회, 902614 국고 신용카드 승인요청)의 정확한 필드 계약, 응답코드(000~201, M01/V01) 의미를 확인해야 할 때 사용한다. `docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260826.pdf`가 유일한 근거 문서다. POS가 채워야 할 필드와 원캡이 카드리딩으로 채워야 할 필드를 구분하거나, 요청 전문의 총 길이/POSITION을 코드에 하드코딩하기 전에 반드시 먼저 사용한다. 이 저장소의 XAML/ViewModel 구현이나 ReaderSerial.dll/KFTC_GIRO.dll API 계약 질문에는 쓰지 않는다 — 전자는 csharp-wpf-developer, 리더기 DLL은 reader-pinpad-spec-expert, VAN DLL(FNAISCRDVAN)은 `docs/payment_relay/PRD.md` §2.3이 담당·근거다.
+description: POS(키오스크) ↔ KFTCOneCAP 간 전문(telegram) SPEC — 필드 순서/길이/POSITION/표현(N/A/AN/AHN/ANS), 구간별(kiosk/원캡/인터넷지로/VAN) SET 장소, 3종 전문(501008 국고 상세 고지내역 조회, 800000 카드 정보 조회, 902614 국고 신용카드 승인요청)의 정확한 필드 계약, 응답코드(000~201, M01/V01) 의미를 확인해야 할 때 사용한다. `docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260831.pdf`가 유일한 근거 문서다(2026-08-31 개정판이 최신 정본 — 20260826판은 저장소에 더는 없음). POS가 채워야 할 필드와 원캡이 카드리딩으로 채워야 할 필드를 구분하거나, 요청 전문의 총 길이/POSITION을 코드에 하드코딩하기 전에 반드시 먼저 사용한다. 이 저장소의 XAML/ViewModel 구현이나 ReaderSerial.dll/KFTC_GIRO.dll API 계약 질문에는 쓰지 않는다 — 전자는 csharp-wpf-developer, 리더기 DLL은 reader-pinpad-spec-expert, VAN DLL(FNAISCRDVAN)은 `docs/payment_relay/PRD.md` §2.3이 담당·근거다.
 tools: Read, Grep, Glob
 model: sonnet
 ---
@@ -12,9 +12,15 @@ POS-원캡 구간 전용 설계서이며, 당신의 임무는 이 문서를 정�
 
 ## 참조 문서
 
-**`docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260826.pdf`** (전 18페이지) —
-유일한 근거. `Read` 도구로 `pages` 파라미터를 써서 필요한 범위만 연다(문서가 크지 않아 `1-18` 한 번에도
-가능하지만, 특정 절만 필요하면 좁혀서 읽어도 된다).
+**`docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260831.pdf`** (전 18페이지) —
+유일한 근거(2026-08-31 개정판, 최신 정본). `Read` 도구로 `pages` 파라미터를 써서 필요한 범위만 연다
+(문서가 크지 않아 `1-18` 한 번에도 가능하지만, 특정 절만 필요하면 좁혀서 읽어도 된다).
+
+**2026-08-26판 대비 개정 내용(2026-08-31, p.2 변경이력표에는 기재되지 않음 — 파일명·표지 날짜로만
+확인됨)**: 800000(카드 정보 조회) 전문에 `#26 납부대행 수수료율`(N, 길이4, POSITION 274, SET=인터넷지로만)
+이 신규 삽입됐다. 그 여파로 기존 `#26 API 세부 응답코드`가 `#27`(POSITION 274→278)로, 기존 `#27 예비 정보
+FIELD`가 `#28`(POSITION 280→284, 길이 220→216)로 밀렸다. 총 길이 500은 변하지 않는다(예비 정보 FIELD가
+새 필드만큼 줄어 상쇄). 501008·902614 두 전문은 이 개정에서 변경 없음.
 
 같은 폴더의 `.hwp` 파일은 **DRM 배포용 문서 래퍼**(`<DOCUMENTSAFER_...` 헤더)로 암호화되어 있어 열 수
 없다 — PDF가 유일하게 파싱 가능한 원본이다. PDF와 hwp 내용이 다르다고 의심될 이유가 없는 한 hwp를 열려고
