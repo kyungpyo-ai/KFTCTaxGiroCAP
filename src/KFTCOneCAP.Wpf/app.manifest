@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Phase 22(docs/operations/development_plan.md P22-0, docs/operations/PRD.md §1.1.1, 2026-09-01 확정):
+  로그 경로를 C:\KFTC_PosAgent\KFTCTaxLog\ (사용자 프로필 밖, C:\ 루트)로 옮기면서, 일반 권한으로는
+  그 경로에 쓰기가 안 될 수 있어 앱을 항상 관리자 권한으로 실행하도록 requireAdministrator를 지정한다.
+  이후 앱을 수동으로 실행하면 항상 UAC 프롬프트가 뜬다(무인 재부팅 경로는 설치 시 작업 스케줄러
+  "가장 높은 권한으로 실행" 옵션으로 대화형 동의 없이 승격된다 — PRD §1.1.1 설치 시 확인 5가지 참고).
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>

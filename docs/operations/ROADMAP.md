@@ -26,8 +26,12 @@
 **목표**: 90일 보관 정리를 구현하고, 장래 장애정보 서버 전송을 붙일 수 있도록 로깅 구조를 정비한다.
 기존 151개 호출 지점은 **한 줄도 고치지 않고** 그대로 동작해야 한다.
 
-- [ ] **`app.manifest` `requireAdministrator` + 로그 경로 변경** — `C:\KFTC_PosAgent\KFTCTaxLog\`로
-      전환. SQLite DB 경로는 그대로 둠 (PRD §1.1.1)
+- [x] **`app.manifest` `requireAdministrator` + 로그 경로 변경** — `C:\KFTC_PosAgent\KFTCTaxLog\`로
+      전환. SQLite DB 경로는 그대로 둠 (PRD §1.1.1). **2026-09-01 완료**: 매니페스트 실측 확인
+      (`requireAdministrator` 임베딩), UAC 프롬프트 발생 확인, 새 경로 로그 생성 확인, 기존
+      `%LOCALAPPDATA%\KFTCTaxGiroCAP\logs\`에 신규 파일 없음 확인, 기존 SQLite DB(`integrity_check.db`)
+      정상 동작 확인(무결성체크 실행 후 `IntegrityCheckHistory` 신규 행 기록됨) — 5개 완료 조건 전부 PASS
+      (`development_plan.md` P22-0)
 - [ ] `ILogSink` 추상화 도입 — `FileLogger`의 공개 정적 API는 유지하고 내부만 위임 구조로 전환
       (PRD §1.3-a). 파일 싱크가 유일한 구현이며, 원격 싱크는 이번에 만들지 않는다
 - [ ] 라인 포맷 확장 — `[시각] [레벨] [카테고리] [코드] [거래ID] 메시지` (PRD §1.3-b).

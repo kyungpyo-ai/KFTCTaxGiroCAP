@@ -21,6 +21,12 @@
       전용 WinForms 상호운용이며 Win10+ 전용 API 아님).
     -->
     <UseWindowsForms>true</UseWindowsForms>
+    <!--
+      Phase 22(docs/operations/development_plan.md P22-0, PRD.md §1.1.1, 2026-09-01 확정): 로그 경로가
+      C:\KFTC_PosAgent\KFTCTaxLog\ (일반 권한으로는 쓰기가 안 될 수 있는 C:\ 루트 하위)로 바뀌면서,
+      앱을 항상 관리자 권한으로 실행해야 한다. app.manifest의 requireAdministrator가 이를 강제한다.
+    -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
