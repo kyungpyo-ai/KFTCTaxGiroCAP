@@ -1,30 +1,57 @@
 using System;
-using System.IO;
-using System.Text;
 
 namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 
 /// <summary>
-/// Phase 8(docs/payment_relay/development_plan.md P8-3) 최소 파일 로깅.
+/// Phase 8(docs/payment_relay/development_plan.md P8-3) 최소 파일 로깅의 공개 진입점.
 ///
-/// - 로깅 프레임워크(NLog/Serilog 등)를 도입하지 않는다 — "언제 무슨 일이 있었는지" 한 줄씩 남기는
-///   것 이상의 요구사항(구조화 로그, 원격 전송, 동적 레벨 변경)이 PRD에 없다.
-/// - 기록 위치는 C:\KFTC_PosAgent\KFTCTaxLog\ 다(Phase 22, docs/operations/development_plan.md P22-0,
-///   PRD.md §1.1.1, 2026-09-01 확정 — 이전 %LOCALAPPDATA%\KFTCTaxGiroCAP\logs\에서 이전. 탐색기
-///   기본 숨김 폴더라 현장 기사가 찾기 어려운 문제 해결). 이 경로는 사용자 프로필 밖(C:\ 루트)이라
-///   일반 권한으로는 쓰기가 안 될 수 있어, app.manifest의 requireAdministrator로 앱을 항상 관리자
-///   권한으로 실행한다 — SQLite DB 경로(IntegrityCheckStore)는 이 변경과 무관하게 그대로 둔다.
-/// - 스레드 안전해야 한다 — Reader CALLBACK이 리더기별 수신 스레드에서 호출되므로(Phase 9부터)
-///   UI 스레드와 동시에 로그를 쓸 수 있다. 파일 핸들을 매 호출마다 열고 닫는 대신, 프로세스 전체에서
-///   하나의 lock으로 직렬화한다(동시 다발 기록에도 줄이 섞이지 않도록).
-/// - 로깅 실패가 앱을 죽이면 안 된다 — 디스크 가득참/권한 문제 등은 조용히 무시한다(로깅 목적 자체가
-///   진단이므로, 로깅 실패로 앱이 죽으면 본말이 전도된다).
+/// Phase 22(docs/operations/development_plan.md P22-3, PRD.md §1.3-a)에서 내부 구현을
+/// <see cref="ILogSink"/> 파이프라인 위임으로 바꿨다 — <b>공개 정적 메서드 시그니처(<see cref="Info"/>
+/// / <see cref="Warn"/> / <see cref="Error"/>)는 그대로다.</b> 151곳의 호출부를 고치지 않는 것이
+/// 이 리팩터링의 목적이라, DI 컨테이너는 도입하지 않는다.
+///
+/// 파이프라인 순서(PRD.md §1.4 "모든 싱크보다 앞, 단일 지점"):
+/// 1) <see cref="LogMessageMasker.Mask"/>로 메시지를 마스킹한다.
+/// 2) 마스킹된 메시지로 <see cref="LogRecord"/>를 만든다(카테고리/코드/거래ID는 기존 151곳의 호출이
+///    채우지 않으므로 <c>null</c> — P22-6에서 새 오버로드로 확장한다).
+/// 3) 등록된 각 <see cref="ILogSink"/>에 순서대로 전달한다. 싱크 하나(렌더링 포함, 예:
+///    <see cref="LogLineRenderer.Render"/>가 던지는 <see cref="ArgumentOutOfRangeException"/> 등)가
+///    예외를 던져도 다른 싱크와 호출자에게 전파되지 않는다 — 로깅 실패가 앱 동작에 영향을 주면 안
+///    된다는 기존 계약을 유지한다.
+///
+/// 싱크 목록은 앱 기동 시 한 번 <see cref="ConfigureSinks"/>로 구성한다(<c>App.xaml.cs</c>). 장래
+/// 원격 싱크는 그 호출에 인자를 추가하는 것만으로 붙는다. <see cref="ConfigureSinks"/>를 호출하지
+/// 않은 상태(콘솔 하네스 등 <c>OnStartup</c>을 거치지 않는 진입점)에서도 파일 로깅이 그대로 동작하도록
+/// 기본값은 <see cref="FileLogSink"/> 하나로 초기화돼 있다.
 /// </summary>
 public static class FileLogger
 {
-    private static readonly object SyncRoot = new();
+    // volatile: ConfigureSinks(기동 시 한 번, App.xaml.cs OnStartup)의 배열 참조 교체가 Dispatch를 호출하는
+    // 다른 스레드(리더기 CALLBACK/결제 오케스트레이터 등)에도 즉시 보이도록 한다. 배열 참조 교체 자체는
+    // 원래도 원자적이라 별도 lock으로 "교체 동작"을 보호할 필요는 없었다 — 이전 lock은 동시 ConfigureSinks
+    // 호출끼리의 직렬화만 보장했을 뿐(실제로는 그 호출이 기동 시 1회뿐이라 의미가 없었다) 가시성은 보장하지
+    // 않았으므로 volatile로 대체한다.
+    private static volatile ILogSink[] _sinks = { new FileLogSink() };
 
-    private static string LogDirectory => @"C:\KFTC_PosAgent\KFTCTaxLog";
+    /// <summary>
+    /// 로그 싱크 목록을 (교체) 구성한다. 앱 기동 시 한 번만 호출한다(<c>App.xaml.cs</c>,
+    /// <c>OnStartup</c> 최상단). 이후 <see cref="Info"/>/<see cref="Warn"/>/<see cref="Error"/> 호출은
+    /// 이 목록으로 디스패치된다.
+    ///
+    /// <para>이 클래스에서 예외를 던지는 <b>유일한</b> 공개 메서드다 — 부트스트랩 구성 오류(빈 싱크 목록
+    /// 전달 등)를 즉시 드러내기 위한 의도적 fail-fast다. <see cref="Info"/>/<see cref="Warn"/>/
+    /// <see cref="Error"/>는 로깅 실패가 앱 동작에 영향을 주면 안 된다는 계약에 따라 절대 던지지 않는다.</para>
+    /// </summary>
+    public static void ConfigureSinks(params ILogSink[] sinks)
+    {
+        if (sinks is null || sinks.Length == 0)
+        {
+            throw new ArgumentException("최소 1개의 ILogSink가 필요합니다.", nameof(sinks));
+        }
+
+        // 방어적 복사: 호출자가 이후 자신이 들고 있는 배열을 변경해도 싱크 목록이 바뀌지 않도록 한다.
+        _sinks = (ILogSink[])sinks.Clone();
+    }
 
     public static void Info(string message) => Write(LogLevel.Info, message);
 
@@ -36,26 +63,37 @@ public static class FileLogger
     {
         try
         {
-            string line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [{LevelText(level)}] {message}{Environment.NewLine}";
-            string filePath = Path.Combine(LogDirectory, $"{DateTime.Now:yyyy-MM-dd}.log");
-
-            lock (SyncRoot)
-            {
-                Directory.CreateDirectory(LogDirectory);
-                File.AppendAllText(filePath, line, Encoding.UTF8);
-            }
+            string masked = LogMessageMasker.Mask(message);
+            var record = new LogRecord(DateTime.Now, level, category: null, code: null, transactionId: null, message: masked);
+            Dispatch(record);
         }
         catch
         {
-            // 로깅 실패(디스크 가득참/권한 문제 등)가 앱 동작에 영향을 주면 안 된다 — 조용히 무시.
+            // 마스킹/레코드 생성 단계의 실패까지 포함해, 로깅 실패가 앱 동작에 영향을 주면 안 된다
+            // (디스크 가득참·권한 문제 등은 조용히 무시한다는 기존 계약을 유지).
         }
     }
 
-    private static string LevelText(LogLevel level) => level switch
+    private static void Dispatch(LogRecord record)
     {
-        LogLevel.Info => "INFO",
-        LogLevel.Warn => "WARN",
-        LogLevel.Error => "ERROR",
-        _ => "INFO",
-    };
+        // 스냅샷 참조 하나만 읽는다 — _sinks가 volatile이라 ConfigureSinks의 배열 참조 교체(swap)가 이
+        // 시점의 읽기에 즉시 보이며, 이 지역 변수로 스냅샷을 떠 두면 순회 도중 다른 스레드가 교체해도
+        // 이번 Dispatch 호출은 시작 시점의 목록으로 일관되게 순회한다.
+        ILogSink[] sinks = _sinks;
+        foreach (ILogSink sink in sinks)
+        {
+            try
+            {
+                // 렌더링(LogLineRenderer.Render)은 각 싱크 구현(FileLogSink) 내부에서 호출되므로 이
+                // try/catch가 렌더링 실패(ArgumentNullException/ArgumentOutOfRangeException 등)까지
+                // 함께 감싼다 — 싱크 하나의 실패가 다른 싱크나 호출자에게 전파되지 않는다(장래 원격
+                // 싱크 대비 특히 중요).
+                sink.Write(record);
+            }
+            catch
+            {
+                // 싱크 실패를 조용히 무시한다.
+            }
+        }
+    }
 }
