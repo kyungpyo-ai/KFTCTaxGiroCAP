@@ -121,7 +121,10 @@
     <!-- 라벨(카드/토글) -->
     <Style x:Key="ReaderLabelTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
-        <Setter Property="FontSize" Value="13.0"/>
+        <!-- 2026-09-02 사용자 요청으로 13.0 → 14.5 상향 후, 섹션 타이틀(15.33)과 계층감이 부족하다는
+             피드백으로 14.5 → 14.0으로 소폭 하향 재조정(리더기 설정 화면과 가맹점 설정 화면이 공유하는
+             스타일이라 양쪽 다 반영된다). -->
+        <Setter Property="FontSize" Value="14.0"/>
         <Setter Property="FontWeight" Value="Normal"/>
         <Setter Property="Foreground" Value="{StaticResource CardTitleTextBrush}"/>
     </Style>

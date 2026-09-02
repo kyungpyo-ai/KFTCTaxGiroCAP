@@ -28,7 +28,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **2차 범위는 `docs/payment_relay/` 한 폴더에 3단 문서 구성(PRD → ROADMAP → 실행계획서)으로 모아 관리한다**: `PRD.md`(무엇을) → `ROADMAP.md`(어떤 순서로 — Phase 7~18 + 계층 구조 설계 원칙) → `development_plan.md`(Task 단위 작업 지시/완료 조건, 각 Phase 착수 직전 작성). 같은 폴더에 `dll/`(KFTC_GIRO.dll)과 `images/`(결제 알림창 자산)도 있다. 코드 작성은 해당 Phase의 실행계획서가 준비된 뒤에 시작한다.
 
-**3차 범위(운영 기능, Phase 22~): `docs/operations/PRD.md`가 요구사항 정본.** 세 기능을 한 문서에 §1~§3으로 묶어 관리한다 — ① 로그 출력(일자별 파일 + 90일 정리 + 장래 장애정보 서버 전송 대비 구조), ② 가맹점 설정 화면(옵션 5개, 홈 화면 "가맹점 설정" 카드에 연결), ③ 리더기 키다운로드(리더기 설정 화면의 기존 버튼에 동작 구현). 분량이 크지 않고 공통 전제(레지스트리 루트·계층 규칙·보안 원칙·화면 경합)를 공유해 폴더를 나누지 않았다. 문서 구성은 2차와 같은 3단(`PRD.md` → `ROADMAP.md` → `development_plan.md`)이다.
+**3차 범위(운영 기능, Phase 22~): `docs/operations/PRD.md`가 요구사항 정본.** 세 기능을 한 문서에 §1~§3으로 묶어 관리한다 — ① 로그 출력(일자별 파일 + 90일 정리 + 장래 장애정보 서버 전송 대비 구조), ② 가맹점 설정 화면(옵션 6개, 홈 화면 "가맹점 설정" 카드에 연결), ③ 리더기 키다운로드(리더기 설정 화면의 기존 버튼에 동작 구현). 분량이 크지 않고 공통 전제(레지스트리 루트·계층 규칙·보안 원칙·화면 경합)를 공유해 폴더를 나누지 않았다. 문서 구성은 2차와 같은 3단(`PRD.md` → `ROADMAP.md` → `development_plan.md`)이다.
 
 **Phase 번호는 세 ROADMAP에 걸쳐 이어진다** — 1차 0~6(`docs/home_reader_setup/ROADMAP.md`), 2차 7~21(`docs/payment_relay/ROADMAP.md`), 3차 22~(`docs/operations/ROADMAP.md`). 같은 앱을 계속 확장하는 것이므로 번호를 새로 시작하지 않는다.
 

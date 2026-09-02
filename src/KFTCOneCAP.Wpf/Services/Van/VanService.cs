@@ -5,6 +5,7 @@ using KFTCOneCAP.Wpf.Interop;
 using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Payment;
+using KFTCOneCAP.Wpf.Services.Settings;
 
 namespace KFTCOneCAP.Wpf.Services.Van;
 
@@ -28,6 +29,20 @@ internal sealed class VanService : IVanRelayService
     /// <summary>SPEC <c>#9</c> 전문관리번호(<c>PosSocketServer.ManagementNumberFieldNumber</c>,
     /// <c>PaymentOrchestrator.LogTxId</c>와 동일한 필드) — P22-6 로깅용.</summary>
     private const int ManagementNumberFieldNumber = 9;
+
+    /// <summary>Phase 23(docs/operations/development_plan.md P23-5) — VAN Mode를 매 호출마다 다시
+    /// 읽는다(PRD.md §2.6 "설정값을 캐시하지 않는다"). 생성자에서 한 번 읽어 필드에 고정하면 화면에서
+    /// 설정을 바꿔도 앱을 재시작하기 전까지 반영되지 않는 캐시 버그가 된다.</summary>
+    private readonly Func<ShopSettings> _loadSettings;
+
+    public VanService() : this(new ShopSettingsService().Load)
+    {
+    }
+
+    internal VanService(Func<ShopSettings> loadSettings)
+    {
+        _loadSettings = loadSettings;
+    }
 
     public async Task<VanRelayOutcome> RelayAsync(PosRequestTelegram populatedRequest)
     {
@@ -54,7 +69,10 @@ internal sealed class VanService : IVanRelayService
             Buffer.BlockCopy(body, 0, inData, 0, body.Length);
             // inData[body.Length]는 배열 기본값 0으로 이미 NUL.
 
-            byte[] mode = BuildNulTerminatedAscii(KftcGiroNative.ModeExternalTest);
+            // 매 호출마다 새로 읽는다(캐시 금지, PRD.md §2.6) — 화면에서 서버를 바꾸면 다음 호출부터
+            // 바로 반영돼야 한다.
+            string vanMode = _loadSettings().VanMode;
+            byte[] mode = BuildNulTerminatedAscii(vanMode);
 
             // 매 호출마다 새로 할당한다 — 재사용하면 이전 거래의 잔여 바이트가 다음 응답에 섞일 수
             // 있다. 카드 데이터가 흐르는 경로이므로 특히 중요하다.
@@ -63,8 +81,10 @@ internal sealed class VanService : IVanRelayService
 
             var stopwatch = Stopwatch.StartNew();
 
-            // P22-6(PRD.md §1.5 경계 표 "VAN") — FNAISCRDVAN 호출 직전.
-            FileLogger.Info(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} FNAISCRDVAN 호출 원문={redactedRequestBody}", code: null, txId);
+            // P22-6(PRD.md §1.5 경계 표 "VAN") — FNAISCRDVAN 호출 직전. 개선권장 1(CP2 Opus 리뷰) —
+            // 실제로 나가는 mode(R/OT/IT)를 한 토큰 남긴다. 민감정보가 아니므로 마스킹하지 않는다.
+            // P23-8 "OT/R이 FNAISCRDVAN 첫 인자로 실제로 나가는 것을 로그로 확인"의 선행 조건.
+            FileLogger.Info(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} mode={vanMode} FNAISCRDVAN 호출 원문={redactedRequestBody}", code: null, txId);
 
             // FNAISCRDVAN은 블로킹 호출이다(타임아웃 인자를 받는 것 자체가 근거) — RelayAsync가
             // async인데 그냥 호출하면 호출 스레드를 최대 타임아웃 시간만큼 붙잡는다. Task.Run으로

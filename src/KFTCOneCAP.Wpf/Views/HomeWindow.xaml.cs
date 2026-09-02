@@ -33,6 +33,7 @@ public partial class HomeWindow : Window
         InitializeComponent();
         DataContext = ViewModel;
         ViewModel.ReaderSetupRequested += OnReaderSetupRequested;
+        ViewModel.ShopSetupRequested += OnShopSetupRequested;
         ViewModel.NotImplementedCardRequested += OnNotImplementedCardRequested;
         SourceInitialized += HomeWindow_SourceInitialized;
     }
@@ -93,7 +94,14 @@ public partial class HomeWindow : Window
         Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(OpenReaderSetup));
 
     /// <summary>
-    /// 가맹점 설정/결제/전표 설정 카드는 본 프로젝트 범위 밖 화면(PRD 1.3 비범위, PRD 6장 미확정
+    /// 가맹점 설정 카드(Phase 23, docs/operations/development_plan.md P23-4). 리더기 카드와 같은
+    /// 이유로 한 프레임 뒤(Input 우선순위)로 미뤄 눌림 애니메이션이 먼저 렌더링을 마치도록 한다.
+    /// </summary>
+    private void OnShopSetupRequested(object? sender, EventArgs e) =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(OpenShopSetup));
+
+    /// <summary>
+    /// 결제/전표 설정 카드는 본 프로젝트 범위 밖 화면(PRD 1.3 비범위, PRD 6장 미확정
     /// 사항 #5)이다. 임의로 실동작을 만들지 않고 "준비 중" 안내만 표시한다(카드 자체를 비활성화하지
     /// 않은 이유: 원본 화면에서 카드가 눌리지 않는 것처럼 보이는 것도 임의 판단이라 UX상 더 이상하다고
     /// 판단 — PM 확인 시 이 처리 방식은 재검토 필요).
@@ -126,6 +134,25 @@ public partial class HomeWindow : Window
         }
 
         var dialog = new ReaderSetupWindow { Owner = this };
+        dialog.ShowDialog();
+    }
+
+    /// <summary>
+    /// Phase 23(docs/operations/development_plan.md P23-4) — 리더기 설정 화면과 동일한 이유로
+    /// 거래 진행 중이면 열지 않는다(안내 없이 조용히 무시, PRD.md §2.7 — 결제 알림창이 Topmost라
+    /// 안내가 가려진다는 2026-08-26 실기 확인 결과가 그대로 적용된다). 반대 방향 게이트(설정 화면이
+    /// 열려 있으면 결제 거부)는 <see cref="ShopSetupWindow"/> 자신의 Loaded/Closed가
+    /// <see cref="App.SetupScreenGate"/>에 등록/해제한다(<c>ReaderSetupWindow</c>와 동일한 카운터
+    /// 공유 — 워밍업 인스턴스가 없으므로 이 창은 <c>IsWarmupInstance</c> 분기가 필요 없다).
+    /// </summary>
+    private void OpenShopSetup()
+    {
+        if (App.PaymentQueue?.IsProcessing == true)
+        {
+            return;
+        }
+
+        var dialog = new ShopSetupWindow { Owner = this };
         dialog.ShowDialog();
     }
 
@@ -288,7 +315,7 @@ public partial class HomeWindow : Window
         menu.Items.Add("가맹점 설정", null, (_, _) =>
         {
             RestoreFromTray();
-            ShowNotImplementedCard("가맹점 설정");
+            OpenShopSetup();
         });
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("프로그램 종료", null, (_, _) => ShutdownApp());

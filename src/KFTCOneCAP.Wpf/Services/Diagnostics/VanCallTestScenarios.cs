@@ -1,8 +1,10 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using KFTCOneCAP.Wpf.Interop;
 using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
+using KFTCOneCAP.Wpf.Services.Settings;
 using KFTCOneCAP.Wpf.Services.Van;
 
 namespace KFTCOneCAP.Wpf.Services.Diagnostics;
@@ -65,7 +67,7 @@ internal static class VanCallTestScenarios
     /// 크래시 없이 리턴하며 실패로 올바르게 분류되는가"다.</summary>
     private static async Task Scenario1_ThreeTelegramTypesCallWithoutCrash()
     {
-        var van = new VanService();
+        var van = new VanService(() => new ShopSettings { VanMode = KftcGiroNative.ModeExternalTest });
 
         await CallOnce(van, "501008");
         await CallOnce(van, "800000");
@@ -77,7 +79,7 @@ internal static class VanCallTestScenarios
     /// 죽는 형태로 드러난다.</summary>
     private static async Task Scenario2_RepeatedCallsStayConsistent()
     {
-        var van = new VanService();
+        var van = new VanService(() => new ShopSettings { VanMode = KftcGiroNative.ModeExternalTest });
         bool allConsistent = true;
 
         for (int i = 0; i < 10; i++)

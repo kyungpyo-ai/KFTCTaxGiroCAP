@@ -7,7 +7,7 @@
         mc:Ignorable="d"
         Title="리더기 설정"
         Width="{StaticResource ReaderWindowWidth}"
-        Height="{StaticResource ReaderWindowHeight}"
+        SizeToContent="Height"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource DialogBgBrush}"
@@ -26,11 +26,17 @@
         리더기 설정 화면 — 정적 레이아웃 (Phase 4, docs/home_reader_setup/ROADMAP.md).
         치수는 전부 Themes/Layout.xaml 리소스 키를 참조한다(리터럴 금지 — 홈 화면과 동일 규칙).
 
-        창 크기: PRD 4.2 "최초 1회 레이아웃 계산 후 창 크기 확정". Phase 4~5에서는
-        SizeToContent="WidthAndHeight"로 내부 컴포넌트별 고정 치수가 자연스럽게 전체 창 크기를
-        결정하도록 했었으나, 2026-08-14(사용자 피드백: 창이 뜰 때마다 오버헤드가 있다)부터는 그
-        결과값을 Layout.xaml의 ReaderWindowWidth/Height 리소스로 고정해 직접 참조한다(매번
-        SizeToContent 레이아웃 패스를 태우지 않도록) — 상세 사유는 Layout.xaml 해당 키 주석 참고.
+        창 크기: PRD 4.2 "최초 1회 레이아웃 계산 후 창 크기 확정". Phase 4~5는
+        SizeToContent="WidthAndHeight"였다가, 2026-08-14(사용자 피드백: 창이 뜰 때마다 오버헤드가
+        있다)부터 그 결과값을 Layout.xaml의 ReaderWindowHeight 리소스로 고정해 직접 참조하는
+        방식으로 바꿨었다. 그런데 이후 라벨 폰트/섹션 구분선 등 콘텐츠가 바뀔 때마다 그 고정값이
+        낡아 확인/취소 버튼이 잘리는 회귀가 반복됐다(2026-09-02, 여러 라운드) — 콘텐츠와 창
+        크기가 분리된 구조 자체가 근본 원인이라고 판단해, 이 문제를 원천 차단하도록
+        SizeToContent="Height"로 되돌렸다(ShopSetupWindow.xaml과 동일 패턴, 아래 폭만 고정). 창이
+        뜰 때의 레이아웃 계산 오버헤드는 HomeWindow.xaml.cs의 WarmUpReaderSetupWindow()가 앱 유휴
+        시간에 이 창을 미리 한 번 생성/Loaded/Close 하는 워밍업으로 이미 흡수한다(XAML/BAML 최초
+        로드, 스타일 캐싱, SizeToContent 레이아웃 패스까지 워밍업 인스턴스에서 먼저 치른다) — 실제
+        클릭 시 체감 지연이 없음을 실측으로 확인했다(아래 실행계획서 P23-3 절 참고).
 
         버튼 클릭(초기화/상태체크/.../확인/취소) 로딩 스텁, 레지스트리 저장/dirty-check는
         Phase 5에서 구현 완료. AOP 뱃지, 포트 열기 토글의 실제 동작(PRD 4.8/4.11)은 외부 DLL
@@ -109,6 +115,7 @@
                                 Background="{StaticResource Blue500Brush}" CornerRadius="2" VerticalAlignment="Center"/>
                         <TextBlock Text="포트 설정" Style="{StaticResource ReaderSectionTitleTextStyle}" Margin="8,0,0,0"/>
                     </StackPanel>
+                    <Border Height="1" Background="{StaticResource FooterDividerBrush}" Margin="0,0,0,10"/>
 
                     <!-- 리더기1 카드 -->
                     <Border Background="{StaticResource CardBgBrush}"
@@ -301,6 +308,7 @@
                                 Background="{StaticResource Blue500Brush}" CornerRadius="2" VerticalAlignment="Center"/>
                         <TextBlock Text="무결성 체크 정보" Style="{StaticResource ReaderSectionTitleTextStyle}" Margin="8,0,0,0"/>
                     </StackPanel>
+                    <Border Height="1" Background="{StaticResource FooterDividerBrush}" Margin="0,0,0,10"/>
                     <!-- 조회기간 콤보 + 조회 버튼 -->
                     <StackPanel Orientation="Horizontal">
                         <ComboBox x:Name="QueryPeriodCombo" Width="{StaticResource ReaderQueryComboWidth}"

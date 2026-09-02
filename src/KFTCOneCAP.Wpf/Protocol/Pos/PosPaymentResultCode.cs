@@ -27,12 +27,19 @@ internal enum PosPaymentResultCode
     /// <summary>참여 후보 리더기 전원이 무결성 체크에 실패 — 양쪽 다 실패했을 때만(PRD §4.2).</summary>
     IntegrityCheckFailure,
 
+    /// <summary>902614(승인요청) 요청의 <c>#42</c>(키오스크 고유번호)가 설정값과 다름 — 빈 설정값도
+    /// 동일하게 이 값을 쓴다(Phase 23, docs/operations/development_plan.md P23-7, PRD.md §2.3.1/
+    /// §2.3.2). 카드 리딩을 시작하기 전에 판정한다.</summary>
+    KioskIdMismatch,
+
     /// <summary>설정된 리더기가 하나도 없음("미사용" 2개) — 카드 리딩을 시도하지 않음(PRD §2.2.3).</summary>
     NoReaderConfigured,
 
-    /// <summary>리더기 설정 화면(모달)이 열려 있어 카드 리딩을 시도하지 않고 거부(2026-08-25 확정,
-    /// P15-4).</summary>
-    ReaderSetupInProgress,
+    /// <summary>설정 화면(리더기 설정 화면 또는 가맹점 설정 화면, 모달)이 열려 있어 카드 리딩을
+    /// 시도하지 않고 거부(2026-08-25 확정, P15-4). Phase 23(docs/operations/development_plan.md
+    /// P23-2)에서 이전 이름(리더기 설정 화면만 가리키던 이름)에서 리네임 — 가맹점 설정 화면도 같은 게이트를 공유하며
+    /// 같은 사유로 거부한다(PRD.md §2.7). 전문 코드(<c>E03</c>)는 바뀌지 않았다.</summary>
+    SetupScreenInProgress,
 
     /// <summary>사용자 취소(PRD §4.8) — 카드 입력 대기 중에만 발생 가능.</summary>
     UserCanceled,

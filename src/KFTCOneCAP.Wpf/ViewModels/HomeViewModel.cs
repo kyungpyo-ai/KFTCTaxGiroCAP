@@ -19,14 +19,19 @@ public sealed partial class HomeViewModel : ObservableObject
     /// <summary>리더기 설정 카드 클릭(PRD 3.7/4.2) — 실제 창 생성/오픈은 View가 담당한다.</summary>
     public event EventHandler? ReaderSetupRequested;
 
-    /// <summary>범위 밖 카드(가맹점 설정/결제/전표 설정) 클릭 — 카드 이름을 실어 알린다.</summary>
+    /// <summary>가맹점 설정 카드 클릭(Phase 23, docs/operations/development_plan.md P23-4) — 실제
+    /// 창 생성/오픈은 View가 담당한다. <see cref="NotImplementedCardRequested"/>를 쓰던 시절의
+    /// "준비 중" 안내에서 실제 화면 오픈으로 바뀌었다.</summary>
+    public event EventHandler? ShopSetupRequested;
+
+    /// <summary>범위 밖 카드(결제/전표 설정) 클릭 — 카드 이름을 실어 알린다.</summary>
     public event EventHandler<string>? NotImplementedCardRequested;
 
     [RelayCommand]
     private void OpenReaderSetup() => ReaderSetupRequested?.Invoke(this, EventArgs.Empty);
 
     [RelayCommand]
-    private void OpenShopSetup() => NotImplementedCardRequested?.Invoke(this, "가맹점 설정");
+    private void OpenShopSetup() => ShopSetupRequested?.Invoke(this, EventArgs.Empty);
 
     [RelayCommand]
     private void OpenTrans() => NotImplementedCardRequested?.Invoke(this, "결제");

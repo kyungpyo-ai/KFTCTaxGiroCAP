@@ -50,10 +50,6 @@ namespace KFTCOneCAP.Wpf.Services.Payment;
 /// </summary>
 internal sealed class PaymentOrchestrator
 {
-    // PRD §4.9 — 카드 입력 대기의 시작 데드라인 기본값. 거래 단위로 딱 하나만 존재하고 라운드마다 새로
-    // 주지 않는다.
-    private static readonly TimeSpan DefaultInitialCardReadDeadline = TimeSpan.FromSeconds(120);
-
     // PRD §4.9 — 새 사용자 입력 단계가 시작될 때마다 데드라인을 이만큼 연장한다(일반 규칙 — FALLBACK/12
     // 재요청뿐 아니라 Phase 18의 PIN 입력 단계도 같은 상수를 재사용한다).
     private static readonly TimeSpan UserInputStepExtension = TimeSpan.FromSeconds(30);
@@ -80,28 +76,49 @@ internal sealed class PaymentOrchestrator
     private readonly IntegrityCheckStore _integrityStore;
     private readonly ObservedIdentityStore _observedIdentityStore;
     private readonly IPaymentNoticePresenter _presenter;
-    private readonly IReaderSetupGate _readerSetupGate;
+    private readonly ISetupScreenGate _setupScreenGate;
     private readonly IVanRelayService _vanRelay;
-    private readonly TimeSpan _initialCardReadDeadline;
+
+    /// <summary>Phase 23(docs/operations/development_plan.md P23-6/P23-7) — 카드입력 타임아웃과
+    /// 키오스크 고유번호(§2.3.1) 둘 다 이 델리게이트로 매 거래마다 새로 읽는다(캐시 금지, PRD.md
+    /// §2.6). 기본값은 <see cref="ShopSettingsService.Load"/>.</summary>
+    private readonly Func<ShopSettings> _loadShopSettings;
+
+    /// <summary>Phase 23(docs/operations/development_plan.md P23-6) — 카드입력 데드라인을 거래
+    /// 시작 시점마다 새로 읽는다(캐시 금지, PRD.md §2.6). 기본값 120초는
+    /// <see cref="ShopSettingsService"/>에만 있다(<c>PaymentOrchestrator</c>에 리터럴을 남기지
+    /// 않는다) — <see cref="ShopSettingsService.Load"/>가 레지스트리 값이 없거나 0이면 이미 120으로
+    /// 변환해서 돌려준다.
+    ///
+    /// <b>개선권장 3(CP2 Opus 리뷰) — <see cref="ShopSettings"/>를 인자로 받는다</b>: 902614는
+    /// <see cref="HandleCardApprovalAsync"/>가 E06 검사를 위해 이미 <see cref="_loadShopSettings"/>를
+    /// 한 번 호출했으므로, 그 결과를 그대로 넘겨받아 재사용하고 레지스트리를 다시 읽지 않는다(800000은
+    /// 미리 읽은 설정이 없으므로 <see cref="RunCardTransactionAsync"/>가 그 자리에서 한 번 읽는다 —
+    /// 어느 전문이든 거래당 정확히 1회만 읽는다). <c>VanService</c>는 이 변경과 무관하게 매 호출마다
+    /// 계속 따로 읽는다(P23-5 설계 그대로 — PRD.md §2.6).</summary>
+    private readonly Func<ShopSettings, TimeSpan> _loadInitialCardReadDeadline;
 
     internal PaymentOrchestrator(
         IReadOnlyList<IReaderEndpoint> readerEndpoints,
         IntegrityCheckStore integrityStore,
         ObservedIdentityStore observedIdentityStore,
         IPaymentNoticePresenter presenter,
-        IReaderSetupGate readerSetupGate,
+        ISetupScreenGate setupScreenGate,
         IVanRelayService vanRelay,
         Func<ReaderSettings>? loadSettings = null,
-        TimeSpan? initialCardReadDeadline = null)
+        Func<ShopSettings, TimeSpan>? initialCardReadDeadline = null,
+        Func<ShopSettings>? loadShopSettings = null)
     {
         _readerEndpoints = readerEndpoints;
         _loadSettings = loadSettings ?? new ReaderSettingsService().Load;
         _integrityStore = integrityStore;
         _observedIdentityStore = observedIdentityStore;
         _presenter = presenter;
-        _readerSetupGate = readerSetupGate;
+        _setupScreenGate = setupScreenGate;
         _vanRelay = vanRelay;
-        _initialCardReadDeadline = initialCardReadDeadline ?? DefaultInitialCardReadDeadline;
+        _loadShopSettings = loadShopSettings ?? new ShopSettingsService().Load;
+        _loadInitialCardReadDeadline = initialCardReadDeadline
+            ?? (shopSettings => TimeSpan.FromSeconds(shopSettings.CardReadTimeoutSeconds));
     }
 
     /// <summary><see cref="TransactionQueue"/>의 워커 스레드에서 호출된다. 전문 종별로 분기한다
@@ -111,13 +128,13 @@ internal sealed class PaymentOrchestrator
         string txId = LogTxId(request);
 
         // ===== 공통 1단계 — 설정 화면 게이트(모든 전문 공통, 2026-08-25 확정 P15-4/2026-08-26 P17-5) =====
-        if (_readerSetupGate.IsReaderSetupOpen)
+        if (_setupScreenGate.IsSetupScreenOpen)
         {
             // 개선권장 A-1(P22 리뷰) — 이 분기는 아래 switch 이전에 return하므로 133행 근처의 중앙화된
             // "거래 확정" 로그를 우회한다. 여기서 구조화 로그로 직접 남긴다(레거시 Warn(string) 호출은
             // 정보 중복이라 이 구조화 버전으로 대체했다).
-            string gateRejectCode = PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.ReaderSetupInProgress);
-            FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 거래 확정 — 리더기 설정 화면 점유로 거부", gateRejectCode, txId);
+            string gateRejectCode = PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.SetupScreenInProgress);
+            FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 거래 확정 — 설정 화면 점유로 거부", gateRejectCode, txId);
             return PosResponseTelegram.Failure(request, gateRejectCode);
         }
 
@@ -152,6 +169,10 @@ internal sealed class PaymentOrchestrator
     /// <summary>SPEC 응답 공통부 <c>#7</c>(처리결과코드) — P22-6 로깅 전용. 필드 위치는 3전문 공통
     /// (<c>PosSocketServer.ResultCodeFieldNumber</c>와 동일한 값).</summary>
     private const int ResultCodeFieldNumber = 7;
+
+    /// <summary>SPEC <c>902614</c> 요청 전용 <c>#42</c>(키오스크 고유번호, AN 20) — P23-7. 501008/
+    /// 800000에는 이 필드 자체가 없다.</summary>
+    private const int KioskIdFieldNumber = 42;
 
     /// <summary>
     /// 501008 — 카드리딩이 없는 순수 중계(P17-5 확정 사항 4). 무결성 선행 판정도, 카드입력 데드라인도
@@ -213,6 +234,35 @@ internal sealed class PaymentOrchestrator
     {
         FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 902614(신용카드 승인요청) 시작", code: null, txId);
 
+        // 개선권장 3(CP2 Opus 리뷰) — 이 거래 안에서 설정 스냅샷을 한 번만 읽어 아래 E06 검사와
+        // RunCardTransactionAsync의 데드라인 조회가 모두 이 지역변수를 재사용한다(레지스트리 재접근 없음).
+        ShopSettings shopSettings = _loadShopSettings();
+
+        // P23-7(PRD.md §2.3.1/§2.3.2) — 카드 리딩을 시작하기 전, #42(키오스크 고유번호)가 설정값과
+        // 일치하는지 검사한다. 501008/800000에는 #42 필드 자체가 없으므로 이 검사는 902614에만 있다.
+        //
+        // 개선권장 4(CP2 Opus 리뷰) — 2026-09-02 재확정 정책("빈 값이면 무조건 거부")이 문자열 비교
+        // 결과에만 맡겨서는 성립하지 않는 경우가 있다: PosField.Trim이 전체가 공백인 필드를 이미 빈
+        // 문자열로 정규화하므로, 설정값도 비어 있으면 "빈 문자열끼리 일치"로 판정되어 거부되지 않고
+        // 통과해버린다. 그래서 문자열 비교 전에 "둘 중 하나라도 빈 문자열이면 무조건 거부"를 명시적으로
+        // 먼저 검사한다 — 값이 같은지 다른지는 그 다음에야 의미가 있다.
+        string configuredKioskId = shopSettings.KioskId.TrimEnd();
+        string receivedKioskId = request.Read(KioskIdFieldNumber).TrimEnd();
+        bool eitherEmpty = configuredKioskId.Length == 0 || receivedKioskId.Length == 0;
+        if (eitherEmpty || !string.Equals(configuredKioskId, receivedKioskId, StringComparison.Ordinal))
+        {
+            string rejectCode = PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.KioskIdMismatch);
+            string configuredDisplay = configuredKioskId.Length == 0 ? "(빈 값)" : configuredKioskId;
+            string receivedDisplay = receivedKioskId.Length == 0 ? "(빈 값)" : receivedKioskId;
+            // development_plan.md P23-7 지시대로 POS 카테고리로 남긴다 — POS가 보낸 요청 필드
+            // 자체의 문제(전문 검증)라 결제 Flow 오케스트레이션(Payment)보다 POS 경계에 더 가깝다.
+            FileLogger.Warn(
+                LogCategory.Pos,
+                $"[PaymentOrchestrator] 키오스크 고유번호 불일치 — 카드 리딩 시작 전 거부. 설정값='{configuredDisplay}' 수신값='{receivedDisplay}'",
+                rejectCode, txId);
+            return PosResponseTelegram.Failure(request, rejectCode);
+        }
+
         return await RunCardTransactionAsync(
             request, txId,
             amountFieldNumber: 29, // #29 총 납부 금액
@@ -228,7 +278,9 @@ internal sealed class PaymentOrchestrator
                 FillCardApprovalFields(request, cardData, pin);
                 FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 승인요청 필드 8종 채움 완료(#43~#46,#48,#50,#51,#53) — VAN 중계로", code: null, txId);
                 return null;
-            }).ConfigureAwait(false);
+            },
+            preloadedShopSettings: shopSettings // 개선권장 3 — 위에서 이미 읽은 스냅샷을 재사용한다.
+            ).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -338,7 +390,8 @@ internal sealed class PaymentOrchestrator
     /// </summary>
     private async Task<PosResponseTelegram> RunCardTransactionAsync(
         PosRequestTelegram request, string txId, int amountFieldNumber, bool requiresPin,
-        Func<IReaderEndpoint, CardReadData, string?, PosResponseTelegram?> fillOneCapFields)
+        Func<IReaderEndpoint, CardReadData, string?, PosResponseTelegram?> fillOneCapFields,
+        ShopSettings? preloadedShopSettings = null)
     {
         // ===== 참여 후보 결정(§2.2.3) =====
         var settings = _loadSettings();
@@ -391,13 +444,19 @@ internal sealed class PaymentOrchestrator
         }
 
         // ===== 알림창 + 카드 리딩 =====
+        // P23-6 — 거래를 시작하는 이 지점에서 매번 새로 읽는다(캐시 금지, PRD.md §2.6). 진행 중인
+        // 거래의 데드라인은 이 시점 이후로 다시 조회하지 않는다. 개선권장 3(CP2 Opus 리뷰) — 902614는
+        // 호출자(HandleCardApprovalAsync)가 E06 검사용으로 이미 읽은 설정을 그대로 넘겨받아 재사용한다
+        // (레지스트리 재접근 없음). 800000은 미리 읽은 설정이 없으므로 여기서 한 번 읽는다.
+        ShopSettings shopSettings = preloadedShopSettings ?? _loadShopSettings();
+        TimeSpan initialCardReadDeadline = _loadInitialCardReadDeadline(shopSettings);
         var scope = new TransactionScope(txId);
-        using var deadline = new PaymentDeadline(_initialCardReadDeadline);
+        using var deadline = new PaymentDeadline(initialCardReadDeadline);
         _ = MonitorDeadlineAsync(deadline, scope);
 
         // P22-6(PRD.md §1.5 경계 표 "거래 수명" — 거래 시작). 501008은 카드입력 데드라인이 없어(클래스
         // 요약 참고) 이 로그가 없다 — 800000/902614만 여기를 지난다.
-        FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 거래 시작 — 카드입력 데드라인 {_initialCardReadDeadline.TotalSeconds:F0}초", code: null, txId);
+        FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 거래 시작 — 카드입력 데드라인 {initialCardReadDeadline.TotalSeconds:F0}초", code: null, txId);
 
         string transactionDateTime = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
         string amount = request.Read(amountFieldNumber);

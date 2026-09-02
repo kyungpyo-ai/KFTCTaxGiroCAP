@@ -89,35 +89,23 @@
     <!-- ===================== 리더기 설정 화면 (PRD 4장) ===================== -->
 
     <!--
-        창 크기 — 아래 컴포넌트 치수를 SizeToContent="WidthAndHeight"로 1회 렌더링해 GetWindowRect로
+        창 폭 — 아래 컴포넌트 치수를 SizeToContent="WidthAndHeight"로 1회 렌더링해 GetWindowRect로
         실측한 값(2026-08-14 Phase 6, 일반 모드와 동일한 방법론). 액션 버튼 폭(100, PRD 4.4가
         컴팩트 값을 별도로 주지 않아 양쪽 모드 동일 유지)이 카드 폭의 하한선이 되어, 다른 요소들이
         줄어든 것에 비해 창 폭 자체는 일반 모드(744) 대비 소폭만 줄어든다(측정값 722).
 
-        2026-08-14 재실측 #1(사용자 피드백, 1024×768 컴팩트 모드 실측: "COM 01 콤보박스만 엄청 큼" +
-        "창이 너무 화면을 꽉채워"): 최초 측정(749) 당시 ComboBox.xaml의 FontSize/Padding이
-        리터럴(15.33/10,6)로 고정돼 있어 컴팩트 모드에서도 줄어들지 않는 버그가 있었다 — 그
-        버그가 있는 채로 측정된 값이라 실제 필요한 것보다 19px 더 컸다. ReaderComboFontSize/
-        ReaderComboPadding 리소스로 분리해 버그를 고친 뒤 다시 SizeToContent로 측정해 730으로
-        갱신했다.
-
-        2026-08-14 재실측 #2(사용자 피드백: "Pretendard가 1024×768에서 살짝 깨져 보인다" → PRD
-        1.5 원문대로 컴팩트 모드 폰트를 Malgun Gothic으로 전환, Typography.Compact.xaml 참고):
-        Malgun Gothic이 Pretendard보다 줄 높이(line height)가 커서 전체 다이얼로그의 실제 필요
-        높이가 늘어났다 — 하단 확인/취소 버튼 텍스트가 730 높이 안에서 잘려 보이는 문제가 발생해
-        (버튼 자체의 폰트/패딩 문제가 아니라 창 전체 높이 부족으로 맨 아래 요소가 잘린 것으로
-        확인) 다시 SizeToContent로 측정해 742로 갱신했다.
-
-        2026-08-18 재실측 #3(사용자 피드백, 실제 1024×768 PC 실측: "아래가 살짝 안보여"): 1024×768
-        화면은 작업표시줄을 뺀 workarea가 742px보다 작아(전형적으로 약 720~730px) 창 하단이
-        화면을 벗어나 잘려 보였다. 세로 방향 패딩/여백(ReaderMainCardPadding 상하 18→12,
-        ReaderSubCardPadding 상하 11→8, ReaderCardPadding 상하 9→7, ReaderCardGapMargin 5→4,
-        ReaderListHeightGridLength 118→100)을 축소한 뒤 다시 SizeToContent로 측정해 691로
-        갱신했다(확인/취소 버튼 텍스트 잘림 없음, 카드/리스트 간격도 부자연스럽지 않음을 스크린샷
-        대조로 확인).
+        높이는 2026-09-02부로 더 이상 이 파일이 고정하지 않는다 — Views/ReaderSetupWindow.xaml이
+        SizeToContent="Height"로 전환됐다(근본 해결, Layout.xaml 해당 절 주석 참고). 아래는 그 전에
+        고정 높이 방식이었을 때의 실측 이력(참고용, 더 이상 유효하지 않음):
+        2026-08-14 #1: ComboBox 폰트/패딩 컴팩트 미반영 버그 수정 후 730. #2: Malgun Gothic 줄
+        높이 반영해 742. 2026-08-18 #3: 1024×768 workarea(약 720~730px) 초과로 상하 패딩 축소 후
+        691. 2026-09-02: 구분선 추가로 713.
+        SizeToContent 전환 후에도 1024×768 등 저해상도 workarea보다 실제 콘텐츠 높이가 커지면
+        창 하단이 화면 밖으로 잘릴 수 있다 — 이 파일의 상하 패딩류(ReaderMainCardPadding/
+        ReaderSubCardPadding/ReaderCardPadding/ReaderCardGapMargin/ReaderListHeightGridLength)는
+        위 실측 이력에서 이미 그 제약을 고려해 축소되어 있으므로 그대로 유지한다.
     -->
     <sys:Double x:Key="ReaderWindowWidth">722</sys:Double>
-    <sys:Double x:Key="ReaderWindowHeight">691</sys:Double>
 
     <!-- 메인 카드 -->
     <CornerRadius x:Key="ReaderMainCardCornerRadius">14</CornerRadius>
@@ -135,9 +123,13 @@
     <CornerRadius x:Key="ReaderSubCardCornerRadius">14</CornerRadius>
     <Thickness x:Key="ReaderSubCardPadding">15,8,15,8</Thickness>
 
-    <!-- 리더기 카드(1/2 공통) — 카드높이 비율(0.797)/간격 비율(0.667) 적용(간격은 Margin만 실사용) -->
+    <!-- 리더기 카드(1/2 공통) — 카드높이 비율(0.797) 적용.
+         간격(ReaderCardGapMargin)은 원래 고정 창 높이 시절 1024×768 workarea에 맞추려 4px로
+         축소해 뒀던 값이다(위 이력 참고) — 2026-09-02 ReaderSetupWindow가 SizeToContent로
+         전환되며 그 높이 제약이 사라졌으므로, 리더기1/2 카드 사이 간격이 너무 좁아 보인다는
+         피드백에 따라 일반 테마와 동일한 8px로 되돌린다. -->
     <sys:Double x:Key="ReaderCardMinHeight">89</sys:Double>
-    <Thickness x:Key="ReaderCardGapMargin">0,4,0,0</Thickness>
+    <Thickness x:Key="ReaderCardGapMargin">0,8,0,0</Thickness>
     <Thickness x:Key="ReaderCardPadding">12,7,12,7</Thickness>
 
     <!-- 좌측 번호 뱃지 — PRD 4.4가 컴팩트 값을 별도로 주지 않아 유지 -->

@@ -50,6 +50,10 @@ internal static class PaymentFlowTestScenarios
             await Scenario12_PinEnteredBeforeSubscriptionIsNotLost().ConfigureAwait(false);
             await Scenario13_ConsecutiveTransactionsDoNotLeakCardOrPinData().ConfigureAwait(false);
             Scenario14_MalformedTelegramFallsBackToGenericMasking();
+            await Scenario15_KioskIdMatchAllowsCardApproval().ConfigureAwait(false);
+            await Scenario16_KioskIdMismatchRejectsBeforeCardReading().ConfigureAwait(false);
+            await Scenario17_KioskIdEmptyConfiguredRejects().ConfigureAwait(false);
+            await Scenario18_KioskIdReceivedAllSpacesRejectedEvenIfConfiguredValid().ConfigureAwait(false);
 
             FileLogger.Info($"[payment-flow-test] 완료 — 통과 {_passCount}건, 실패 {_failCount}건");
         }
@@ -75,15 +79,27 @@ internal static class PaymentFlowTestScenarios
 
     // ===== 공통 빌드 헬퍼 =====
 
+    /// <summary>개선권장 4/5(CP2 Opus 리뷰) — E06 비교가 "둘 중 하나라도 빈 값이면 무조건 거부"로
+    /// 바뀌면서, 빈 문자열끼리 일치시켜 통과하던 옛 loophole이 사라졌다. 그래서 902614 시나리오들의
+    /// 기본값을 더 이상 빈 문자열에 의존하지 않고, <b>설정값과 실제로 같은 값을 #42에 채우는 "정상
+    /// 운영 상태"</b>로 바꿨다 — <see cref="BuildOrchestrator"/>의 <c>kioskId</c> 기본값과 <see
+    /// cref="BuildRequest"/>의 902614 자동 채움이 둘 다 이 상수를 쓴다(둘 다 P23-7 신규 시나리오
+    /// 15/16 전용이던 것을 기본값으로 승격).</summary>
+    private const string ConfiguredKioskId = "TESTKIOSK001";
+
     private static PaymentOrchestrator BuildOrchestrator(
         out FakeReaderEndpoint reader1, out FakeReaderEndpoint reader2,
-        out FakePaymentNoticePresenter presenter, out FakeReaderSetupGate gate,
-        out CapturingVanRelayService vanRelay, string port1 = "COM 05", string port2 = "미사용")
+        out FakePaymentNoticePresenter presenter, out FakeSetupScreenGate gate,
+        out CapturingVanRelayService vanRelay, string port1 = "COM 05", string port2 = "미사용",
+        // 개선권장 5(CP2) — 기본값을 설정값과 일치하는 "정상 운영 상태"로 바꿨다(위 주석 참고). 이
+        // 검증을 신경 쓰지 않는 기존 시나리오(3, 5~13)는 BuildRequest의 자동 채움과 짝을 이뤄 그대로
+        // 통과한다.
+        string kioskId = ConfiguredKioskId)
     {
         reader1 = new FakeReaderEndpoint("COM 05");
         reader2 = new FakeReaderEndpoint("COM 03");
         presenter = new FakePaymentNoticePresenter();
-        gate = new FakeReaderSetupGate();
+        gate = new FakeSetupScreenGate();
         vanRelay = new CapturingVanRelayService();
         string dbPath = Path.Combine(Path.GetTempPath(), $"p17-test-{Guid.NewGuid():N}.db");
         var integrityStore = new IntegrityCheckStore(dbPath);
@@ -98,12 +114,22 @@ internal static class PaymentFlowTestScenarios
             gate,
             vanRelay,
             () => new ReaderSettings { Port1 = port1, Port2 = port2 },
-            TimeSpan.FromSeconds(5)); // 검증용 짧은 데드라인
+            // 검증용 짧은 데드라인(P23-6). 개선권장 3(CP2) — Func<ShopSettings, TimeSpan>로 바뀌었지만
+            // 하네스는 여전히 설정과 무관하게 5초 고정을 쓴다(입력값은 무시).
+            _ => TimeSpan.FromSeconds(5),
+            () => new ShopSettings { KioskId = kioskId }); // P23-7
     }
 
     private static int _managementSequence;
 
-    private static PosRequestTelegram BuildRequest(string transactionType, IReadOnlyDictionary<int, string> fields)
+    /// <summary>개선권장 5(CP2 Opus 리뷰) — <paramref name="autoFillKioskId"/>가 true(기본값)이고
+    /// <paramref name="transactionType"/>이 902614이며 <paramref name="fields"/>가 #42를 명시적으로
+    /// 채우지 않았으면, "설정값과 일치하는 정상 운영 상태"를 흉내내도록 <see cref="ConfiguredKioskId"/>를
+    /// 자동으로 채운다. 개선권장 4로 E06 검사가 "둘 중 하나라도 빈 값이면 거부"로 바뀌면서, #42를
+    /// 채우지 않던 기존 시나리오(3, 5~13)가 전부 깨지지 않게 하기 위함이다. #42를 의도적으로 비워
+    /// 두려는 시나리오(신규 Scenario18)는 <paramref name="autoFillKioskId"/>를 false로 준다.</summary>
+    private static PosRequestTelegram BuildRequest(
+        string transactionType, IReadOnlyDictionary<int, string> fields, bool autoFillKioskId = true)
     {
         if (!PosSchemaRegistry.TryResolve(transactionType, out PosTelegramSchema? schema) || schema is null)
             throw new InvalidOperationException($"알 수 없는 거래구분: {transactionType}");
@@ -118,6 +144,9 @@ internal static class PaymentFlowTestScenarios
         // txId로 쓴다(H-1/M-1). 하네스도 채워야 로그 경로가 실제와 같아진다. SPEC 번호체계는
         // 구분코드(3, "0EC") + "0"(Reserved) + 일련번호(8).
         telegram.Write(9, "0EC0" + (++_managementSequence).ToString("D8"));
+
+        if (autoFillKioskId && transactionType == "902614" && !fields.ContainsKey(42))
+            telegram.Write(42, ConfiguredKioskId);
 
         foreach (var kv in fields)
             telegram.Write(kv.Key, kv.Value);
@@ -577,5 +606,72 @@ internal static class PaymentFlowTestScenarios
             !genericMasked.Contains(decoyDigits));
         Check("기형전문: 범용 마스킹 결과가 카드번호 마스킹 형식(앞6+뒤4, 가운데 '*')을 따름",
             genericMasked.Contains(decoyDigits.Substring(0, 6) + new string('*', decoyDigits.Length - 10) + decoyDigits.Substring(decoyDigits.Length - 4)));
+    }
+
+    /// <summary>P23-7(PRD.md §2.3.1) — 설정값과 요청 #42가 일치하면 정상 처리(카드리딩까지 진행)돼야
+    /// 한다. 값이 있는 경우의 "정상 통과"를 확인한다.</summary>
+    private static async Task Scenario15_KioskIdMatchAllowsCardApproval()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay,
+            kioskId: ConfiguredKioskId);
+        r1.EnqueueCardReadOutcome(SuccessOutcome());
+        presenter.FirePinEnteredSynchronouslyOnChangeState = true;
+        presenter.PinToFireSynchronously = "1234";
+
+        var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000", [42] = ConfiguredKioskId });
+        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+
+        Check("902614(#42 일치): 응답 성공(#7=000)", response.Telegram.Read(7) == "000");
+        Check("902614(#42 일치): 카드리딩이 정상적으로 시도됨", r1.CardReadCallCount > 0);
+    }
+
+    /// <summary>P23-7(PRD.md §2.3.1) — 설정값과 다른 #42는 카드 리딩을 시작하기도 전에 E06으로
+    /// 거부돼야 한다(사용자가 카드를 대는 헛수고를 막는다).</summary>
+    private static async Task Scenario16_KioskIdMismatchRejectsBeforeCardReading()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay,
+            kioskId: ConfiguredKioskId);
+        r1.EnqueueCardReadOutcome(SuccessOutcome()); // 도달하면 안 되므로 호출되면 큐만 남는다(검증은 CallCount로).
+
+        var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000", [42] = "DIFFERENTKIOSK0001" });
+        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+
+        Check("902614(#42 불일치): E06 거부", response.Telegram.Read(7) == "E06");
+        Check("902614(#42 불일치): 카드 리딩을 시도하지 않음", r1.CardReadCallCount == 0);
+        Check("902614(#42 불일치): VAN까지 도달하지 않음", vanRelay.LastRequest == null);
+    }
+
+    /// <summary>P23-7(PRD.md §2.3.2, 2026-09-02 재확정) — 설정값이 빈 상태에서 실제 값이 담긴 #42가
+    /// 오면(빈 문자열이 아닌 이상) 항상 불일치로 간주해 E06으로 거부한다. 별도의 "설정값이 비어
+    /// 있으면" 특수 분기가 없다는 것 자체를 확인한다 — 이 시나리오가 실패한다면 코드에 그런 특수
+    /// 분기가 잘못 들어간 것이다.</summary>
+    private static async Task Scenario17_KioskIdEmptyConfiguredRejects()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay,
+            kioskId: ""); // 설정값 미입력(§2.3 기본값)
+
+        var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000", [42] = "SOMEKIOSKID00000001" });
+        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+
+        Check("902614(설정값 빈 값): E06 거부", response.Telegram.Read(7) == "E06");
+        Check("902614(설정값 빈 값): 카드 리딩을 시도하지 않음", r1.CardReadCallCount == 0);
+    }
+
+    /// <summary>개선권장 4/5(CP2 Opus 리뷰) — 설정값은 정상인데 수신값(#42)이 전체 공백(정규화 후 빈
+    /// 문자열, <see cref="PosField.Trim"/>)인 경우. 개선권장 4 수정 전에는 "빈 문자열끼리
+    /// 일치"로 판정되어 통과했지만(loophole), 수정 후에는 "둘 중 하나라도 빈 값이면 무조건 거부"가
+    /// 먼저 걸려 E06으로 거부되어야 한다.</summary>
+    private static async Task Scenario18_KioskIdReceivedAllSpacesRejectedEvenIfConfiguredValid()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay,
+            kioskId: ConfiguredKioskId);
+
+        // autoFillKioskId: false — #42를 의도적으로 채우지 않는다(전체 space 패딩 -> Read가 빈
+        // 문자열을 돌려줌).
+        var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" }, autoFillKioskId: false);
+        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+
+        Check("902614(설정값 정상 + 수신값 빈 값): E06 거부(개선권장 4 loophole 수정 확인)", response.Telegram.Read(7) == "E06");
+        Check("902614(설정값 정상 + 수신값 빈 값): 카드 리딩을 시도하지 않음", r1.CardReadCallCount == 0);
     }
 }

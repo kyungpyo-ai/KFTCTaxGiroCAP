@@ -121,7 +121,8 @@
     <!-- 라벨(카드/토글) : 13.0 × 0.857 ≈ 11.14 -->
     <Style x:Key="ReaderLabelTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PretendardMediumFontFamily}"/>
-        <Setter Property="FontSize" Value="11.14"/>
+        <!-- 2026-09-02 — 일반 테마 13.0→14.0 상향과 같은 비율(약 1.077배)로 조정. -->
+        <Setter Property="FontSize" Value="12.0"/>
         <Setter Property="FontWeight" Value="Normal"/>
         <Setter Property="Foreground" Value="{StaticResource CardTitleTextBrush}"/>
     </Style>

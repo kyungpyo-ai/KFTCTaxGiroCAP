@@ -5,6 +5,12 @@
   그 경로에 쓰기가 안 될 수 있어 앱을 항상 관리자 권한으로 실행하도록 requireAdministrator를 지정한다.
   이후 앱을 수동으로 실행하면 항상 UAC 프롬프트가 뜬다(무인 재부팅 경로는 설치 시 작업 스케줄러
   "가장 높은 권한으로 실행" 옵션으로 대화형 동의 없이 승격된다 — PRD §1.1.1 설치 시 확인 5가지 참고).
+
+  [원복 완료, 2026-09-02] Phase 23 화면 작업(P23-3~P23-4) 중 requireAdministrator가 UIPI를 걸어
+  mcp__windows__* 클릭 자동화가 관리자 권한 창을 건드릴 수 없다는 문제 때문에 asInvoker로 한시적으로
+  낮췄던 임시 조치(docs/operations/development_plan.md "진행 중 임시 조치" 절)를, Phase 23 화면 작업이
+  끝난 P23-8 착수 시점에 requireAdministrator로 되돌렸다. UAC 프롬프트 재발생을 실측으로 확인함
+  (development_plan.md P23-8 "작업 2" 절 참고).
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

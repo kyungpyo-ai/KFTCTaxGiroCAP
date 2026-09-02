@@ -36,12 +36,14 @@ public partial class App : Application
     internal static ReaderConnectionManager? ReaderConnections { get; private set; }
 
     /// <summary>
-    /// Phase 15(docs/payment_relay/development_plan.md P15-4) — 리더기 설정 화면이 열려 있는지
-    /// 결제 Flow가 판정하는 유일한 접근점. <see cref="ReaderConnections"/>와 달리 다른 서비스에
-    /// 의존하지 않아 <c>OnStartup</c>을 기다릴 필요가 없으므로 필드 초기화로 즉시 만든다 —
-    /// <c>ReaderSetupWindow</c>가 <c>OnStartup</c> 이전(테스트 하네스 등)에 생성돼도 안전하다.
+    /// Phase 15(docs/payment_relay/development_plan.md P15-4) — <b>리더기 설정 화면과 가맹점 설정
+    /// 화면(Phase 23, docs/operations/development_plan.md P23-2) 둘 다</b> 열려 있는지 결제 Flow가
+    /// 판정하는 유일한 접근점(카운터 공유, PRD.md §2.7). <see cref="ReaderConnections"/>와 달리 다른
+    /// 서비스에 의존하지 않아 <c>OnStartup</c>을 기다릴 필요가 없으므로 필드 초기화로 즉시 만든다 —
+    /// <c>ReaderSetupWindow</c>/<c>ShopSetupWindow</c>가 <c>OnStartup</c> 이전(테스트 하네스 등)에
+    /// 생성돼도 안전하다.
     /// </summary>
-    internal static Views.ReaderSetupWindowGate ReaderSetupGate { get; } = new();
+    internal static Views.SetupScreenGate SetupScreenGate { get; } = new();
 
     /// <summary>
     /// Phase 14(docs/payment_relay/development_plan.md P14-3) — 결제 요청을 순차 처리하는 유일한
@@ -170,7 +172,7 @@ public partial class App : Application
         // 로그만 보는 사람이 실거래 승인으로 오해하지 않도록 기동 시점에 명시적으로 남긴다. Phase 20이
         // 이 스텁을 실제 FNAISCRDVAN 구현으로 교체하면 이 로그도 함께 제거한다.
         FileLogger.Warn("[PaymentOrchestrator] VAN 서비스가 스텁(StubVanRelayService)입니다 — 실제 승인이 아닙니다(Phase 20에서 FNAISCRDVAN으로 교체 예정)");
-        Orchestrator = new PaymentOrchestrator(readerEndpoints, integrityStore, observedIdentityStore, paymentPresenter, ReaderSetupGate, vanRelay);
+        Orchestrator = new PaymentOrchestrator(readerEndpoints, integrityStore, observedIdentityStore, paymentPresenter, SetupScreenGate, vanRelay);
 
         // Phase 14(P14-2/P14-3): 소켓 서버 + 단일 워커 Queue 기동. 8002 포트가 이미 사용 중이어도
         // (PRD §9) 앱 기동은 막지 않는다 — PosServer.Start()가 실패를 로그로만 남기고 넘어간다.
@@ -185,6 +187,14 @@ public partial class App : Application
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--home")
         {
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+        }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--shop-setup")
+        {
+            // 개발/회귀 검증용(P23-3 완료 조건, 최종 산출물 아님) — app.manifest가
+            // requireAdministrator라 UIPI 때문에 자동화 클릭으로 홈 화면 카드를 눌러 이 창을 여는
+            // 경로를 재현할 수 없어(HomeWindow 자동화 시도, 2026-09-02), --home/--gallery와 같은
+            // 패턴으로 이 창을 직접 띄워 스크린샷 대조가 가능하게 한다.
+            StartupUri = new Uri("Views/ShopSetupWindow.xaml", UriKind.Relative);
         }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--home-notice-test")
         {

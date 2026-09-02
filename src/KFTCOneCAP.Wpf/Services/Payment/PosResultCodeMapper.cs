@@ -33,9 +33,10 @@ internal static class PosResultCodeMapper
     {
         PosPaymentResultCode.UserCanceled => "E01",
         PosPaymentResultCode.Timeout => "E02",
-        PosPaymentResultCode.ReaderSetupInProgress => "E03",
+        PosPaymentResultCode.SetupScreenInProgress => "E03",
         PosPaymentResultCode.NoReaderConfigured => "E04",
         PosPaymentResultCode.IntegrityCheckFailure => "E05",
+        PosPaymentResultCode.KioskIdMismatch => "E06",
         PosPaymentResultCode.InternalError => "E99",
 
         PosPaymentResultCode.Approved =>

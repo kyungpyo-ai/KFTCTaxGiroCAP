@@ -68,36 +68,56 @@
 
 ---
 
-## Phase 23 — 가맹점 설정 화면 (PRD §2)
+## Phase 23 — 가맹점 설정 화면 (PRD §2) — 완료(2026-09-02)
 
-**목표**: 홈 화면의 "가맹점 설정" 카드에 연결되는 신규 화면을 MVVM으로 만들고, 옵션 5개를
+**목표**: 홈 화면의 "가맹점 설정" 카드에 연결되는 신규 화면을 MVVM으로 만들고, 옵션 6개를
 레지스트리와 동기화한다. VAN Mode와 카드입력 타임아웃은 실제 결제 Flow에 반영한다.
 
-- [ ] `Services/Settings/ShopSettingsService` — `TCP\VAN_MODE`, `SERIALPORT\KIOSK_ID`,
-      `SERIALPORT\TIMEOUT`, `AUTO_REBOOT`/`AUTO_UPDATE`/`KEYIN_DIM`. 반전 인코딩은 이 클래스
-      안에서만 (PRD §0.3)
-- [ ] `ShopSetupWindow.xaml` + `ShopSetupViewModel` — 단일 화면 · 섹션 3개 · 옵션 6개 ·
-      리더기 설정 화면의 스타일 재사용 (PRD §2.1)
-- [ ] 입력 검증 — 카드입력 타임아웃 `0 또는 30 이상`, 위반 시 `"30초 이상 입력"` (PRD §2.4).
-      키오스크 고유번호는 20자 이내, 빈 값 허용 (PRD §2.3)
-- [ ] **키오스크 고유번호 불일치 검증**(PRD §2.3.1) — `902614` 요청 `#42`가 설정값과 다르면
-      **카드 리딩 전에** 거부. `PosPaymentResultCode`에 값 1개 추가 + `PosResultCodeMapper`에
-      **`E06`** 매핑 1줄. 설정값이 비어 있으면 검증 없이 진행하고 `WARN`만 남긴다(§2.3.2) —
-      **수신값을 레지스트리에 자동 기입하지 않는다**
-- [ ] 홈 화면 연결 — `HomeViewModel.OpenShopSetup()`의 "범위 밖" 안내를 실제 화면 열기로 교체
-- [ ] **VAN Mode 반영** — `VanService.cs:44`의 `KftcGiroNative.ModeExternalTest` 상수 사용을
-      설정값 주입으로 교체. 기본값 `R` (PRD §2.2)
-- [ ] **카드입력 타임아웃 반영** — `PaymentOrchestrator.cs:55`의 하드코딩 120초를 설정값으로 교체
-      (PRD §2.4)
-- [ ] 저장 시점 — `확인`에서만 저장·반영, `취소`는 무저장. 저장 실패는 사용자에게 알림 (PRD §2.6)
-- [ ] **결제 중 경합 차단 양방향** — 거래 중이면 화면을 열지 않음(안내 없이 무시) + 화면이 열려
-      있으면 POS 요청에 `E03` 반환. 기존 `ReaderSetupWindowGate` 방식 준용 (PRD §2.7)
-- [ ] 원본 앱 화면과 문구·레이아웃 대조(스크린샷) — 옵션 이름은 원본을 따른다
-- [ ] `docs/payment_relay/PRD.md` §10.1의 "VAN Mode `OT` 고정" 항목 갱신 (PRD §5)
+- [x] `Services/Settings/ShopSettingsService` — `TCP\VAN_MODE`, `TCP\KIOSK_ID`(2026-09-02 확정,
+      당초 `SERIALPORT\KIOSK_ID`에서 이동), `SERIALPORT\TIMEOUT`, `AUTO_REBOOT`/`AUTO_UPDATE`/
+      `KEYIN_DIM`. 반전 인코딩은 이 클래스 안에서만 (PRD §0.3). P23-1 실측 완료
+- [x] `ShopSetupWindow.xaml` + `ShopSetupViewModel` — 단일 화면 · 섹션 2개(결제 설정/시스템 설정) ·
+      옵션 6개 · 리더기 설정 화면의 스타일 재사용 (PRD §2.1). P23-3 실측 완료
+- [x] 입력 검증 — 카드입력 타임아웃 `0 또는 30 이상`, 위반 시 안내 메시지. 키오스크 고유번호는
+      20자 이내, 빈 값 허용 (PRD §2.3). P23-3 실측 완료
+- [x] **키오스크 고유번호 불일치 검증**(PRD §2.3.1) — `902614` 요청 `#42`가 설정값과 다르면
+      **카드 리딩 전에** 거부. `PosPaymentResultCode.KioskIdMismatch` + `PosResultCodeMapper`에
+      **`E06`** 매핑 1줄. **설정값이 비어 있어도 동일하게 거부한다**(2026-09-02 재확정, §2.3.2) —
+      **수신값을 레지스트리에 자동 기입하지 않는다**. P23-7 하네스(Scenario15/16/17/18) +
+      P23-8 실기(KioskSim으로 `#42` 불일치 실측, 로그에 설정값/수신값 확인)로 검증 완료
+- [x] 홈 화면 연결 — `HomeViewModel.OpenShopSetup()`이 실제 화면을 연다(P23-4)
+- [x] **VAN Mode 반영** — `VanService`가 `Func<ShopSettings>`로 매 호출마다 설정을 읽는다(캐시
+      없음). 기본값 `R` (PRD §2.2). P23-5 코드 검증 + P23-8 실기(가맹점 설정 화면에서 "테스트
+      서버" 선택 → 레지스트리 `VAN_MODE=OT` 확인 → 실제 하드웨어로 902614 전송 → 카드 리딩 단계
+      진입까지 확인. VAN 호출 자체의 `mode=OT` 로그는 `--van-call-test`로 재확인, 아래 참고)
+- [x] **카드입력 타임아웃 반영** — `PaymentOrchestrator`가 거래 시작 시점마다 설정을 다시 읽는다
+      (PRD §2.4). P23-8 실기로 `30`/`0`(→120초 변환 포함) 둘 다 실제 리더기로 확인
+- [x] 저장 시점 — `확인`에서만 저장·반영, `취소`는 무저장. 저장 실패는 사용자에게 알림 (PRD §2.6)
+- [x] **결제 중 경합 차단 양방향** — 거래 중이면 화면을 열지 않음(안내 없이 무시) + 화면이 열려
+      있으면 POS 요청에 `E03` 반환. 기존 게이트를 카운터째 재사용하고 이름을 리네임
+      (`ISetupScreenGate`/`SetupScreenGate`) (PRD §2.7). **실측 한계**: `requireAdministrator`
+      복귀 이후에는 UAC로 자동화 클릭이 막히고, `asInvoker`로 낮춘 구간에서도 이 앱이 트레이
+      상주형이라(대화상자를 닫으면 메인 창이 숨어 자동화로 재호출하기 어려움) 실 클릭으로 두
+      방향을 모두 재현하지는 못했다 — `--payment-flow-test`의 `FakeSetupScreenGate` 시나리오
+      (`SetupScreenGate`/`ISetupScreenGate`와 동일한 `PaymentOrchestrator` 분기)로 동등성을
+      확인했다(P23-2, P23-4, P23-8 재확인 71건 통과)
+- [x] 원본 앱 화면(`screenshots/shop_setup.png`)과 문구 대조 — 옵션 이름은 원본을 따르고, 레이아웃은
+      6개 옵션에 맞게 단일 화면으로 재구성(PRD §2.1). P23-3, P23-8 재확인(`--shop-setup` 진단
+      경로로 스크린샷 비교) 완료
+- [x] `docs/payment_relay/PRD.md` §10.1의 "VAN Mode `OT` 고정" 항목 갱신 (PRD §5) — 2026-09-02
+      "가맹점 설정 화면에서 선택, 기본 `R`"로 갱신 완료
 
-**완료 기준**: 화면에서 서버를 "테스트 서버"로 바꾸고 확인을 누르면 다음 결제의 `FNAISCRDVAN`
-첫 인자가 `OT`로 나가는 것이 로그로 확인되고, 타임아웃을 30초로 바꾸면 거래 데드라인이 실제로
-30초가 된다. 거래 중 화면 열기와 화면 열림 중 결제 요청이 양방향 모두 차단된다.
+**완료 기준**: 화면에서 서버를 "테스트 서버"로 바꾸고 확인을 누르면 레지스트리 `VAN_MODE=OT`로
+저장되고, 실제 리더기(COM3)로 `902614`를 보내면 설정된 데드라인(예: `30초`/`120초`)으로 카드 리딩
+대기까지 진입하는 것을 로그로 확인했다(2026-09-02, `App.xaml.cs`를 일시적으로 `VanService`로
+스왑한 뒤 실측). **실카드 리더 하드웨어는 COM3에 실제로 연결돼 있었으나(무결성 체크 "정상"),
+물리 카드가 없어 카드 리딩 완료 이후의 `FNAISCRDVAN` 호출까지는 이 실제 화면 경로로 도달하지
+못했다** — `mode=OT`가 `FNAISCRDVAN` 호출부에 실제로 실리는 것은 `--van-call-test`(실제
+`VanService`+실제 DLL, 카드리딩 우회)로 확인했다(로그 `[VanService] 거래구분=902614 mode=OT
+FNAISCRDVAN 호출...`). `App.xaml.cs`는 검증 직후 `StubVanRelayService`로 원복했고, 재기동 로그의
+`"VAN 서비스가 스텁(StubVanRelayService)입니다"` 경고로 원복을 재확인했다(development_plan.md
+P23-8 참고). 타임아웃 30초/0초(→120초)는 실제 하드웨어로 재현해 로그로 확인했다. 거래 중 경합
+차단은 하네스 동등성 확인으로 갈음했다(위 참고).
 
 ---
 

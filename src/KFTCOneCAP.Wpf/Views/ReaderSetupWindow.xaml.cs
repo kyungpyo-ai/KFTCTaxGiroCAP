@@ -61,7 +61,8 @@ public partial class ReaderSetupWindow : Window
 
     /// <summary>
     /// Phase 15(P15-4) — 이 창이 (워밍업이 아니게) 실제로 열려 있는 동안 결제 Flow가 카드 리딩을
-    /// 시도하지 않도록 <see cref="App.ReaderSetupGate"/>에 등록한다. <see cref="IsWarmupInstance"/>는
+    /// 시도하지 않도록 <see cref="App.SetupScreenGate"/>에 등록한다(가맹점 설정 화면과 카운터를 공유,
+    /// PRD.md §2.7). <see cref="IsWarmupInstance"/>는
     /// 객체 초기화 구문(<c>new ReaderSetupWindow { IsWarmupInstance = true, ... }</c>)으로 설정되므로
     /// 생성자 시점에는 아직 반영되지 않는다 — 이 값이 이미 확정된 뒤에 실행되는 <c>Loaded</c>에서
     /// 판정해야 정확하다(<c>Loaded</c>는 <c>Show()</c> 이후에 발생하고, 객체 초기화는 <c>Show()</c>
@@ -80,7 +81,7 @@ public partial class ReaderSetupWindow : Window
         // 이중 등록으로 카운터가 새고 — 그 실패 모드가 "결제가 영구히 거부됨"이라 예방 가치가 크다.
         if (!IsWarmupInstance && !_registeredInGate)
         {
-            App.ReaderSetupGate.Register();
+            App.SetupScreenGate.Register();
             _registeredInGate = true;
         }
     }
@@ -95,7 +96,7 @@ public partial class ReaderSetupWindow : Window
     {
         if (_registeredInGate)
         {
-            App.ReaderSetupGate.Unregister();
+            App.SetupScreenGate.Unregister();
             _registeredInGate = false;
         }
     }
