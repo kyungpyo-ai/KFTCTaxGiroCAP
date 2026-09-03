@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using System.Threading.Tasks;
+using KFTCOneCAP.Wpf.Security;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Van;
 
@@ -26,17 +27,18 @@ namespace KFTCOneCAP.Wpf.Services.Reader
     /// <b>자동 재시도 금지</b>(PRD.md §3.6, IPEK 소모) — 5단계 중 어느 하나라도 실패하면 그 즉시
     /// 멈추고 뒤 단계를 호출하지 않는다.
     ///
-    /// <b>메모리 클리어(2026-09-02 사용자 확정)</b> — P24-2(<see cref="ReaderService"/>)/P24-3
-    /// (<see cref="KeyDownloadVanClient"/>)가 각자 지우는 원본 배열과 별개로, 이 클래스가 단계 사이에
-    /// <b>직접 들고 있는</b> relay용 중간 바이트 배열(예: [73] 응답에서 뽑아 0100 요청에 넘길
-    /// 키버전+모듈ID 묶음)도 다음 단계 호출이 끝나면 <c>Array.Clear</c>로 지운다. <b>한계</b>:
-    /// <c>Array.Clear</c>는 best-effort다 — GC 세대 압축이 그 전에 배열을 옮긴 적이 있다면 옛
-    /// 위치의 잔여 바이트까지는 지우지 못하고, 이 프로젝트 타겟(.NET Framework 4.8)에는
-    /// <c>CryptographicOperations.ZeroMemory</c> 같은 상위 API도 없다. 문자열(<c>string</c>)은 불변이라
-    /// 이 클래스 수준에서 지울 방법이 없다 — hash/rnd/sign/encryptedData 같은 값을 리더기 API에
-    /// 넘길 때는 문자열이어야 하므로(<see cref="IKeyDownloadReaderEndpoint"/> 시그니처), 그 문자열
-    /// 자체의 수명은 GC에 맡긴다(P24-2/P24-3과 동일한 캐비어트). pin(<c>GCHandle.Alloc</c>)까지
-    /// 강화하는 것은 Phase 25로 미룬다.
+    /// <b>메모리 클리어(2026-09-02 사용자 확정, 2026-09-03 Phase 25 P25-2에서 방식 통일)</b> — P24-2
+    /// (<see cref="ReaderService"/>)/P24-3(<see cref="KeyDownloadVanClient"/>)가 각자 지우는 원본
+    /// 배열과 별개로, 이 클래스가 단계 사이에 <b>직접 들고 있는</b> relay용 중간 바이트 배열(예: [73]
+    /// 응답에서 뽑아 0100 요청에 넘길 키버전+모듈ID 묶음)도 다음 단계 호출이 끝나면
+    /// <see cref="Security.SecureClear.Clear(byte[])"/>(3회 덮어쓰기)로 지운다. <b>한계</b>(`PRD.md`
+    /// §4.4): best-effort다 — GC 세대 압축이 그 전에 배열을 옮긴 적이 있다면 옛 위치의 잔여 바이트까지는
+    /// 지우지 못하고, 이 프로젝트 타겟(.NET Framework 4.8)에는 <c>CryptographicOperations.ZeroMemory</c>
+    /// 같은 상위 API도 없다. 문자열(<c>string</c>)은 불변이라 이 클래스 수준에서 지울 방법이 없다 —
+    /// hash/rnd/sign/encryptedData 같은 값을 리더기 API에 넘길 때는 문자열이어야 하므로
+    /// (<see cref="IKeyDownloadReaderEndpoint"/> 시그니처), 그 문자열 자체의 수명은 GC에 맡긴다
+    /// (P24-2/P24-3과 동일한 캐비어트). GC 압축 복사본 대응을 위한 pin(<c>GCHandle.Alloc</c>)은
+    /// 인증 기준이 요구하지 않아 Phase 25 범위 밖으로 확정됐다(`PRD.md` §4.4 #1/§4.7).
     /// </summary>
     internal sealed class KeyDownloadService
     {
@@ -114,7 +116,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             finally
             {
                 // relay 목적의 중간 값(키버전+모듈ID) — 다음 단계 호출이 끝났으므로 지운다.
-                Array.Clear(p28Bytes, 0, p28Bytes.Length);
+                SecureClear.Clear(p28Bytes);
             }
 
             if (!vanAuthOutcome.IsSuccess)
@@ -144,7 +146,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             finally
             {
                 // relay 목적의 중간 값(HASH+RND+SIGN) — 다음 단계 호출이 끝났으므로 지운다.
-                Array.Clear(authBytes, 0, authBytes.Length);
+                SecureClear.Clear(authBytes);
             }
 
             if (authOutcome.Kind != ReaderCommandOutcomeKind.Success)
@@ -174,7 +176,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             finally
             {
                 // relay 목적의 중간 값(키버전+모듈ID+암호화데이터) — 다음 단계 호출이 끝났으므로 지운다.
-                Array.Clear(p29Bytes, 0, p29Bytes.Length);
+                SecureClear.Clear(p29Bytes);
             }
 
             if (!vanBundlingOutcome.IsSuccess)
@@ -203,7 +205,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             finally
             {
                 // relay 목적의 중간 값(암호화데이터+MAC) — 다음 단계(마지막 단계) 호출이 끝났으므로 지운다.
-                Array.Clear(usingKeyBytes, 0, usingKeyBytes.Length);
+                SecureClear.Clear(usingKeyBytes);
             }
 
             if (usingKeyOutcome.Kind != ReaderCommandOutcomeKind.Success)

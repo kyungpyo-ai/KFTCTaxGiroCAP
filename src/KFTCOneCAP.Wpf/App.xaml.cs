@@ -355,6 +355,15 @@ public partial class App : Application
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
             System.Threading.Tasks.Task.Run(KeyDownloadTestScenarios.RunAll);
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--secure-clear-self-test")
+        {
+            // 개발/회귀 검증용(docs/operations/development_plan.md P25-1 완료 조건, 최종 산출물
+            // 아님): SecureClear(Phase 25) 자체가 Release 빌드에서 JIT 최적화(dead store
+            // elimination)로 무력화되지 않는지만 확인한다 — 전체 파이프라인 심사 증적 하네스는
+            // P25-9(--memory-clear-test)가 별도로 만든다. UI는 홈 화면을 그대로 띄운다.
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+            System.Threading.Tasks.Task.Run(SecureClearSelfTest.RunAll);
+        }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--notice-demo")
         {
             // 개발용 결제 알림창 실시간 애니메이션 데모(수동 실행 전용). 예전엔 인자 없는 기본

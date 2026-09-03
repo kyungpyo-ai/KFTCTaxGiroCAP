@@ -27,6 +27,36 @@
   keydown-test/van-call-test/payment-flow-test 하네스 재검증만 여러 라운드 반복했다. 4차 Opus
   전체 리뷰에서 치명적 0건으로 확정된 시점에 requireAdministrator로 되돌렸다
   (development_plan.md "Phase 24 전체 4차 Opus 리뷰" 절 참고).
+
+  [원복 완료, 2026-09-03] Phase 25 P25-1 완료 조건(SecureClear가 Release 빌드에서 실제로 지우는지
+  자동화로 실측)을 확인하려고 한시적으로 asInvoker로 낮췄다. 인자는 secure clear self test(앞에
+  하이픈 두 개, 이 주석에는 XML 파싱 버그 재발 방지를 위해 하이픈 없이 적는다). Release 빌드로
+  실행해 로그(C:\KFTC_PosAgent\KFTCTaxLog\2026-09-03.log:68) "byte[]=통과, char[]=통과,
+  null/빈배열=통과, 종합=통과"를 확인한 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-03] Phase 25 P25-2(Array.Clear를 SecureClear로 소급 교체) 완료 조건 확인을 위해
+  keydown-test/van-call-test/payment-flow-test 세 하네스를 재실행해야 해서 한시적으로 asInvoker로
+  낮췄다. keydown-test 128/128, van-call-test 통과 4건/실패 0건(2026-09-02 리팩터링 전과 동일한
+  nRet=-1/'0004' 통신 실패 패턴), payment-flow-test 71/71을 로그로 확인한 즉시
+  requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-03] Phase 25 CP1 Opus 리뷰(독립 재현)에서 개발자 보고를 그대로 믿지 않고
+  리뷰어가 직접 Release 빌드 + secure clear self test(앞에 하이픈 두 개, XML 파싱 버그 재발 방지를
+  위해 이 주석에는 하이픈 없이 적는다)와 keydown/van-call/payment-flow 세 하네스를 재실행하기 위해
+  한시적으로 asInvoker로 낮췄다. 셀프테스트 종합=통과(10:40:44), keydown 128/128(10:41:01),
+  van-call 4건/0건(10:47:49), payment-flow 71/71(10:49:09)을 로그로 확인한 즉시 requireAdministrator로
+  되돌렸다.
+
+  [원복 완료, 2026-09-03] CP1 Opus 리뷰 개선권장 3건(F1 char[] 패턴이 상위 바이트를 안 덮음, F2
+  셀프테스트가 JIT 방어를 증명하지 못함, F3 Array.Clear 잔재 주석) 수정 후 재검증을 위해 한시적으로
+  asInvoker로 낮췄다. Release 셀프테스트 종합=통과(10:53:23), keydown 128/128(10:53:46),
+  payment-flow-test 71/71(10:54:50)을 로그로 확인한 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-03] 위 F1~F3 수정을 리뷰어가 독립 재현하기 위해 한시적으로 asInvoker로 낮췄다.
+  Release 셀프테스트 종합=통과(10:56:30), keydown 128/128(10:56:48), payment-flow 71/71(10:58:02)을
+  로그로 확인한 즉시 requireAdministrator로 되돌렸다. van-call-test는 이번 수정 범위(char 패턴 +
+  주석)가 byte 경로를 전혀 건드리지 않아 같은 날 10:47:49 결과를 그대로 유효한 것으로 판단해
+  생략했다.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

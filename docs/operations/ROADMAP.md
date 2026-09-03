@@ -10,7 +10,9 @@
 1. **반드시 순서를 따른다.** 각 Phase의 "완료 기준"을 통과한 뒤에만 다음으로 넘어간다.
 2. **PRD와 구현이 어긋나면 코드보다 먼저 PRD를 갱신한다.**
 3. **미확정 사항은 해당 Phase 착수 전에 확인하고 PRD에 반영한다.** 추측으로 진행하지 않는다.
-4. 계층 규칙(`Views` → `ViewModels` → `Services` → `Protocol` → `Interop`)을 지킨다.
+4. 계층 규칙(`Views` → `ViewModels` → `Services` → `Protocol` → `Interop`)을 지킨다. **예외**:
+   `Security/SecureClear`(Phase 25 P25-1)는 아무것도 참조하지 않는 leaf 유틸리티라 어느 계층에서든
+   호출할 수 있다(`Interop`과 같은 위치의 공용 도구로 취급, `PRD.md` §4.3.1).
 
 ## Phase 순서를 이렇게 잡은 이유
 

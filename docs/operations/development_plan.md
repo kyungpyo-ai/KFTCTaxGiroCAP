@@ -2368,7 +2368,10 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
 확인했다"**는 뜻이다. Task가 전부 체크돼 있어도 이게 비어 있으면 그 체크포인트는 검증되지 않은
 것이다(Phase 24에서 CP2가 이 둘을 착각해 "검증됨"으로 잘못 표시됐던 전례가 있다 — 재발 방지).
 
-- [ ] **CP1 Opus 리뷰 통과** — 리뷰 라운드 수: ___, 최종 치명적 0건 확인일: ______
+- [x] **CP1 Opus 리뷰 통과** — 리뷰 라운드 수: 2, 최종 치명적 0건 확인일: 2026-09-03. 1차 라운드
+      개선권장 3건(F1 char[] 패턴이 상위 바이트를 안 덮음, F2 셀프테스트가 JIT 방어를 증명 못함,
+      F3 Array.Clear 잔재 주석 3파일) 발견 → 수정 → 2차 라운드에서 리뷰어가 직접 코드·빌드·실행으로
+      재현해 전부 해결 확인, 신규 문제 0건.
 - [ ] **CP2 ★ Opus 리뷰 통과** — 리뷰 라운드 수: ___, 최종 치명적 0건 확인일: ______
 - [ ] **CP3 Opus 리뷰 통과** — 리뷰 라운드 수: ___, 최종 치명적 0건 확인일: ______
 - [ ] **최종 전체 리뷰 통과**(P25-10 이후, 결제 Flow 전체 대상) — 최종 치명적 0건 확인일: ______
@@ -2391,12 +2394,19 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
 - `Array.Clear`를 직접 부르는 코드를 앞으로 만들지 않는다는 규칙을 클래스 주석에 적는다.
 
 **완료 조건**
-- [ ] `SecureClear.Clear(byte[])` / `Clear(char[])`가 있고, `null`/빈 배열에서 예외를 던지지 않는다.
-- [ ] 덮어쓰기 횟수가 상수 하나로 존재하고, 마지막 패스가 `0x00`이다(코드 확인).
-- [ ] **Release 빌드**에서 실제로 배열이 0으로 채워지는 것을 확인한다 — 클리어 직후 같은 배열을
-      읽어 전부 0인지 검사하는 코드를 넣고 Release로 돌려 통과를 로그로 남긴다(디버그 빌드 결과는
-      근거로 인정하지 않는다 — JIT 최적화가 다르다).
-- [ ] `dotnet build` 통과.
+- [x] `SecureClear.Clear(byte[])` / `Clear(char[])`가 있고, `null`/빈 배열에서 예외를 던지지 않는다 —
+      `Security/SecureClear.cs`, `null`/`Array.Empty` 조기 return. `SecureClearSelfTest`의
+      null/빈배열 케이스로 실행 확인(예외 없음).
+- [x] 덮어쓰기 횟수가 상수 하나로 존재하고, 마지막 패스가 `0x00`이다(코드 확인) — `OverwritePasses = 3`,
+      `OverwritePattern = { 0x00, 0xFF, 0x00 }`.
+- [x] **Release 빌드**에서 실제로 배열이 0으로 채워지는 것을 확인한다 — 전용 셀프테스트
+      (`Services/Diagnostics/SecureClearSelfTest.cs`, `App.xaml.cs`의 secure clear self test 인자
+      분기)를 만들어 Release 빌드로 실행, `C:\KFTC_PosAgent\KFTCTaxLog\2026-09-03.log:68`에
+      `[SecureClearSelfTest] 완료 — byte[]=통과, char[]=통과, null/빈배열=통과, 종합=통과` 확인함
+      (2026-09-03 10:26:08). 검증 동안 `app.manifest`를 한시적으로 `asInvoker`로 낮췄다가 확인 직후
+      `requireAdministrator`로 원복(파일 내 주석에 근거 기록).
+- [x] `dotnet build` 통과 — Debug/Release 둘 다 경고 0, 오류 0.
+- [x] `ROADMAP.md` 계층 규칙에 `Security/SecureClear` 예외를 명시했다.
 
 ## P25-2. 키다운로드 경로 소급 적용 — `Array.Clear` → `SecureClear`
 
@@ -2411,11 +2421,21 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
   한계 내용 자체는 `PRD.md` §4.4로 옮겨져 있으므로 그쪽을 가리키게 한다).
 
 **완료 조건**
-- [ ] `grep -rn "Array.Clear" src/`가 **0건**이다(주석의 설명 문구 제외).
-- [ ] `--keydown-test` 하네스가 **교체 전과 동일한 결과**(128/128)를 낸다. 교체 전후 로그를 대조한다.
-- [ ] `--van-call-test`가 교체 전과 동일한 결과(통과 4건/실패 0건)를 낸다 — `FnaisCrdVanInvoker`를
-      건드렸으므로 결제 경로 회귀 확인이 필요하다.
-- [ ] `--payment-flow-test` 71/71 그대로 통과.
+- [x] `grep -rn "Array.Clear(" src/`가 **0건**이다(주석의 설명 문구 제외) — 실제 호출 13곳
+      (`ReaderService.cs` 3, `KeyDownloadService.cs` 4, `KeyDownloadVanClient.cs` 5,
+      `FnaisCrdVanInvoker.cs` 1)을 전부 `SecureClear.Clear`로 교체, 남은 매치는
+      `SecureClear.cs`/`FnaisCrdVanInvoker.cs`의 설명 주석 2건뿐.
+- [x] `--keydown-test` 하네스가 **교체 전과 동일한 결과**(128/128)를 낸다 —
+      `C:\KFTC_PosAgent\KFTCTaxLog\2026-09-03.log:265` `완료 — 통과 128건, 실패 0건`(10:32:53).
+- [x] `--van-call-test`가 교체 전과 동일한 결과(통과 4건/실패 0건)를 낸다 —
+      `2026-09-03.log:309` `완료 — 통과 4건, 실패 0건`(10:37:45), 501008/800000/902614 개별 호출과
+      902614 10회 반복 모두 `nRet=-1 out_szRetCode='0004'` 통신 실패로 2026-09-02 리팩터링 전과
+      동일한 패턴(결제용 VAN 서버가 이 환경에서 여전히 미도달인 것이지 이번 변경의 회귀가 아님).
+- [x] `--payment-flow-test` 71/71 그대로 통과 — `2026-09-03.log:596`
+      `완료 — 통과 71건, 실패 0건`(10:38:40).
+- [x] `dotnet build` Debug/Release 둘 다 경고 0, 오류 0.
+- [x] 검증 동안 `app.manifest`를 한시적으로 `asInvoker`로 낮췄다가 확인 직후
+      `requireAdministrator`로 원복(파일 내 주석에 근거 기록).
 
 > **CP1 Opus 리뷰** — 여기까지. 특히 P25-1의 Release 실측 근거를 리뷰어가 **직접 재현**하도록 한다
 > (Phase 24 C-A의 교훈 — 보고를 믿지 않고 직접 돌린다).

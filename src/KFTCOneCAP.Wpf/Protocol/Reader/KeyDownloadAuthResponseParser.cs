@@ -6,8 +6,8 @@ namespace KFTCOneCAP.Wpf.Protocol.Reader
     /// [74] 키 다운로드 상호 인증 응답 파싱 결과. "00"이 아니면 실패(§3.4/§3.6). ParseFailed는
     /// 데이터가 SPEC 형식(558byte)에 못 미칠 때만 true다(Protocol/Reader/StatusResponseParser와
     /// 동일한 관례). EncryptedData는 512byte 원본을 그대로 문자열로 옮긴 것뿐이다 — 이 구조체가
-    /// 반환된 뒤 호출자(ReaderService)가 원본 raw byte[]를 Array.Clear로 지운다
-    /// (development_plan.md P24-2 메모리 클리어 요구사항, 이 파서 자체는 원본 배열을 소유하지
+    /// 반환된 뒤 호출자(ReaderService)가 원본 raw byte[]를 SecureClear로(3회 덮어쓰기) 지운다
+    /// (development_plan.md P24-2/Phase 25 P25-2, 이 파서 자체는 원본 배열을 소유하지
     /// 않으므로 지우는 책임이 없다).
     /// </summary>
     internal readonly struct KeyDownloadAuthResponseResult

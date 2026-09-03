@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using KFTCOneCAP.Wpf.Interop;
 using KFTCOneCAP.Wpf.Protocol.KeyDownload;
 using KFTCOneCAP.Wpf.Protocol.Pos;
+using KFTCOneCAP.Wpf.Security;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Settings;
 
@@ -90,11 +91,12 @@ internal readonly struct KeyDownloadVanCallOutcome
 /// <b>Mode 캐시 금지</b>(`PRD.md` §2.6, <see cref="VanService"/>와 동일 원칙) — 매 호출마다
 /// <see cref="ShopSettings.VanMode"/>를 새로 읽는다. 필드에 담아두지 않는다.
 ///
-/// <b>메모리 클리어(2026-09-02 사용자 확정)</b> — 조립한 0100/0120 요청 바이트는 invoker 호출 직후,
-/// 0110/0130 응답 바이트는 필요한 필드를 파서로 복사해낸 직후 각각 <see cref="Array.Clear(Array,int,int)"/>
-/// 로 지운다. best-effort다(GC가 이동시킨 옛 복사본까지는 못 지운다, net48엔
-/// <c>CryptographicOperations.ZeroMemory</c>도 없다) — 결제 경로(<see cref="VanService"/>)는 이 클리어
-/// 대상이 아니다(범위 확대는 Phase 25로 미룸).
+/// <b>메모리 클리어(2026-09-02 사용자 확정, 2026-09-03 Phase 25 P25-2에서 방식 통일)</b> — 조립한
+/// 0100/0120 요청 바이트는 invoker 호출 직후, 0110/0130 응답 바이트는 필요한 필드를 파서로 복사해낸
+/// 직후 각각 <see cref="Security.SecureClear.Clear(byte[])"/>(3회 덮어쓰기)로 지운다. best-effort다
+/// (GC가 이동시킨 옛 복사본까지는 못 지운다 — `PRD.md` §4.4의 알려진 한계).
+/// <see cref="FnaisCrdVanInvoker"/>가 지우는 <c>inData</c>는 결제 경로(<see cref="VanService"/>)와
+/// 공용이라, 이 클라이언트뿐 아니라 결제 요청 전문 사본도 함께 3회 덮어쓰기 대상이다(Phase 25 P25-2).
 /// </summary>
 internal sealed class KeyDownloadVanClient : IKeyDownloadVanClient
 {
@@ -195,7 +197,7 @@ internal sealed class KeyDownloadVanClient : IKeyDownloadVanClient
         {
             // 조립한 요청 바이트(SIGN/HASH/RND/암호화 데이터 포함, P-28/P-29)는 invoker 호출 직후
             // 더 필요 없다 — best-effort 클리어(2026-09-02 사용자 확정, 위 클래스 주석 참고).
-            Array.Clear(request, 0, request.Length);
+            SecureClear.Clear(request);
         }
 
         if (invokeResult.Threw)
@@ -219,8 +221,8 @@ internal sealed class KeyDownloadVanClient : IKeyDownloadVanClient
         {
             // R-3(Phase 24 전체 Opus 리뷰) — 통신 실패 조기 반환 경로도 정상 경로와 동일하게 4096바이트
             // OutData를 클리어한다. Threw 경로는 OutData가 항상 빈 배열이라(FnaisCrdVanInvoker) 별도
-            // 처리가 필요 없다 — Array.Clear에 빈 배열을 넘겨도 무해하므로 조건 분기 없이 공통화한다.
-            Array.Clear(invokeResult.OutData, 0, invokeResult.OutData.Length);
+            // 처리가 필요 없다 — SecureClear.Clear에 빈 배열을 넘겨도 무해하므로 조건 분기 없이 공통화한다.
+            SecureClear.Clear(invokeResult.OutData);
             return KeyDownloadVanCallOutcome.CommunicationFailure($"FNAISCRDVAN 통신 실패(nRet={invokeResult.ReturnCode})");
         }
 
@@ -232,7 +234,7 @@ internal sealed class KeyDownloadVanClient : IKeyDownloadVanClient
         Buffer.BlockCopy(invokeResult.OutData, 0, response, 0, copyLength);
         // invoker가 돌려준 원본 4096바이트 버퍼도 같은 응답 데이터를 담고 있다 — 위 response로
         // 필요한 부분을 옮겼으니 더 갖고 있을 필요가 없다.
-        Array.Clear(invokeResult.OutData, 0, invokeResult.OutData.Length);
+        SecureClear.Clear(invokeResult.OutData);
 
         // R-1(Phase 24 전체 Opus 리뷰) — VanService.ContainsNulByte(H-1)와 동일한 방어를 여기도 추가한다.
         // DLL이 nRet=0을 주면서 응답을 앞부분만 채우면 나머지가 0x00으로 남는데, 아래
@@ -247,7 +249,7 @@ internal sealed class KeyDownloadVanClient : IKeyDownloadVanClient
         {
             FileLogger.Warn(LogCategory.Keydown,
                 $"[KeyDownloadVanClient] 전문={telegramName} nRet=0인데 응답 본문에 0x00 바이트 포함 — 통신 실패로 처리");
-            Array.Clear(response, 0, response.Length);
+            SecureClear.Clear(response);
             return KeyDownloadVanCallOutcome.CommunicationFailure("nRet=0이지만 응답 본문이 불완전함(0x00 포함, 방어적 처리)");
         }
 
@@ -267,7 +269,7 @@ internal sealed class KeyDownloadVanClient : IKeyDownloadVanClient
 
         // 필요한 필드(payload/responseCode)를 위 지역 변수로 복사해냈으니 원본 응답 바이트는 더
         // 필요 없다 — best-effort 클리어.
-        Array.Clear(response, 0, response.Length);
+        SecureClear.Clear(response);
 
         if (parsed.ParseFailed)
         {

@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using KFTCOneCAP.Wpf.Interop;
+using KFTCOneCAP.Wpf.Security;
 
 namespace KFTCOneCAP.Wpf.Services.Van;
 
@@ -103,11 +104,11 @@ internal static class FnaisCrdVanInvoker
             finally
             {
                 // 개선권장 #2(Phase 24 2차 Opus 리뷰) — inData(요청 전문 + NUL 종단, SIGN/HASH/RND/
-                // 암호화데이터 포함 가능)는 여기서 새로 만든 복사본이라 호출자의 Array.Clear(원본
-                // request 배열)로는 지워지지 않는다 — DLL 호출이 끝난 직후(성공/실패 무관) 지운다.
+                // 암호화데이터 포함 가능)는 여기서 새로 만든 복사본이라 호출자가 원본 request 배열을
+                // SecureClear로 지워도 함께 지워지지 않는다 — DLL 호출이 끝난 직후(성공/실패 무관) 지운다.
                 // 이 invoker는 결제 경로(VanService)와 키다운로드 경로(KeyDownloadVanClient)가
                 // 공유하므로, 이 변경은 두 경로 모두에 자동으로 적용된다.
-                Array.Clear(inData, 0, inData.Length);
+                SecureClear.Clear(inData);
             }
 
             stopwatch.Stop();

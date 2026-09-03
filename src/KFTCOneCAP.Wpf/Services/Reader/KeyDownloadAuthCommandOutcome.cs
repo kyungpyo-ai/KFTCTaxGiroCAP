@@ -4,10 +4,10 @@ namespace KFTCOneCAP.Wpf.Services.Reader
 {
     /// <summary>SendKeyDownloadAuthCommandAsync([64]-&gt;[74])의 결과. EncryptedData(512byte)는
     /// Success/BusinessFailure일 때만 채워진다 — 다음 단계([65] 조립)에 필요한 값만 여기 옮겨 담고,
-    /// 원본 raw byte[]는 ReaderService가 이 outcome을 만든 직후 Array.Clear로 지운다
-    /// (development_plan.md P24-2 메모리 클리어 요구사항). 이 outcome 자체가 보관하는
+    /// 원본 raw byte[]는 ReaderService가 이 outcome을 만든 직후 SecureClear로(3회 덮어쓰기) 지운다
+    /// (development_plan.md P24-2/Phase 25 P25-2). 이 outcome 자체가 보관하는
     /// EncryptedData 문자열도 다음 단계 조립이 끝나면 호출자가 더 이상 참조하지 않아야 한다 —
-    /// string은 Array.Clear 대상이 아니므로(불변) 이 타입 수준에서는 지우지 않는다.</summary>
+    /// string은 불변이라 이 타입 수준에서는 지우지 않는다.</summary>
     internal sealed class KeyDownloadAuthCommandOutcome
     {
         internal ReaderCommandOutcomeKind Kind { get; }

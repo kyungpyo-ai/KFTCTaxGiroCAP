@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using KFTCOneCAP.Wpf.Interop;
 using KFTCOneCAP.Wpf.Protocol.Reader;
+using KFTCOneCAP.Wpf.Security;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 
 namespace KFTCOneCAP.Wpf.Services.Reader
@@ -172,9 +173,9 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         /// 문자열이어야 한다 — 이 메서드는 바이트를 직접 만들지 않는다(계층 규칙).
         ///
         /// 메모리 클리어(development_plan.md P24-2 신규 요구사항): 조립한 요청 원본 배열은
-        /// DLL 호출(SendAndAwaitAsync 경유) 직후 Array.Clear로 지운다. 응답(암호화 데이터 512byte
+        /// DLL 호출(SendAndAwaitAsync 경유) 직후 SecureClear로(3회 덮어쓰기) 지운다. 응답(암호화 데이터 512byte
         /// 포함)도 파서가 필요한 필드를 KeyDownloadAuthCommandOutcome으로 복사해낸 뒤 원본
-        /// raw byte[]를 Array.Clear로 지운다.</summary>
+        /// raw byte[]를 SecureClear로 지운다.</summary>
         internal async Task<KeyDownloadAuthCommandOutcome> SendKeyDownloadAuthCommandAsync(string hash, string rnd, string sign, TimeSpan timeout)
         {
             byte[] data = KeyDownloadRequestBuilder.BuildAuthRequest(hash, rnd, sign);
@@ -188,7 +189,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 // [64] 요청 원본 배열(HASH+RND+SIGN) — DLL 호출 직후 지운다. Reader_SendCommand는
                 // 이 호출이 완료되는 시점에 이미 데이터를 native 버퍼로 전달했으므로(P/Invoke는
                 // 동기 호출), await가 끝난 지금 지워도 전송에는 영향이 없다.
-                Array.Clear(data, 0, data.Length);
+                SecureClear.Clear(data);
             }
 
             var outcome = MapKeyDownloadAuthOutcome(raw);
@@ -196,7 +197,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             {
                 // [74] 응답 원본 배열(암호화 데이터 512byte 포함) — 필요한 필드를 outcome으로
                 // 복사해낸 뒤 지운다.
-                Array.Clear(raw.Data, 0, raw.Data.Length);
+                SecureClear.Clear(raw.Data);
             }
 
             return outcome;
@@ -207,7 +208,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         /// 문자열이어야 한다 — 이 메서드는 바이트를 직접 만들지 않는다(계층 규칙).
         ///
         /// 메모리 클리어(development_plan.md P24-2 신규 요구사항): 조립한 요청 원본 배열은
-        /// DLL 호출 직후 Array.Clear로 지운다. [75] 응답(응답코드+모듈ID 12byte)은 민감정보를
+        /// DLL 호출 직후 SecureClear로 지운다. [75] 응답(응답코드+모듈ID 12byte)은 민감정보를
         /// 담지 않으므로 클리어 대상이 아니다.</summary>
         internal async Task<KeyDownloadUsingKeyCommandOutcome> SendKeyDownloadUsingKeyCommandAsync(string encryptedData, string mac, TimeSpan timeout)
         {
@@ -220,7 +221,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             finally
             {
                 // [65] 요청 원본 배열(암호화 데이터+MAC) — DLL 호출 직후 지운다.
-                Array.Clear(data, 0, data.Length);
+                SecureClear.Clear(data);
             }
 
             return MapKeyDownloadUsingKeyOutcome(raw);
@@ -519,9 +520,9 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             // I-4(CP1 Opus 리뷰) — 이 `copy` 배열 인스턴스 하나가 아래 CompletePendingIfMatches와
             // EventReceived 양쪽에 그대로 전달된다. 키다운로드 경로(SendKeyDownloadAuthCommandAsync
             // 등)는 pending 쪽에서 받은 RawReaderCommandResult.Data(=이 copy)를 필요한 필드로 옮긴
-            // 뒤 Array.Clear로 지운다(위 ":203" 근처) — 지금은 EventReceived 구독자가 없어 문제가
+            // 뒤 SecureClear로 지운다(위 ":203" 근처) — 지금은 EventReceived 구독자가 없어 문제가
             // 없지만, 나중에 누가 EventReceived를 구독하면 CompletePendingIfMatches 쪽이 먼저 지운
-            // (이미 Array.Clear로 0으로 채워진) 데이터를 볼 위험이 있다. 구독자를 추가할 때는 배열을
+            // (이미 SecureClear로 채워진) 데이터를 볼 위험이 있다. 구독자를 추가할 때는 배열을
             // 공유하지 말고 각자 복사본을 갖도록 바꿔야 한다.
             CompletePendingIfMatches(eventType, commandCode, copy);
 
