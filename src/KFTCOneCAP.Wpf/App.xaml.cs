@@ -345,6 +345,16 @@ public partial class App : Application
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
             System.Threading.Tasks.Task.Run(VanCallTestScenarios.RunAll);
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--keydown-test")
+        {
+            // 개발/회귀 검증용(docs/operations/development_plan.md P24-5 완료 조건, 최종 산출물
+            // 아님): KeyDownloadService(P24-4)를 FakeKeyDownloadReaderEndpoint/FakeKeyDownloadVanClient
+            // 로 감싼 별도 인스턴스를 만들어 실장비·VAN 서버 없이 5단계 시퀀스 전체(성공 경로 +
+            // 실패 시나리오 7종)와 PRD.md §3.3 바이트 slicing을 재현한다 — 운영 배선(P24-6)은 건드리지
+            // 않는다.
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+            System.Threading.Tasks.Task.Run(KeyDownloadTestScenarios.RunAll);
+        }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--notice-demo")
         {
             // 개발용 결제 알림창 실시간 애니메이션 데모(수동 실행 전용). 예전엔 인자 없는 기본

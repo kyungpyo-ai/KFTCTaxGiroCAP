@@ -19,7 +19,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
     /// 알고, WPF 타입(Dispatcher 등)을 전혀 참조하지 않는다. EventReceived는 네이티브 콜백 스레드에서
     /// 그대로 raise되므로, UI로 마샬링하는 책임은 이 이벤트를 구독하는 ViewModel에 있다.
     /// </summary>
-    internal sealed class ReaderService
+    internal sealed class ReaderService : IKeyDownloadReaderEndpoint
     {
         // ===================== 콜백 델리게이트 수명 (P9-2, Phase 10에서도 불변) =====================
         //
@@ -149,6 +149,99 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             return MapCardReadOutcome(raw);
         }
 
+        // ===================== 공개 명령 3종 — 키다운로드(P24-2, PRD §3.4) =====================
+
+        /// <summary>[63](키 다운로드 시작) 전송 → [73] 응답 대기 → 응답코드 + 키버전/리더기이름/
+        /// 리더기버전/모듈ID 파싱. 요청 data는 없다(§3.4).</summary>
+        internal async Task<KeyDownloadStartCommandOutcome> SendKeyDownloadStartCommandAsync(TimeSpan timeout)
+        {
+            // C-A(Phase 24 2차 Opus 리뷰, 치명적 회귀) — R-8-2에서 "죽은 코드 제거" 목적으로
+            // KeyDownloadRequestBuilder.BuildStartRequest()(= Array.Empty<byte>())를 쓰도록
+            // 바꿨었는데, net48/x86 P/Invoke 마샬러는 Array.Empty<byte>()를 non-null 포인터로
+            // 넘긴다 — 실제 DLL(ReaderApi.cpp)의 인자 검증은 "data != nullptr && dataLength <= 0"
+            // 이면 READER_ERR_INVALID_ARGUMENT(-1001)를 반환하므로, 이 변경은 [63] 키다운로드
+            // 시작 요청을 DLL 레벨에서 항상 실패시켰다(리더기 없는 COM 포트로 실증: null,0 ->
+            // READER_OK, Array.Empty<byte>(),0 -> -1001). 아래 Interop/ReaderSerialNative.cs:155
+            // 근처 주석이 이미 이 사실을 경고해뒀다. null, 0을 직접 넘기는 원래 형태로 되돌린다.
+            var raw = await SendAndAwaitAsync(ReaderCommandCodes.KEY_DOWNLOAD_START_REQUEST, ReaderCommandCodes.KEY_DOWNLOAD_START_RESPONSE, null, 0, timeout).ConfigureAwait(false);
+            return MapKeyDownloadStartOutcome(raw);
+        }
+
+        /// <summary>[64](키 다운로드 상호 인증) 전송 → [74] 응답 대기(§3.4). hash/rnd/sign은
+        /// Protocol/Reader/KeyDownloadRequestBuilder가 요구하는 정확한 길이(64/32/512)의 ASCII
+        /// 문자열이어야 한다 — 이 메서드는 바이트를 직접 만들지 않는다(계층 규칙).
+        ///
+        /// 메모리 클리어(development_plan.md P24-2 신규 요구사항): 조립한 요청 원본 배열은
+        /// DLL 호출(SendAndAwaitAsync 경유) 직후 Array.Clear로 지운다. 응답(암호화 데이터 512byte
+        /// 포함)도 파서가 필요한 필드를 KeyDownloadAuthCommandOutcome으로 복사해낸 뒤 원본
+        /// raw byte[]를 Array.Clear로 지운다.</summary>
+        internal async Task<KeyDownloadAuthCommandOutcome> SendKeyDownloadAuthCommandAsync(string hash, string rnd, string sign, TimeSpan timeout)
+        {
+            byte[] data = KeyDownloadRequestBuilder.BuildAuthRequest(hash, rnd, sign);
+            RawReaderCommandResult raw;
+            try
+            {
+                raw = await SendAndAwaitAsync(ReaderCommandCodes.KEY_DOWNLOAD_AUTH_REQUEST, ReaderCommandCodes.KEY_DOWNLOAD_AUTH_RESPONSE, data, data.Length, timeout).ConfigureAwait(false);
+            }
+            finally
+            {
+                // [64] 요청 원본 배열(HASH+RND+SIGN) — DLL 호출 직후 지운다. Reader_SendCommand는
+                // 이 호출이 완료되는 시점에 이미 데이터를 native 버퍼로 전달했으므로(P/Invoke는
+                // 동기 호출), await가 끝난 지금 지워도 전송에는 영향이 없다.
+                Array.Clear(data, 0, data.Length);
+            }
+
+            var outcome = MapKeyDownloadAuthOutcome(raw);
+            if (raw.Kind == RawReaderCommandKind.Response)
+            {
+                // [74] 응답 원본 배열(암호화 데이터 512byte 포함) — 필요한 필드를 outcome으로
+                // 복사해낸 뒤 지운다.
+                Array.Clear(raw.Data, 0, raw.Data.Length);
+            }
+
+            return outcome;
+        }
+
+        /// <summary>[65](Using Key 전송) 전송 → [75] 응답 대기(§3.4). encryptedData/mac은
+        /// Protocol/Reader/KeyDownloadRequestBuilder가 요구하는 정확한 길이(128/16)의 ASCII
+        /// 문자열이어야 한다 — 이 메서드는 바이트를 직접 만들지 않는다(계층 규칙).
+        ///
+        /// 메모리 클리어(development_plan.md P24-2 신규 요구사항): 조립한 요청 원본 배열은
+        /// DLL 호출 직후 Array.Clear로 지운다. [75] 응답(응답코드+모듈ID 12byte)은 민감정보를
+        /// 담지 않으므로 클리어 대상이 아니다.</summary>
+        internal async Task<KeyDownloadUsingKeyCommandOutcome> SendKeyDownloadUsingKeyCommandAsync(string encryptedData, string mac, TimeSpan timeout)
+        {
+            byte[] data = KeyDownloadRequestBuilder.BuildUsingKeyRequest(encryptedData, mac);
+            RawReaderCommandResult raw;
+            try
+            {
+                raw = await SendAndAwaitAsync(ReaderCommandCodes.KEY_DOWNLOAD_USING_KEY_REQUEST, ReaderCommandCodes.KEY_DOWNLOAD_USING_KEY_RESPONSE, data, data.Length, timeout).ConfigureAwait(false);
+            }
+            finally
+            {
+                // [65] 요청 원본 배열(암호화 데이터+MAC) — DLL 호출 직후 지운다.
+                Array.Clear(data, 0, data.Length);
+            }
+
+            return MapKeyDownloadUsingKeyOutcome(raw);
+        }
+
+        // ===================== IKeyDownloadReaderEndpoint 명시적 구현(P24-4) =====================
+        //
+        // 위 세 메서드는 internal이라 암시적 인터페이스 구현이 안 된다(인터페이스 자체가
+        // internal이라도, 구현 멤버는 최소 public이어야 한다) — 그렇다고 메서드 접근자를 public으로
+        // 넓히면 이 클래스의 다른 internal 명령 4종과 접근성이 어긋난다. 명시적 인터페이스
+        // 구현으로 위 메서드 본문은 그대로 두고 얇은 위임만 추가한다(development_plan.md P24-4
+        // 지시 — "P24-2가 만든 메서드 본문은 절대 건드리지 마라").
+        Task<KeyDownloadStartCommandOutcome> IKeyDownloadReaderEndpoint.SendKeyDownloadStartCommandAsync(TimeSpan timeout) =>
+            SendKeyDownloadStartCommandAsync(timeout);
+
+        Task<KeyDownloadAuthCommandOutcome> IKeyDownloadReaderEndpoint.SendKeyDownloadAuthCommandAsync(string hash, string rnd, string sign, TimeSpan timeout) =>
+            SendKeyDownloadAuthCommandAsync(hash, rnd, sign, timeout);
+
+        Task<KeyDownloadUsingKeyCommandOutcome> IKeyDownloadReaderEndpoint.SendKeyDownloadUsingKeyCommandAsync(string encryptedData, string mac, TimeSpan timeout) =>
+            SendKeyDownloadUsingKeyCommandAsync(encryptedData, mac, timeout);
+
         /// <summary>
         /// P10-5 페일오버 무효화 — 이 리더기가 아직 응답 대기 중인 명령(보통 0x2B)을 0x60으로
         /// 무효화한다. 0x60은 WAITING_RESPONSE 상태에서도 항상 허용되며 대기 중이던 명령을 무엇이든
@@ -222,6 +315,51 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                     return CardReadCommandOutcome.CommunicationError(raw.Detail);
                 default:
                     return CardReadCommandOutcome.DllCallFailure(raw.DllResult, raw.DllResultName, raw.Detail);
+            }
+        }
+
+        private static KeyDownloadStartCommandOutcome MapKeyDownloadStartOutcome(RawReaderCommandResult raw)
+        {
+            switch (raw.Kind)
+            {
+                case RawReaderCommandKind.Response:
+                    return KeyDownloadStartCommandOutcome.FromParsed(KeyDownloadStartResponseParser.Parse(raw.Data));
+                case RawReaderCommandKind.Timeout:
+                    return KeyDownloadStartCommandOutcome.Timeout();
+                case RawReaderCommandKind.CommunicationError:
+                    return KeyDownloadStartCommandOutcome.CommunicationError(raw.Detail);
+                default:
+                    return KeyDownloadStartCommandOutcome.DllCallFailure(raw.DllResult, raw.DllResultName, raw.Detail);
+            }
+        }
+
+        private static KeyDownloadAuthCommandOutcome MapKeyDownloadAuthOutcome(RawReaderCommandResult raw)
+        {
+            switch (raw.Kind)
+            {
+                case RawReaderCommandKind.Response:
+                    return KeyDownloadAuthCommandOutcome.FromParsed(KeyDownloadAuthResponseParser.Parse(raw.Data));
+                case RawReaderCommandKind.Timeout:
+                    return KeyDownloadAuthCommandOutcome.Timeout();
+                case RawReaderCommandKind.CommunicationError:
+                    return KeyDownloadAuthCommandOutcome.CommunicationError(raw.Detail);
+                default:
+                    return KeyDownloadAuthCommandOutcome.DllCallFailure(raw.DllResult, raw.DllResultName, raw.Detail);
+            }
+        }
+
+        private static KeyDownloadUsingKeyCommandOutcome MapKeyDownloadUsingKeyOutcome(RawReaderCommandResult raw)
+        {
+            switch (raw.Kind)
+            {
+                case RawReaderCommandKind.Response:
+                    return KeyDownloadUsingKeyCommandOutcome.FromParsed(KeyDownloadUsingKeyResponseParser.Parse(raw.Data));
+                case RawReaderCommandKind.Timeout:
+                    return KeyDownloadUsingKeyCommandOutcome.Timeout();
+                case RawReaderCommandKind.CommunicationError:
+                    return KeyDownloadUsingKeyCommandOutcome.CommunicationError(raw.Detail);
+                default:
+                    return KeyDownloadUsingKeyCommandOutcome.DllCallFailure(raw.DllResult, raw.DllResultName, raw.Detail);
             }
         }
 
@@ -378,6 +516,13 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 Marshal.Copy(data, copy, 0, dataLength);
             }
 
+            // I-4(CP1 Opus 리뷰) — 이 `copy` 배열 인스턴스 하나가 아래 CompletePendingIfMatches와
+            // EventReceived 양쪽에 그대로 전달된다. 키다운로드 경로(SendKeyDownloadAuthCommandAsync
+            // 등)는 pending 쪽에서 받은 RawReaderCommandResult.Data(=이 copy)를 필요한 필드로 옮긴
+            // 뒤 Array.Clear로 지운다(위 ":203" 근처) — 지금은 EventReceived 구독자가 없어 문제가
+            // 없지만, 나중에 누가 EventReceived를 구독하면 CompletePendingIfMatches 쪽이 먼저 지운
+            // (이미 Array.Clear로 0으로 채워진) 데이터를 볼 위험이 있다. 구독자를 추가할 때는 배열을
+            // 공유하지 말고 각자 복사본을 갖도록 바꿔야 한다.
             CompletePendingIfMatches(eventType, commandCode, copy);
 
             EventReceived?.Invoke(this, new ReaderEventArgs(readerId, eventType, commandCode, copy));

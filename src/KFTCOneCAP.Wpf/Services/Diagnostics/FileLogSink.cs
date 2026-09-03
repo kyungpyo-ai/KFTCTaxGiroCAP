@@ -49,9 +49,16 @@ public sealed class FileLogSink : ILogSink
         //
         // 빈 줄은 파싱 정규식(PRD.md §1.3-b, `^\[([^\]]*)\] ...`)에 매치되지 않으므로 장래 서버/분석
         // 도구가 그냥 건너뛰면 된다 — 기계 파싱에 영향을 주지 않는다.
+        // Phase 24 후속(2026-09-02 사용자 요청) — 리더기 설정 화면 액션 경계선. 초기화/상태체크/
+        // 무결성체크/키다운로드는 메시지 내용이 성공/실패마다 달라 "이게 마지막 줄이다"를 메시지
+        // 패턴으로 특정할 수 없다(위 Payment 조건과 달리 고정 문구가 없다) — 그래서
+        // ReaderSetupViewModel.LogActionBoundary가 각 동작 끝에 내용과 무관한 고정 문구
+        // ("처리 종료")를 UI 카테고리로 한 줄 남기고, 여기서는 그 고정 문구만 보고 판단한다.
         bool appendBlankLineAfter =
-            record.Category == LogCategory.Payment
-            && record.Message.StartsWith("[PaymentOrchestrator] 거래 확정", StringComparison.Ordinal);
+            (record.Category == LogCategory.Payment
+                && record.Message.StartsWith("[PaymentOrchestrator] 거래 확정", StringComparison.Ordinal))
+            || (record.Category == LogCategory.Ui
+                && record.Message.EndsWith("처리 종료", StringComparison.Ordinal));
 
         string filePath = Path.Combine(LogPaths.LogDirectory, $"{record.Timestamp:yyyy-MM-dd}.log");
         byte[] bytes = Encoding.UTF8.GetBytes(appendBlankLineAfter ? line + Environment.NewLine : line);

@@ -11,6 +11,22 @@
   낮췄던 임시 조치(docs/operations/development_plan.md "진행 중 임시 조치" 절)를, Phase 23 화면 작업이
   끝난 P23-8 착수 시점에 requireAdministrator로 되돌렸다. UAC 프롬프트 재발생을 실측으로 확인함
   (development_plan.md P23-8 "작업 2" 절 참고).
+
+  [원복 완료, 2026-09-02] Phase 24 CP1 리뷰 대응(개발 에이전트가 UAC 보안 데스크톱 프롬프트를
+  자동화로 승인할 수 없어 keydown-test 진단 하네스 실행 검증이 막힘) 때문에 한시적으로 asInvoker로
+  낮췄던 임시 조치를, CP1/CP2(P24-1~P24-6) 검증이 모두 끝나 P24-7(실장비 검증) 착수 직전인 이
+  시점에 requireAdministrator로 되돌렸다. C:\KFTC_PosAgent\KFTCTaxLog\에 Authenticated Users
+  Modify 권한이 있어 asInvoker로도 로그 쓰기는 됐지만, P24-7은 관리자 권한 상시 실행이라는 운영
+  전제를 그대로 따라야 한다. 참고(2026-09-02): 이 절을 처음 작성할 때 XML 주석 안에 하이픈 두 개가
+  연속된 인자 표기를 그대로 적었다가 매니페스트 리소스 파싱이 깨진 적이 있다(XML 주석은 내용에
+  하이픈 두 개 연속을 허용하지 않는다) — 이후로 이 파일 주석에는 그런 표기를 쓰지 않는다.
+
+  [원복 완료, 2026-09-02] P24-7(실장비 검증) 완료 후 Opus 전체 리뷰가 나온 개선권장(R-1~R-9,
+  이어서 그 라운드가 만든 치명적 회귀 C-A까지) 여러 라운드를 수정·재검증하는 동안, 사용자가 매번
+  UAC 승인을 해줄 수 없는 상황이라 한시적으로 asInvoker로 낮췄다. 실장비는 다시 쓰지 않고
+  keydown-test/van-call-test/payment-flow-test 하네스 재검증만 여러 라운드 반복했다. 4차 Opus
+  전체 리뷰에서 치명적 0건으로 확정된 시점에 requireAdministrator로 되돌렸다
+  (development_plan.md "Phase 24 전체 4차 Opus 리뷰" 절 참고).
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

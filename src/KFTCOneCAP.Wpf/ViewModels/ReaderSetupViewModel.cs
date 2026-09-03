@@ -82,7 +82,8 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
             () => ExecuteInitAsync(_connectionManager.Reader1, "리더기1", () => Reader1PortSelection));
         Reader1StatusCheckButton = new ReaderActionButtonViewModel(this, "상태체크", "확인중...",
             () => ExecuteStatusAsync(_connectionManager.Reader1, "리더기1", () => Reader1PortSelection));
-        Reader1KeyDownloadButton = new ReaderActionButtonViewModel(this, "키다운로드", "다운로드중...");
+        Reader1KeyDownloadButton = new ReaderActionButtonViewModel(this, "키다운로드", "다운로드중...",
+            () => ExecuteKeyDownloadAsync(_connectionManager.Reader1, "리더기1", () => Reader1PortSelection));
         Reader1IntegrityCheckButton = new ReaderActionButtonViewModel(this, "무결성체크", "체크중...",
             () => ExecuteIntegrityAsync(_connectionManager.Reader1, "리더기1", () => Reader1PortSelection));
         Reader1UpdateButton = new ReaderActionButtonViewModel(this, "업데이트", "업데이트중...");
@@ -91,7 +92,8 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
             () => ExecuteInitAsync(_connectionManager.Reader2, "리더기2", () => Reader2PortSelection));
         Reader2StatusCheckButton = new ReaderActionButtonViewModel(this, "상태체크", "확인중...",
             () => ExecuteStatusAsync(_connectionManager.Reader2, "리더기2", () => Reader2PortSelection));
-        Reader2KeyDownloadButton = new ReaderActionButtonViewModel(this, "키다운로드", "다운로드중...");
+        Reader2KeyDownloadButton = new ReaderActionButtonViewModel(this, "키다운로드", "다운로드중...",
+            () => ExecuteKeyDownloadAsync(_connectionManager.Reader2, "리더기2", () => Reader2PortSelection));
         Reader2IntegrityCheckButton = new ReaderActionButtonViewModel(this, "무결성체크", "체크중...",
             () => ExecuteIntegrityAsync(_connectionManager.Reader2, "리더기2", () => Reader2PortSelection));
         Reader2UpdateButton = new ReaderActionButtonViewModel(this, "업데이트", "업데이트중...");
@@ -220,6 +222,11 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
 
         var outcome = await reader.SendInitCommandAsync(CommandTimeout);
         LogOutcome(readerLabel, "초기화", outcome.Kind, outcome.ResponseCode, outcome.DllResultName, outcome.DllResult, outcome.Detail);
+        // R-9(Phase 24 전체 Opus 리뷰) — RaiseResultMessage→MessageBox.Show가 동기 모달이라, 그
+        // 뒤에 LogActionBoundary를 부르면 사용자가 알림창을 닫을 때까지 "처리 종료" 로그가 안
+        // 찍힌다. 이 로그는 "완료" 의미가 아니라 "로그 기록이 끝났다"는 뜻이므로 알림 직전이 더
+        // 정확하다 — 순서를 뒤바꾼다.
+        LogActionBoundary(readerLabel, "초기화");
         RaiseResultMessage(BuildMessage("초기화", outcome.Kind, outcome.ResponseCode, outcome.DllResultName, outcome.DllResult, outcome.Detail));
     }
 
@@ -245,6 +252,9 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
         string? successExtra = outcome.Kind == ReaderCommandOutcomeKind.Success
             ? $"리더기 인증 식별번호 : {outcome.ReaderAuthId}\n모듈 ID : {outcome.ModuleId}"
             : null;
+        // R-9(Phase 24 전체 Opus 리뷰) — 모달 알림보다 먼저 "처리 종료"를 기록한다(위 ExecuteInitAsync
+        // 주석 참고).
+        LogActionBoundary(readerLabel, "상태체크");
         RaiseResultMessage(BuildMessage("상태체크", outcome.Kind, outcome.ResponseCode, outcome.DllResultName, outcome.DllResult, outcome.Detail, successExtra));
     }
 
@@ -268,12 +278,89 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
         string? successExtra = outcome.IsSuccess
             ? $"리더기 인증 식별번호 : {outcome.ReaderAuthId}\n모듈 ID : {outcome.ModuleId}"
             : null;
+        // R-9(Phase 24 전체 Opus 리뷰) — 모달 알림보다 먼저 "처리 종료"를 기록한다(위 ExecuteInitAsync
+        // 주석 참고). 리스트 새로고침(RefreshIntegrityRowsAsync)은 사용자가 알림창을 닫은 뒤 화면
+        // 갱신이 이어지는 원래 순서를 유지한다 — 이번 수정 범위는 로그 순서뿐이다.
+        LogActionBoundary(readerLabel, "무결성체크");
         RaiseResultMessage(BuildMessage("무결성 체크", outcome.Kind, outcome.ResponseCode, outcome.DllResultName, outcome.DllResult, outcome.Detail, successExtra));
 
         // 사용자 요청(2026-08-20): 무결성체크가 끝나면 "조회" 버튼을 누르지 않아도 아래 리스트에
         // 바로 반영돼야 한다. P12-4가 성공/실패 양쪽 다 DB에 저장하므로(IntegrityCheckService),
         // 결과와 무관하게 항상 새로고침한다 — 실패 건도 리스트에 나타나야 한다.
         await RefreshIntegrityRowsAsync();
+    }
+
+    /// <summary>
+    /// 키다운로드 5단계(PRD.md §3.2) 화면 배선(P24-6). 시퀀스 오케스트레이션 자체는
+    /// <see cref="Services.Reader.KeyDownloadService"/>(P24-4)에 있다 — 이 메서드는
+    /// <see cref="ExecuteIntegrityAsync"/>와 동일하게 포트를 연결 상태로 맞추고, 서비스를 호출해
+    /// 결과를 문구로 바꿔 <see cref="ResultMessageReady"/>로 알리기만 한다. 이력을 남기지 않으므로
+    /// <see cref="RefreshIntegrityRowsAsync"/>를 호출하지 않고, <see cref="_integrityCheckStore"/>도
+    /// 전혀 쓰지 않는다(PRD.md §3.1).
+    ///
+    /// <see cref="Services.Reader.KeyDownloadService"/>는 상태를 갖지 않는다(생성자 인자를 필드에
+    /// 저장할 뿐, 호출마다 VAN Mode를 새로 조회하는 책임은 <see cref="Services.Van.KeyDownloadVanClient"/>
+    /// 내부에 있다) — 매 호출 새로 만들어도 안전하고, 필드로 캐시할 이유도 없어 여기서 새로 만든다.
+    /// </summary>
+    private async Task ExecuteKeyDownloadAsync(ReaderService reader, string readerLabel, Func<string> comPortAccessor)
+    {
+        string comPort = ComPortFormat.StripUnavailableSuffix(comPortAccessor());
+        _connectionManager.EnsureOpenForSelection(reader, readerLabel, comPort);
+
+        Services.Reader.KeyDownloadOutcome outcome;
+        try
+        {
+            // R-2(Phase 24 전체 Opus 리뷰) — readerLabel을 전달해 KEYDOWN 로그에 어느 리더기 구간인지
+            // 남긴다(초기화/상태체크/무결성체크가 이미 LogOutcome으로 남기는 것과 동일한 목적).
+            var service = new Services.Reader.KeyDownloadService(reader, new Services.Van.KeyDownloadVanClient(), readerLabel);
+            outcome = await service.RunAsync();
+        }
+        catch (Exception ex)
+        {
+            // 개선권장 #4(Phase 24 2차 Opus 리뷰) — VanService.RelayAsync가 전체를 try/catch(Exception)
+            // 로 감싸는 것과 동일한 안전망을 여기도 둔다. KeyDownloadService.RunAsync 경로는 지금
+            // 실제로 예외를 던지지 않는 것으로 확인됐지만(방어적 차원), 화면 스레드에서 예외가 그대로
+            // 밖으로 새 나가 앱이 죽는 일이 없도록 CommunicationFailure류(ReaderDllFailure)로 안전하게
+            // 떨어뜨린다.
+            FileLogger.Error($"[{readerLabel} 키다운로드] 예상치 못한 예외로 중단: {ex.GetType().Name}: {ex.Message}");
+            outcome = Services.Reader.KeyDownloadOutcome.ReaderFailure(
+                Services.Reader.KeyDownloadStage.Start, Services.Reader.ReaderFailureCategory.DllFailure,
+                string.Empty, string.Empty, $"예상치 못한 예외: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        // R-9(Phase 24 전체 Opus 리뷰) — 모달 알림보다 먼저 "처리 종료"를 기록한다(위 ExecuteInitAsync
+        // 주석 참고).
+        LogActionBoundary(readerLabel, "키다운로드");
+        RaiseResultMessage(BuildKeyDownloadMessage(outcome));
+    }
+
+    /// <summary>P24-6 — <see cref="Services.Reader.KeyDownloadOutcome"/>은 <see cref="ReaderCommandOutcomeKind"/>와
+    /// 모양이 달라(단계 + 통합 실패 종류) <see cref="BuildMessage"/>를 재사용하지 않는다. 성공 문구엔
+    /// 모듈 ID를, 실패 문구엔 단계 + 응답코드를 담는다(PRD.md §3.6).</summary>
+    private static string BuildKeyDownloadMessage(Services.Reader.KeyDownloadOutcome outcome)
+    {
+        if (outcome.IsSuccess)
+            return $"리더기 키다운로드 성공\n모듈 ID : {outcome.ModuleId}";
+
+        string stageLabel = outcome.Stage switch
+        {
+            Services.Reader.KeyDownloadStage.Start => "① 키 다운로드 시작",
+            Services.Reader.KeyDownloadStage.ServerAuth => "② 상호인증(서버)",
+            Services.Reader.KeyDownloadStage.Auth => "③ 키 다운로드 상호 인증",
+            Services.Reader.KeyDownloadStage.ServerKeyBundling => "④ Key Bundling(서버)",
+            Services.Reader.KeyDownloadStage.UsingKey => "⑤ Using Key 전송",
+            _ => outcome.Stage.ToString(),
+        };
+
+        string reason = outcome.IsDeviceReplacementRequired
+            ? $"응답코드: {outcome.ResponseCode} (단말기 교체 요망)"
+            : string.IsNullOrEmpty(outcome.ResponseCode)
+                ? outcome.Detail
+                : $"응답코드: {outcome.ResponseCode}";
+
+        return string.IsNullOrEmpty(reason)
+            ? $"리더기 키다운로드 실패\n단계: {stageLabel}"
+            : $"리더기 키다운로드 실패\n단계: {stageLabel}\n{reason}";
     }
 
     /// <summary>P12-3 "실패 원인 구분"(PRD §6.6) — 명령 4종이 공유하는 결과 문구 매핑을 이 한 곳에
@@ -324,6 +411,16 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
                 break;
         }
     }
+
+    /// <summary>Phase 24 후속(2026-09-02 사용자 요청) — 액션 1건(초기화/상태체크/무결성체크/
+    /// 키다운로드)이 성공이든 실패든 끝났을 때 로그에 남길 고정 경계 문구. 각 동작의 마지막 로그
+    /// 줄은 성공/실패에 따라 내용이 매번 달라(특히 키다운로드는 단계별로 여러 줄이고 마지막 줄이
+    /// 성공/실패 단계마다 다르다) 메시지 내용만으로는 "이게 이 동작의 끝이다"를 특정할 수 없다 —
+    /// 그래서 내용과 무관한 고정 문구를 UI 카테고리로 별도로 남기고,
+    /// <see cref="FileLogSink"/>가 이 문구("처리 종료")만 보고 빈 줄을 추가한다(가독성, 동작 단위
+    /// 구분선).</summary>
+    private static void LogActionBoundary(string readerLabel, string commandLabel) =>
+        FileLogger.Info(LogCategory.Ui, $"[{readerLabel} {commandLabel}] 처리 종료");
 
     // ===================== 조회(무결성 체크 리스트, PRD 4.5/4.6) =====================
 

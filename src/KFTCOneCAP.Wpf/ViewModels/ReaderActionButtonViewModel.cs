@@ -55,17 +55,26 @@ public sealed partial class ReaderActionButtonViewModel : ObservableObject
         IsLoading = true;
         Content = _loadingContent;
 
-        if (_customExecute != null)
+        // R-4(Phase 24 전체 Opus 리뷰) — _customExecute() 실행 중 예외가 나면(현재 Phase 24 코드
+        // 경로상 실제로 던지는 곳은 없지만 방어적으로) try/finally 없이는 아래 복원 코드가 실행되지
+        // 않아 리더기 카드 전체(패널 IsEnabled가 _owner.IsBusy에 물려 있음)가 영구 비활성된다.
+        // 예외 자체는 삼키지 않는다 — AsyncRelayCommand가 다시 던지도록 그대로 전파한다.
+        try
         {
-            await _customExecute();
+            if (_customExecute != null)
+            {
+                await _customExecute();
+            }
+            else
+            {
+                await Task.Delay(3000);
+            }
         }
-        else
+        finally
         {
-            await Task.Delay(3000);
+            Content = _normalContent;
+            IsLoading = false;
+            _owner.IsBusy = false;
         }
-
-        Content = _normalContent;
-        IsLoading = false;
-        _owner.IsBusy = false;
     }
 }

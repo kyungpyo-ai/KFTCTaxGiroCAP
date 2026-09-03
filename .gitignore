@@ -6,3 +6,8 @@ obj/
 # Phase 13 이미지 자산 작업의 중간 산출물(크롭 실험/생성 원본) — 완성본은
 # src/KFTCOneCAP.Wpf/Assets/Images/PaymentNotice/에 이미 커밋돼 있다.
 docs/payment_relay/images/_preview_crop/
+
+# Phase 24 CP1 리뷰 중 발견 — KFTC_GIRO.dll이 프로세스 CWD 기준으로 만드는 자체 로그
+# (VAN 서버 IP/포트가 평문으로 남는다). 이 앱 코드가 만드는 로그(C:\KFTC_PosAgent\KFTCTaxLog\)와
+# 무관한 DLL 내부 산출물이라 커밋 대상이 아니다.
+/log/

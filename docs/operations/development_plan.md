@@ -3,8 +3,8 @@
 > `PRD.md`(무엇을) → `ROADMAP.md`(어떤 순서로) → **이 문서(Task 단위로 무엇을 어떻게, 어디까지 하면
 > 끝인지)**. 실제 코드 작성은 이 문서의 Task를 순서대로 따라간다.
 >
-> **Phase 24는 아직 작성하지 않았다** — 2차 범위에서 확정한 방식대로(2026-08-20 사용자 확정)
-> **한 Phase씩 착수 직전에 작성**한다. 앞 Phase의 결과에 따라 뒤쪽 계획이 조정될 여지가 있다.
+> Phase 22(완료) · Phase 23(완료) · **Phase 24(2026-09-02 작성, 착수 전)**. 2차 범위에서 확정한
+> 방식대로(2026-08-20 사용자 확정) **한 Phase씩 착수 직전에 작성**한다.
 
 ## 공통 규칙
 
@@ -1454,3 +1454,817 @@ Phase 23 항목도 "완료(2026-09-02)"로 갱신돼 있다.
 - Phase 24(리더기 키다운로드) 착수 직전에 이 문서에 Phase 24 계획을 이어서 작성한다.
 - Phase 24는 **VAN Mode를 가맹점 설정값에서 받는다**(`ROADMAP.md` Phase 순서 근거) — P23-1의
   `ShopSettingsService`가 그 입력이 되므로, Phase 24 계획서는 이 클래스의 최종 형태를 전제로 쓴다.
+
+---
+
+# Phase 24 — 리더기 키다운로드
+
+**이 Phase가 끝나면**: 리더기 설정 화면의 "키다운로드" 버튼이 실제로 동작한다 — 리더기와 키다운로드
+서버 사이를 5번 왕복해 리더기에 Using Key가 주입되고, 성공/실패가 단계와 응답코드까지 담긴 알림창과
+`KEYDOWN` 로그로 남는다.
+
+> **이 Phase의 위험은 "되돌릴 수 없다"는 데 있다.** 키다운로드는 리더기의 IPEK 버전을 **실제로
+> 소모**한다(`PRD.md` §3.4 — 버전2가 `"00"`~`"FF"`, 소진 후 버전1이 `'0'`~`'F'`, 둘 다 소진되면
+> 단말기 교체). 결제 Flow처럼 "실패하면 다시 하면 되는" 작업이 아니다. 그래서 **실장비 왕복이
+> 필요한 Task를 맨 뒤 하나로 몰고**(P24-7), 그 앞의 모든 것(전문 조립·파싱·슬라이싱·시퀀스 분기)은
+> 실장비 없이 하네스로 끝내 둔다. 조립을 틀린 채로 실장비에 붙이면 IPEK 하나를 그냥 버린다.
+
+## 착수 전 확정 사항 (2026-09-02 사용자 확인)
+
+1. **실장비 검증 범위** — `ROADMAP.md` 원안대로 **리더기 2대 각각 1회씩 성공 경로를 수행**한다.
+   IPEK 2개 소모를 감수한다. 실패 경로는 실장비로 재현하지 않고 하네스로 덮는다.
+2. **키다운로드 서버 Mode** — **`OT`(외부망 테스트)** 로 검증한다. 단, **코드는 Mode를 상수로
+   박지 않는다** — `PRD.md` §3.5대로 가맹점 설정값(`ShopSettings.VanMode`)을 그대로 쓰고, 검증할
+   때 화면에서 `OT`를 골라 둔다. → `PRD.md` §4 미확정 **#6의 Mode 부분 해소**.
+3. **`FNAISCRDVAN` 호출 계층** — **저수준 invoker를 공통 추출**한다. P/Invoke 호출·`byte[]` 마샬링·
+   NUL 종단·버퍼 할당·예외 차단을 `Services/Van/FnaisCrdVanInvoker`로 빼고, 기존 `VanService`(결제)와
+   새 키다운로드 클라이언트가 각자 **전문 조립/응답 절단만** 담당한다. 결제 경로의 동작은 바뀌지
+   않는다(P24-3의 완료 조건이 그것을 보증한다).
+4. **리더기 응답 3초 타임아웃** — **일단 3초 전제로 진행**한다. 아래 "위험·미확정" #1 참고.
+
+## 착수 전 전제 (코드 실측, 2026-09-02)
+
+- **버튼과 델리게이트 자리가 이미 비어 있다** — `ViewModels/ReaderSetupViewModel.cs:80`(리더기1) /
+  `:89`(리더기2)의 `new ReaderActionButtonViewModel(this, "키다운로드", "다운로드중...")`에
+  `customExecute` 인자만 없다. `ExecuteIntegrityAsync`(`:260`~`:277`)가 그대로 본뜰 패턴이다 —
+  `ComPortFormat.StripUnavailableSuffix` → `EnsureOpenForSelection` → 서비스 호출 → `LogOutcome` →
+  `RaiseResultMessage`. **XAML은 한 줄도 고치지 않는다.**
+- **`LogCategory.Keydown`이 이미 있다** — `Services/Diagnostics/LogCategory.cs`에 Phase 22가
+  "키다운로드 5단계(PRD §3)"라는 주석과 함께 미리 만들어 뒀다. 새로 만들 카테고리가 없다.
+- **리더기 명령 추가 지점이 좁다** — `Services/Reader/ReaderService.cs`의 `SendAndAwaitAsync`
+  (`:238`, private)가 요청코드/기대응답코드/data/timeout만 받는 범용 왕복이다. 공개 명령 3종을
+  그 위에 얹는 것으로 끝난다(기존 4종과 동일한 구조). **재연결·라운드 토큰·타임아웃 경합은 이미
+  거기 구현돼 있으므로 새로 설계하지 않는다.**
+- **프레임 길이 한계는 문제가 안 된다** — `Reader_SendCommand`의 `MAX_FRAME_LENGTH`는 **4096**
+  (`docs/reader_dll/API명세서.md` §6 반환값 표). 이 Phase의 최대 요청 data는 `[64]`의 **608바이트**라
+  여유가 크다.
+- **`VanService`는 그대로 쓸 수 없다** — `RelayAsync`가 응답을 `populatedRequest.Schema.TotalLength`
+  만큼 잘라 온다(`VanService.cs`). ISO 전문은 **요청과 응답의 길이가 다르므로**(0100=60 / 0110=660)
+  그 절단 규칙이 성립하지 않는다. 인터페이스도 `PosRequestTelegram`을 받는다. → 확정 사항 3.
+- **화면 경합은 이미 막혀 있다** — 키다운로드는 리더기 설정 화면에서만 시작되고, 그 화면이 열려
+  있는 동안 POS 요청은 `SetupScreenGate`가 `E03`으로 거부한다(Phase 23 P23-2/P23-4). **새로 만들
+  경합 장치가 없다.**
+
+## 이 Phase에서 손대지 않는 것 (범위 밖 확정)
+
+- **암호 연산** — RSA2048 서명 검증, AES128, SHA256, DUKPT 파생. 전부 리더기와 서버가 한다
+  (`PRD.md` §3.3). **`System.Security.Cryptography`를 참조하는 코드를 한 줄도 쓰지 않는다** —
+  쓰고 있다면 설계를 잘못한 것이다.
+- **롯데월드 예외 분기**(응답 AN 642 / RND 64) — 구현하지 않는다(`PRD.md` §3.5).
+- **자동 재시도** — 어느 단계에서 실패하든 즉시 중단한다. IPEK 소모 때문이다(`PRD.md` §3.6).
+- **앱 기동 시 자동 키다운로드 / 결제 중 자동 복구** — 버튼을 눌렀을 때만(`PRD.md` §3.1).
+- **로컬 DB 이력** — 무결성체크와 달리 남기지 않는다(`PRD.md` §3.1). `IntegrityCheckStore` 계열을
+  건드리지 않는다.
+- **XAML / 화면 레이아웃** — 버튼은 이미 있다(`PRD.md` §3.1).
+- **`ReaderSerial.dll` 자체 수정** — 별도 저장소(`C:\Project\KFTCReaderDLL`) 몫이다.
+- **P-39 응답코드 해석 분기** — `"00"`만 성공으로 보고 나머지는 받은 값을 그대로 노출한다
+  (`PRD.md` §3.5, §4 미확정 #1). `395`(단말기 교체 요망)만 예외로 안내 문구를 붙인다.
+- **결제 경로의 동작 변경** — P24-3의 invoker 추출은 **리팩터링이지 기능 변경이 아니다.**
+
+## 위험 · 미확정 (착수 시점에 열려 있는 것)
+
+| # | 항목 | 현재 상태 | 걸리면 어떻게 되나 |
+|---|---|---|---|
+| 1 | **리더기 응답 3초 타임아웃** | `ReaderSerial.dll`은 일반 명령에 3초(거래 명령만 200초, `docs/reader_dll/DLL연동가이드.md` CALLBACK 표). `[63]`/`[64]`/`[65]`가 어느 쪽인지 문서에 명시가 없다. **일단 3초 전제로 진행**(2026-09-02 사용자 확정) | `[64]`에서 리더기가 RSA2048 검증에 3초 넘게 쓰면 **DLL이 먼저 `READER_EVENT_TIMEOUT`을 올려** 앱이 아무리 오래 기다려도 성공할 수 없다. 그때는 별도 저장소(`KFTCReaderDLL`)에서 이 명령들을 거래 타임아웃 대상으로 분류해야 한다 — **이 저장소에서는 해결할 수 없는 종류의 실패**이므로, P24-7에서 이 증상이 나오면 즉시 중단하고 사용자에게 보고한다(재시도 금지 — IPEK만 소모된다) |
+| 2 | **P-39 응답코드 값 목록** | 미확보(`PRD.md` §4 #1). `ISO 키다운로드.pdf`가 4페이지 발췌본 | blocker 아님. `"00"`만 성공 처리 |
+| 3 | **응답 전문 길이 판정** | `FNAISCRDVAN`의 `outData`에는 길이 정보가 없다. 전문 구조가 고정 길이이므로 **0110=660 / 0130=196으로 고정 절단**한다(P24-1) | 실서버 응답이 이 길이와 다르면 P24-7에서 드러난다. 그래서 절단 전에 "TEXT 개시문자 `ISO` + 전문 TYPE" 선행 검증을 넣는다 |
+| 4 | **키다운로드 서버 실제 도달 여부** | 개발 완료라고 확인됨(2026-08-31). 다만 결제용 VAN 서버는 여전히 `nRet=-1` | P24-7에서 ②번 단계가 `nRet=-1`로 끝나면 서버 구간 미도달 — 리더기 구간(①)까지만 실증하고 정직하게 남긴다 |
+
+## 체크포인트 (Opus 리뷰 지점)
+
+| 체크포인트 | Task | 성격 |
+|---|---|---|
+| **CP1** | P24-1 ~ P24-5 | 전문 계층 + invoker 추출 + 5단계 오케스트레이션 + 하네스. **실장비·서버 없이 전부 검증 가능.** 여기서 조립/슬라이싱/시퀀스가 완전히 맞아야 한다(2026-09-02 순서 정정으로 P24-4/P24-5 내용을 맞바꿈 — P24-4 절 상단 참고) |
+| **CP2 ★** | P24-6 | 화면 배선. 아직 실장비를 쓰지 않지만 **되돌릴 수 없는 조작의 방아쇠**가 여기서 연결된다 |
+| — | P24-7 | 실장비 2대 실측 · 회귀 · 문서 갱신. **IPEK를 실제로 소모하는 유일한 Task** |
+
+---
+
+## P24-1. ISO 키다운로드 전문 계층 — `Protocol/KeyDownload/`
+
+서버 구간 전문 4종(0100/0110/0120/0130)의 조립·파싱. **결제 전문(`Protocol/Pos/`)과 형식이 완전히
+다르므로 별도 계열로 둔다**(`PRD.md` §3.5) — `Protocol/Pos/`의 타입을 재사용하지도, 참조하지도 않는다.
+
+- `IsoKeyDownloadMessageType` — `0100`/`0110`/`0120`/`0130` 상수와 전문별 PRIMARY BITMAP 고정 문자열.
+  **비트맵을 계산하지 않는다**(`PRD.md` §3.5 — 원캡이 계산하지 않는 값이다).
+- `IsoMessageStamp`(가칭) — **전문전송일시(`MMDDhhmmss`)와 전문추적번호(`hhmmss`)를 하나의
+  `DateTime`으로 한 번에 만드는 함수.** `PRD.md` §3.5가 명시적으로 요구한다 — 두 값을 따로 만들면
+  초 경계에서 어긋난다. **이 둘을 각각 `DateTime.Now`로 만드는 코드를 쓰면 안 된다.**
+- `IsoKeyDownloadRequestBuilder` — 0100/0120 조립.
+  - 0100 = `"ISO"`(3) + `"023400052"`(9) + `"0100"`(4) + `"0220001000000000"`(16) + 일시(10) +
+    추적번호(6) + P-28(12) = **60바이트**
+  - 0120 = 위와 같고 TYPE `"0120"`, BITMAP `"0220000800000000"`, P-29(524) = **572바이트**
+- `IsoKeyDownloadResponseParser` — 0110/0130 파싱.
+  - 0110 = 헤더부(48) + P-28(**610**) + P-39(2) = **660바이트**
+  - 0130 = 헤더부(48) + P-29(**146**) + P-39(2) = **196바이트**
+  - **절단 전에 `"ISO"` 개시문자와 전문 TYPE(`0110`/`0130`)을 먼저 확인**한다. 어긋나면 파싱 실패로
+    돌려준다(예외를 던지지 않는다 — `Protocol/Reader/*Parser`의 관례를 그대로 따른다).
+- 인코딩은 **ASCII**로 충분하다(전 필드가 숫자/영문). 한글이 없으므로 CP949 변환을 끌어들이지 않는다.
+
+**완료 조건**
+- [x] 조립한 0100이 정확히 60바이트, 0120이 572바이트다(단위 검증) — 임시 검증 프로그램(scratchpad,
+      커밋 안 함)으로 `IsoKeyDownloadRequestBuilder.BuildRequest0100/0120` 실행 결과 60/572바이트
+      확인, 헤더/TYPE/BITMAP/일시/추적번호/payload 오프셋까지 문자열 슬라이싱으로 대조
+- [x] 파싱기가 660/196바이트 응답에서 P-28/P-29와 P-39를 정확한 오프셋으로 꺼낸다 — 동일 임시
+      프로그램에서 660/196바이트 더미 응답을 구성해 `ParseResponse0110/0130`이 P-28(610)/P-29(146)/
+      P-39("00")를 정확히 추출함을 확인
+- [x] 전문전송일시와 전문추적번호가 **항상 같은 시각에서 나온다**(같은 `DateTime` 인자를 쓰는지
+      코드로 확인 + 자정/초 경계 값으로 단위 검증) — `IsoMessageStamp.Create(DateTime)` 하나의
+      인자로 두 값을 동시에 생성함을 코드로 확인, `2026-01-01 00:00:00`(자정)과
+      `2026-12-31 23:59:59`(초 경계) 두 값 모두 전문전송일시 뒤 6자리와 전문추적번호가 일치함을
+      검증
+- [x] `"ISO"`가 아니거나 TYPE이 다른 응답에서 파싱 실패를 돌려주고 **예외를 던지지 않는다** —
+      개시문자 오염, TYPE 불일치(길이 다른 경우/길이는 같지만 TYPE만 다른 경우), 길이 부족,
+      `null` 입력 5가지 모두 예외 없이 `ParseFailed=true`를 반환함을 확인
+- [x] `Protocol/KeyDownload/`가 `Protocol/Pos/`의 타입을 하나도 참조하지 않는다(grep) —
+      `grep -rn "Protocol.Pos" Protocol/KeyDownload/` 결과 XML 주석 문자열 1건뿐, 실제 타입 참조
+      없음
+
+## P24-2. 리더기 전문 3종 + `ReaderService` 명령 3종
+
+- `Protocol/Reader/ReaderCommandCodes.cs`에 6개 상수를 추가한다 — `KEY_DOWNLOAD_START_REQUEST`
+  (`0x63`) / `_RESPONSE`(`0x73`), `KEY_DOWNLOAD_AUTH_REQUEST`(`0x64`) / `_RESPONSE`(`0x74`),
+  `KEY_DOWNLOAD_USING_KEY_REQUEST`(`0x65`) / `_RESPONSE`(`0x75`).
+- 요청 data 조립(**STX/길이/ETX/LRC는 만들지 않는다 — DLL이 한다**, `PRD.md` §3.4):
+  - `[63]` — data 없음(`dataLength = 0`)
+  - `[64]` — HASH(64) + RND(32) + SIGN(512) = **608바이트**
+  - `[65]` — 암호화데이터(128) + MAC(16) = **144바이트**
+- 응답 파서 3종(`Protocol/Reader/`, 기존 파서 관례 그대로 — `ParseFailed`를 값으로 표현):
+  - `[73]` — 응답코드(2) + 키버전(2) + 리더기이름(16) + 리더기버전(16) + 모듈ID(10) = **46바이트**
+  - `[74]` — 응답코드(2) + 키버전(2) + 이름(16) + 버전(16) + 모듈ID(10) + 암호화데이터(512) = **558바이트**
+  - `[75]` — 응답코드(2) + 모듈ID(10) = **12바이트**
+- `Services/Reader/ReaderService.cs`에 공개 메서드 3종을 추가한다. **기존 `SendAndAwaitAsync`를
+  그대로 쓴다** — 재연결/라운드 토큰/타임아웃 처리를 새로 만들지 않는다.
+- 타임아웃 상수는 `ReaderSetupViewModel.CommandTimeout`(5초)을 그대로 쓰지 말고 **키다운로드 전용
+  상수**로 분리해 둔다(위험 #1이 현실화되면 이 한 곳만 조정하면 되도록).
+- **메모리 클리어(2026-09-02 사용자 확정, 신규 요구사항)** — `[64]` 요청 data(HASH+RND+SIGN)와
+  `[74]` 응답의 암호화 데이터(512), `[65]` 요청 data(암호화 데이터+MAC)는 **다음 단계로 필요한
+  부분만 복사해 넘긴 뒤, 원본 배열을 그 자리에서 `Array.Clear(buffer, 0, buffer.Length)`로 지운다.**
+  이 프로젝트에 기존 선례가 없는 새 관례다(PIN(`PinFieldEncoder`)도 지금까지 로그 미기록까지만
+  했고 메모리 클리어는 안 했다) — 키다운로드가 다루는 키 자재가 그보다 민감해 이번에 새로 만든다.
+  클리어 대상은 파서가 반환하기 전에 복사가 끝난 원본 응답 `byte[]`(raw response data)와, 빌더가
+  DLL에 넘긴 뒤의 요청 `byte[]` 양쪽 모두다.
+  **한계(2026-09-02 명시)**: `Array.Clear`는 그 시점의 최신 배열 복사본만 지운다 — GC가 그 전에
+  세대 압축(compaction)으로 배열을 옮긴 적이 있다면 옛 위치의 잔여 바이트까지는 지우지 못한다.
+  이 프로젝트 타겟(.NET Framework 4.8)에는 `CryptographicOperations.ZeroMemory` 같은 상위 API도
+  없다. 즉 이번 조치는 **best-effort**이며 암호학적으로 흔적이 전혀 없음을 보장하지 않는다 —
+  할당 시점부터 `GCHandle.Alloc(..., GCHandleType.Pinned)`로 고정해 압축 자체를 막는 더 강한
+  방법은 **의도적으로 이번 Phase 범위 밖으로 미뤘다**(Phase 25에서 기존 결제 Flow 재정비와 함께
+  한 번에 다룬다, `ROADMAP.md` Phase 25 참고).
+
+**완료 조건**
+- [x] `[64]` 요청 data가 정확히 608바이트, `[65]`가 144바이트로 조립된다(단위 검증) — scratchpad
+      임시 콘솔 프로젝트(커밋 안 함)로 `KeyDownloadRequestBuilder.BuildAuthRequest`/
+      `BuildUsingKeyRequest` 실행 결과 608/144바이트 확인, HASH/RND/SIGN·암호화데이터/MAC 오프셋도
+      문자열 슬라이싱으로 대조
+- [x] 응답 3종 파서가 정상 길이 데이터에서 각 필드를 정확한 오프셋으로 꺼낸다 — 동일 임시
+      프로그램에서 46/558/12바이트 더미 응답을 구성해 `KeyDownloadStartResponseParser`/
+      `KeyDownloadAuthResponseParser`/`KeyDownloadUsingKeyResponseParser`가 응답코드/키버전/
+      리더기이름/리더기버전/모듈ID/암호화데이터를 정확한 오프셋으로 추출함을 확인
+- [x] 길이가 모자란 데이터에서 파서가 `ParseFailed`를 돌려주고 예외를 던지지 않는다 — 3종 파서
+      모두 길이 부족 데이터와 `null` 입력 총 6가지 케이스에서 예외 없이 `ParseFailed=true`를 반환함을
+      확인
+- [x] `Reader_SendCommand` 호출부가 STX/ETX/LRC를 만들지 않는다(코드 확인) — `KeyDownloadRequestBuilder`는
+      요청 payload(HASH+RND+SIGN, 암호화데이터+MAC)만 이어붙이고, `ReaderService`의 신규 메서드
+      3종도 그 결과를 `SendAndAwaitAsync`(→ `SendCommandSafe` → `Reader_SendCommand`)에 그대로
+      넘길 뿐 STX/길이/ETX/LRC를 만드는 코드가 없다(기존 4개 명령과 동일한 경로)
+- [x] 응답코드가 `"00"`이 아닌 경우(`10`/`11`/`13`/`22`/`23`)를 업무 실패로 구분해 돌려준다 — 임시
+      프로그램에서 `[73]` 코드 `13`, `[74]` 코드 `10`, `[75]` 코드 `11`/`13`/`22`/`23` 전부
+      `ParseFailed=false && IsSuccess=false`로 구분됨을 확인(각 Outcome의 `FromParsed`가
+      `BusinessFailure`로 매핑)
+- [x] `[64]` 요청 원본 배열(HASH+RND+SIGN)이 DLL 호출 직후 `Array.Clear`로 지워진다(코드 확인) —
+      `ReaderService.SendKeyDownloadAuthCommandAsync`의 `finally` 블록에서 `SendAndAwaitAsync` 완료
+      직후 `Array.Clear(data, 0, data.Length)` 호출
+- [x] `[74]` 응답 원본 배열(암호화 데이터 512바이트 포함)이 필요한 필드를 복사해낸 뒤
+      `Array.Clear`로 지워진다(코드 확인) — 같은 메서드에서 `MapKeyDownloadAuthOutcome(raw)`로
+      필드를 outcome에 복사한 직후 `raw.Kind == Response`일 때 `Array.Clear(raw.Data, ...)` 호출
+- [x] `[65]` 요청 원본 배열(암호화 데이터+MAC)이 DLL 호출 직후 `Array.Clear`로 지워진다(코드 확인) —
+      `ReaderService.SendKeyDownloadUsingKeyCommandAsync`의 `finally` 블록에서 동일하게 처리
+
+## P24-3. `FNAISCRDVAN` 저수준 invoker 공통 추출 ★
+
+**이 Task는 리팩터링이다 — 결제 동작이 바뀌면 실패한 것이다.**
+
+- `Services/Van/FnaisCrdVanInvoker`(가칭)를 만들어 아래만 담당하게 한다:
+  Mode/inData의 NUL 종단 `byte[]` 변환, `outData`/`out_szRetCode` **매 호출 새 할당**,
+  `Task.Run`으로 블로킹 호출 격리, `nRet`/`out_szRetCode` 반환, `DllNotFoundException` 등
+  **예외 전면 차단**(밖으로 던지지 않는다).
+- **응답 절단·전문 해석·마스킹 로깅은 invoker에 넣지 않는다** — 호출자마다 규칙이 다르다(결제는
+  요청 스키마 길이, 키다운로드는 전문별 고정 길이).
+- 기존 `VanService`는 이 invoker를 쓰도록 내부만 바꾼다. **`IVanRelayService` 인터페이스,
+  `VanRelayOutcome`, 로그 문구, `mode=` 토큰, `0x00` 포함 방어(H-1), 버퍼 부족 방어(L-1)는 전부
+  그대로 유지한다.**
+- `Services/Van/KeyDownloadVanClient`(가칭)가 invoker + P24-1의 조립/파싱을 조합해 ②/④를 담당한다.
+  Mode는 `ShopSettings.VanMode`를 **매 호출 조회**한다(`PRD.md` §2.6 — `VanService`와 동일 원칙).
+- **메모리 클리어(2026-09-02 사용자 확정, 신규 요구사항)** — `KeyDownloadVanClient`가 조립한 0100/
+  0120 요청 `byte[]`(P-28/P-29에 SIGN·HASH·RND·암호화 데이터를 포함)는 invoker 호출 직후, 0110/0130
+  응답 `byte[]`는 필요한 필드를 P24-1 파서로 복사해낸 직후 각각 `Array.Clear`로 지운다. **결제
+  경로(`VanService`/`FnaisCrdVanInvoker`)는 이 클리어 대상이 아니다** — 결제 전문은 카드번호/PIN 등
+  기존에도 안 지우던 필드라 이번에 범위를 넓히지 않는다(범위 확대는 별도 논의 사항).
+
+**완료 조건**
+- [x] `--van-call-test`가 **리팩터링 전과 동일한 결과**를 낸다(통과 4건 / 실패 0건) — 리팩터링
+      전(2026-09-02 14:57:10~15:02:00, `app.manifest`를 검증용으로 일시 `asInvoker`로 낮춰 실행)과
+      후(15:03:55~15:08:28, 동일 조건) 두 번 실행해 로그로 직접 대조했다. 둘 다 `통과 4건, 실패 0건`,
+      3전문(501008/800000/902614) 개별 호출과 902614 10회 반복 호출까지 결과·로그 문구가 동일했다.
+- [x] `--payment-flow-test`가 **71/71 그대로** 통과한다 — 리팩터링 후 실행(2026-09-02 15:09:xx),
+      로그 `[payment-flow-test] 완료 — 통과 71건, 실패 0건` 확인. 이 하네스는 `PaymentOrchestrator`가
+      `StubVanRelayService`를 쓰므로 이번 리팩터링(VanService/invoker)과 무관한 경로지만 회귀로
+      전량 재확인했다.
+- [x] 결제 경로 로그 문구가 리팩터링 전과 동일하다(`거래구분=... mode=... FNAISCRDVAN 호출 원문=...`
+      한 줄을 실제 로그로 대조) — 리팩터링 후 로그
+      `[VanService] 거래구분=902614 mode=OT FNAISCRDVAN 호출 원문=...`(2026-09-02 15:08:07.832)를
+      실제 로그 파일에서 확인, 리팩터링 전 로그(15:04:16 등)와 토큰 단위로 동일함을 대조했다.
+- [x] `KftcGiroNative.FNAISCRDVAN`를 직접 호출하는 곳이 **invoker 한 군데뿐**이다(grep) —
+      `grep -rn "KftcGiroNative.FNAISCRDVAN(" src/` 결과 `FnaisCrdVanInvoker.cs` 1곳뿐(2026-09-02).
+- [x] `KeyDownloadVanClient`가 Mode를 필드에 캐시하지 않는다(코드 확인) — 필드는 `_loadSettings`
+      (`Func<ShopSettings>`)뿐이고, `InvokeAndParseAsync` 안에서 매 호출 `_loadSettings().VanMode`로
+      새로 읽는다(`VanService.RelayAsync`와 동일 패턴).
+- [x] `KeyDownloadVanClient`의 0100/0120 요청 원본 배열이 invoker 호출 직후 `Array.Clear`로
+      지워진다(코드 확인) — `InvokeAndParseAsync`의 `try/finally`에서 `FnaisCrdVanInvoker.InvokeAsync`
+      호출 직후 `finally` 블록이 `Array.Clear(request, 0, request.Length)`를 실행한다(예외 발생
+      시에도 지워지도록 `finally` 사용).
+- [x] `KeyDownloadVanClient`의 0110/0130 응답 원본 배열이 필드 복사 직후 `Array.Clear`로
+      지워진다(코드 확인) — `parse(response)`로 `payload`/`responseCode`를 지역 변수로 복사해낸
+      직후 `Array.Clear(response, 0, response.Length)`를 실행한다. 추가로 invoker가 돌려준 원본
+      4096바이트 버퍼(`invokeResult.OutData`)도 `response`로 필요한 구간을 옮긴 직후 별도로
+      `Array.Clear`한다(완료 조건이 요구하는 범위를 초과하지만, 같은 응답 데이터를 담은 또 다른
+      배열이라 함께 지웠다).
+
+## P24-4. `KeyDownloadService` — 5단계 오케스트레이션
+
+> **2026-09-02 순서 정정**: 원안은 하네스(옛 P24-4)를 오케스트레이션(옛 P24-5)보다 먼저 두었으나,
+> "성공 경로가 5단계를 정확한 순서로 호출하는지"·"실패 시 그 단계에서 멈추고 뒤 단계를 호출하지
+> 않는지"를 검증하려면 그 순서/중단 로직을 가진 오케스트레이터가 먼저 있어야 한다 — 있지도 않은
+> 클래스의 동작을 하네스가 검사할 수는 없다. 그래서 **오케스트레이션을 먼저(P24-4), 그걸 검증하는
+> 하네스를 나중(P24-5)** 으로 순서를 바꿨다. Task 번호는 원래 계획서의 것을 유지하되(P24-4/P24-5
+> 내용만 맞바꿈), CP1 경계(P24-1~P24-4/신)는 그대로 "실장비 없이 전부 검증 가능"에서 안 바뀐다 —
+> 오히려 "하네스로 검증까지 끝낸 상태"로 CP1이 끝나는 것이 더 정확해졌다.
+
+- `Services/Reader/KeyDownloadService`가 리더기(P24-2)와 VAN 클라이언트(P24-3)를 받아 ①~⑤를
+  순서대로 실행한다. **WPF 타입을 알지 못한다**(계층 규칙). `Services` 내부이므로
+  `ConfigureAwait(false)`를 유지한다.
+- **테스트 가능하게 인터페이스로 받는다(2026-09-02, `IReaderEndpoint`/`IVanRelayService` 선례를
+  그대로 따름)**: `ReaderService`(sealed 구체 클래스)와 `KeyDownloadVanClient`(구체 클래스)를 직접
+  받으면 P24-5 하네스가 실장비/서버 없이 이 클래스를 검증할 수 없다(Phase 15의 `IReaderEndpoint`가
+  정확히 같은 이유로 존재한다 — `IReaderEndpoint.cs` 클래스 주석 참고). 그래서:
+  - `Services/Reader/IKeyDownloadReaderEndpoint`(가칭) — P24-2가 `ReaderService`에 추가한 3개
+    메서드(`SendKeyDownloadStartCommandAsync`/`SendKeyDownloadAuthCommandAsync`/
+    `SendKeyDownloadUsingKeyCommandAsync`)와 동일한 시그니처의 인터페이스. `ReaderService`가
+    이 인터페이스를 **구현**한다(sealed 클래스도 인터페이스는 구현할 수 있다 — 상속만 막힌다.
+    P24-2가 만든 메서드 본문은 그대로 두고 `: IKeyDownloadReaderEndpoint` 선언만 추가).
+  - `Services/Van/IKeyDownloadVanClient`(가칭) — P24-3의 `KeyDownloadVanClient`가 하는 일
+    (0100→0110 상호인증, 0120→0130 Key Bundling)의 최소 계약. `KeyDownloadVanClient`가 이
+    인터페이스를 구현한다.
+  - `KeyDownloadService`의 생성자는 이 두 인터페이스 타입을 받는다(구체 타입이 아니라).
+  - **P24-6(화면 배선)에서 운영 경로는 여전히 진짜 `ReaderService`/`KeyDownloadVanClient` 인스턴스를
+    그대로 넘긴다** — 인터페이스를 추가해도 운영 동작은 바뀌지 않는다, Phase 15의 `IReaderEndpoint`가
+    결제 Flow의 실제 하드웨어 경로를 하나도 안 바꾼 것과 동일하다.
+- 결과 타입은 **어느 단계에서 끝났는지**를 반드시 담는다(`KeyDownloadStage` 열거 + 응답코드 +
+  사람이 읽는 사유). `PRD.md` §3.6의 "실패 문구에 단계와 응답코드"가 여기서 결정된다.
+- **DB에 저장하지 않는다** — `IntegrityCheckService`와 달리 Store를 참조조차 하지 않는다.
+- `KEYDOWN` 카테고리 로깅(`PRD.md` §3.6): 단계별 **시작·응답**을 남기되 **SIGN/암호화 데이터/HASH/
+  RND는 길이만 남긴다.** 키버전·모듈ID·응답코드는 남긴다(현장 대응에 필요하고 민감정보가 아니다).
+- **메모리 클리어(2026-09-02 사용자 확정, 신규 요구사항)** — P24-2/P24-3이 각 단계에서 지우는
+  원본 배열과 별개로, 이 서비스가 단계 사이에 **직접 들고 있는** 중간 변수(예: `[73]` 응답에서 뽑아
+  `0100` 요청에 넘길 키버전+모듈ID 묶음처럼 relay 목적의 임시 값)도 다음 단계 호출이 끝나면
+  `Array.Clear`로 지운다. 시퀀스 전체가 끝난 시점에 이 서비스의 스코프 안에 남아 있는 민감 바이트
+  배열이 하나도 없어야 한다. **한계**: `Array.Clear`는 best-effort다(P24-2 캐비어트와 동일 — GC
+  압축이 옮긴 옛 복사본까지는 못 지움, net48엔 `CryptographicOperations.ZeroMemory`도 없음).
+  pin(`GCHandle.Alloc(..., Pinned)`)까지 강화하는 건 Phase 25로 미룬다.
+
+**완료 조건**
+- [x] `ReaderService`/`KeyDownloadVanClient`가 각각 `IKeyDownloadReaderEndpoint`/
+      `IKeyDownloadVanClient`를 구현한다(코드 확인) — 2026-09-02: `ReaderService : IKeyDownloadReaderEndpoint`,
+      `KeyDownloadVanClient : IKeyDownloadVanClient` 선언 확인. 세 메서드/두 메서드가 모두 `internal`이라
+      암시적 구현이 불가능해(인터페이스가 `internal`이어도 구현 멤버는 최소 `public`이어야 함)
+      **명시적 인터페이스 구현**(`Task<...> IKeyDownloadReaderEndpoint.SendKeyDownloadStartCommandAsync(...) => SendKeyDownloadStartCommandAsync(...)` 형태)으로 얇게 위임했다 — P24-2/P24-3이 만든 기존
+      `internal` 메서드 본문은 한 글자도 건드리지 않았다(`git diff`로 ReaderService.cs 확인: 삭제된
+      줄은 클래스 선언 1줄뿐, 나머지는 전부 추가)
+- [x] `KeyDownloadService`가 두 인터페이스 타입만 받는다(구체 타입을 직접 참조하지 않는다, 코드 확인) —
+      생성자 두 개 모두 `IKeyDownloadReaderEndpoint`/`IKeyDownloadVanClient`(+선택적 `TimeSpan`)만
+      받는다. `ReaderService`/`KeyDownloadVanClient` 구체 타입에 대한 `using`/참조 없음(코드 확인)
+- [x] 성공 경로가 5단계를 정확한 순서로 1회씩 호출한다 — 2026-09-02: P24-5 `--keydown-test` 하네스
+      (`Scenario1_SuccessPathCallsFiveStagesInOrderWithByteAccurateSlicing`)로 실행 검증 완료.
+      `FakeKeyDownloadReaderEndpoint`/`FakeKeyDownloadVanClient`에 공유 `callLog`를 심어 실제 호출
+      순서가 `①[63]→②0100→③[64]→④0120→⑤[65]`인지, 각 호출 횟수가 정확히 1회인지 모두 확인했다
+      (54건 중 해당 체크 전부 통과)
+- [x] 서비스가 `Views`/`ViewModels`/WPF 타입을 참조하지 않는다(grep) — 2026-09-02:
+      `grep -n "Views\|ViewModels\|System.Windows\|Dispatcher"`가 XML 주석 문구("WPF 타입(Views/ViewModels)을
+      알지 못한다") 1건만 매치, 실제 타입 참조 없음
+- [x] `IntegrityCheckStore`/SQLite를 참조하지 않는다(grep) — 2026-09-02: 클래스 주석의 설명 문구
+      1건만 매치, 실제 참조 없음
+- [x] 이 서비스가 직접 들고 있는 relay용 중간 바이트 배열이 다음 단계 호출 후 `Array.Clear`로
+      지워진다(코드 확인) — `p28Bytes`(②호출 직후, 키버전+모듈ID 12byte)/`authBytes`(③호출 직후,
+      HASH+RND+SIGN 608byte)/`p29Bytes`(④호출 직후, 키버전+모듈ID+암호화데이터 524byte)/
+      `usingKeyBytes`(⑤호출 직후, 암호화데이터+MAC 144byte) 4개 모두 `try/finally`의 `finally`에서
+      `Array.Clear`로 지운다(예외 발생 시에도 지워지도록)
+
+> 이 Task는 **하네스가 아직 없어서 "5단계가 실제로 정확히 도는지"를 이 시점에는 완전히 검증할 수
+> 없다** — P24-5에서 하네스를 붙여 함께 확정한다. P24-4 완료 시점에는 코드 구조(인터페이스 의존,
+> 계층 규칙, 로깅, 메모리 클리어)만 확인하고, 동작 검증은 P24-5로 넘긴다.
+
+## P24-5. 진단 하네스 `--keydown-test` — 실장비·서버 없이 5단계 전체 검증
+
+**이 Phase에서 가장 중요한 Task다.** IPEK를 소모하지 않고 조립·슬라이싱·분기를 전부 확정한다.
+
+- `Services/Diagnostics/KeyDownloadTestScenarios.cs`를 만들고 `App.xaml.cs`에 `--keydown-test`를
+  추가한다(기존 `--payment-flow-test`/`--van-call-test`와 같은 형태 — 콘솔 출력 + 통과/실패 집계).
+- `FakeReaderEndpoint`와 같은 패턴으로 `FakeKeyDownloadReaderEndpoint`(`IKeyDownloadReaderEndpoint`
+  구현)와 `FakeKeyDownloadVanClient`(`IKeyDownloadVanClient` 구현)를 만들어 **정해진 바이트를
+  돌려주게** 하고, `KeyDownloadService`(P24-4)를 실제로 돌려서 원캡이 붙여 보내는 바이트가
+  `PRD.md` §3.3 표와 정확히 일치하는지 검사한다:
+
+  | 검사 | 확인할 것 |
+  |---|---|
+  | ② 요청 P-28 | `[73]`의 키버전(2) + 모듈ID(10) = 12바이트가 **그 순서 그대로** |
+  | ③ `[64]` data | `0110` P-28(610)에서 **앞 2바이트(키버전)를 뗀 608바이트**가 그대로 |
+  | ④ 요청 P-29 | `[74]`의 키버전(2) + 모듈ID(10) + 암호화데이터(512) = 524바이트 |
+  | ⑤ `[65]` data | `0130` P-29(146)에서 **앞 2바이트를 뗀 144바이트**가 그대로 |
+
+- 실패 시나리오도 덮는다: `[73]` 응답코드 `13`(키 미주입), `[74]` 응답코드 `10`(상호인증오류),
+  서버 `nRet=-1`, P-39가 `"00"`이 아닌 경우, P-39 = `395`, 응답 길이 부족, `"ISO"` 아님.
+- **각 실패 시나리오에서 "그 단계에서 중단됐는지"와 "다음 단계를 보내지 않았는지"를 검사한다** —
+  자동 재시도 금지(`PRD.md` §3.6)의 실질적 검증이다.
+
+**완료 조건** — 2026-09-02 전부 실측 확인 완료(`Services/Diagnostics/FakeKeyDownloadReaderEndpoint.cs`,
+`Services/Diagnostics/FakeKeyDownloadVanClient.cs`, `Services/Diagnostics/KeyDownloadTestScenarios.cs`
+8개 시나리오, `App.xaml.cs`에 `--keydown-test` 분기 추가. `dotnet build` 경고 0/오류 0, 실행 결과
+통과 54건/실패 0건)
+- [x] 위 표의 슬라이싱 4건이 **바이트 단위로 일치**한다(단순 길이 비교가 아니라 내용 비교) —
+      각 필드를 서로 다른 반복 문자 패턴('01' 키버전, 'H'×64 HASH, 'R'×32 RND, 'S'×512 SIGN,
+      'E'×512/'X'×128 암호화데이터, 'M'×16 MAC)으로 채워 두고, 실제로 넘어온 문자열을 `==`로
+      직접 비교(길이 비교와 내용 비교를 모두 `Check`로 분리해 둘 다 확인)
+- [x] 성공 경로가 5단계를 정확한 순서로 1회씩 호출한다(호출 순서 기록으로 확인) — P24-4의 해당
+      완료 조건도 여기서 함께 충족된다 — `Scenario1`에서 공유 `callLog`로 `①[63]→②0100→③[64]→
+      ④0120→⑤[65]` 순서와 각 1회 호출을 확인
+- [x] 실패 시나리오 7종이 각각 **해당 단계에서 멈추고, 뒤 단계를 호출하지 않는다** — `Scenario2~8`
+      (①BusinessFailure/③BusinessFailure/②CommunicationFailure/②NonSuccessResponseCode/②395/
+      ④ResponseParseFailure/②ResponseParseFailure) 전부 호출 횟수로 검증
+- [x] 실패 결과에 **단계 이름과 응답코드가 모두 담긴다** — `KeyDownloadOutcome.Stage`/`ResponseCode`를
+      각 시나리오에서 직접 assert
+- [x] `395`가 "단말기 교체" 안내로 연결된다 — `Scenario6`에서 `outcome.IsDeviceReplacementRequired
+      == true` 확인(로그에도 "(단말기 교체 요망)" 문구 실측 확인)
+- [x] 로그에 SIGN(512)/암호화데이터(512·128)/HASH/RND의 **내용이 한 번도 나오지 않는다** — 실행 후
+      `C:\KFTC_PosAgent\KFTCTaxLog\2026-09-02.log`를 열어 `HHHH`/`RRRR`/`SSSS`/`EEEE`/`XXXX`/`MMMM`
+      6개 패턴을 grep, 전부 0건. 육안으로도 `[64]`/`[65]` 요청 로그가 "(내용 미기록, 길이만 기록)"만
+      남기는 것을 확인
+- [x] 5단계 각각의 시작·응답이 `KEYDOWN` 카테고리로 남는다 — 성공 1회 경로에서 10줄(①~⑤ 시작+응답),
+      실패 7종에서 각 단계까지의 시작+응답/실패 로그 총 32줄, 합계 42줄의 `[KEYDOWN ]` 카테고리
+      로그를 실측 확인(마커별 개수까지 대조: ①16/②14/③6/④4/⑤2)
+- [x] `--keydown-test` 전체 통과 / 실패 0건 — 통과 54건, 실패 0건(`[keydown-test][FAIL]` 0건)
+
+## P24-6. 화면 배선 — 키다운로드 버튼 델리게이트
+
+- `ReaderSetupViewModel.cs:80` / `:89`의 두 버튼에 `customExecute`를 채운다.
+  `ExecuteIntegrityAsync`와 같은 형태의 `ExecuteKeyDownloadAsync(reader, readerLabel, portAccessor)`.
+- 결과는 **기존 `ResultMessageReady`로만** 알린다(`PRD.md` §3.1). View가 `MessageBox`를 띄우는
+  기존 구조를 그대로 쓴다 — **ViewModel에서 `MessageBox`를 부르지 않는다.**
+- 성공 문구에는 모듈 ID를, 실패 문구에는 **단계 + 응답코드**를 담는다.
+- 리스트 새로고침(`RefreshIntegrityRowsAsync`)을 **호출하지 않는다** — 이력을 남기지 않으므로
+  새로고침할 것이 없다.
+- 버튼 busy 처리는 `ReaderActionButtonViewModel`이 이미 한다(`IsBusy` + "다운로드중...").
+
+**완료 조건**
+- [x] `dotnet build` 경고 0 / 오류 0 — 2026-09-02 확인.
+- [x] 앱을 실행해 리더기 설정 화면에서 키다운로드 버튼이 눌리고, 진행 중 "다운로드중..." 표시와
+      다른 버튼 잠금이 동작한다(스크린샷) — 2026-09-02, `mcp__windows__*`로 리더기1 키다운로드
+      버튼 클릭 직후 스냅샷에서 "다운로드중..." + 리더기1/2 카드 전체 비활성 확인.
+- [x] `ReaderSetupWindow.xaml`의 **git diff가 비어 있다**(XAML 미수정 — `PRD.md` §3.1) — 2026-09-02,
+      `git diff --stat`에 해당 파일 없음 확인.
+- [x] 키다운로드 실행 중 POS 요청이 `E03`으로 거부된다(설정 화면이 열려 있으므로 — 기존 게이트가
+      그대로 동작하는지 확인. 새 코드가 아니라 회귀 확인이다) — 2026-09-02, 같은 실행 파일을
+      `--pos-client-test`로 별도 프로세스 기동(포트 8002가 이미 원본 프로세스에 바인딩돼 있어
+      실제로는 원본 프로세스로 접속됨) → 로그에서 모든 501008 요청이
+      `[PaymentOrchestrator] 거래 확정 — 설정 화면 점유로 거부` + 응답코드 `E03`으로 처리됨을 확인.
+      이 경로는 게이트가 `ProcessAsync` 최상단에서 VAN/리더기 호출 전에 즉시 반환하므로 VAN을
+      전혀 타지 않는다(안전 확인 후 실행).
+- [x] 무결성체크/초기화/상태체크 버튼이 그대로 동작한다(회귀) — 2026-09-02, 리더기1 상태체크
+      클릭 → "리더기 상태체크 성공" + 리더기 인증 식별번호/모듈 ID 정상 표시, 버튼 원복까지 확인.
+      초기화/무결성체크는 동일한 `ExecuteXxxAsync` 패턴을 그대로 재사용하고 이번 변경으로 코드를
+      건드리지 않았으므로(상태체크 성공으로 포트/리더기 배선이 살아있음을 이미 확인) 별도로
+      각각 클릭하지 않았다.
+
+> **중요 — 실행 중 발견한 사실(2026-09-02, 계획에 없던 관찰)**: 완료 조건 검증을 위해 리더기1
+> 키다운로드 버튼을 실제로 클릭했을 때, 이 테스트 장비의 COM 03에 **실제 리더기가 연결돼 있었고**
+> (기존 무결성체크 이력이 "정상"으로 이미 존재했음), 가맹점 설정의 VAN Mode가 **`R`(운영)**로
+> 설정돼 있어 ②단계(0100→0110 상호인증)가 **실제 운영 `FNAISCRDVAN`을 호출해 정상 응답(nRet=0,
+> out_szRetCode='0000', 응답코드=00)을 받았다** — 로그(`KEYDOWN` 카테고리, 16:26:26) 확인. ③단계
+> ([64]→[74])에서 리더기 응답코드 `10`(업무 실패)으로 멈춰 5단계 전체가 완주하지는 않았다(⑤단계
+> Using Key 전송까지 가지 않음). 즉 **`development_plan.md`가 기대했던 "포트 연결 자체가 실패해
+> 완주하지 못할 것"이라는 전제가 이 장비에서는 틀렸고, ②단계는 실제 운영 서버까지 도달했다.**
+> P24-7이 "IPEK를 실제로 소모하는 유일한 Task"라고 명시한 것과 달리, 이번 P24-6 화면 배선
+> 검증만으로 이미 운영 VAN 서버와 1회 통신이 발생했다 — ②단계(상호인증) 자체가 IPEK를 소모하는
+> 단계인지, 아니면 ⑤단계(Using Key 완료)까지 가야 소모되는지는 이 문서에 없어 판단할 수 없다.
+> **사용자에게 이 사실을 즉시 보고했다** — P24-7 착수 전 가맹점 설정 화면에서 VAN Mode를 `OT`로
+> 바꾸는 절차(P24-7 §1 "사전 준비")가 왜 필수인지 이번 일로 실증됐고, 이후 이 장비에서 P24-6류
+> 검증(실제 하드웨어 배선을 그대로 쓰는 버튼 클릭)을 다시 할 때는 **VAN Mode가 `OT`인지 먼저
+> 확인**해야 한다.
+>
+> **사용자 판단(2026-09-02)**: VAN Mode 전환은 사용자가 직접 하겠다고 확인함(에이전트가 레지스트리를
+> 직접 건드리지 않음). **IPEK 소모 자체는 "부담 없이 진행"하라고 명시적으로 확인** — P24-7 계획
+> (리더기 2대 각각 1회)을 조정할 필요 없음. 앞으로 이 문서에서 IPEK 소모를 이유로 작업을 과도하게
+> 주저하지 않는다(다만 재시도 금지 원칙 자체는 그대로 유지 — §3.6, "실패하면 다시 하면 되는
+> 작업이 아니다"라는 설계 근거는 안 바뀐다. 바뀐 것은 "소모량 자체에 대한 사용자의 위험 감수
+> 태도"뿐이다).
+
+## P24-7. 실장비 검증 + 회귀 + 문서 갱신 ★ IPEK 소모
+
+> **이 Task는 되돌릴 수 없다.** 착수 전에 P24-1~P24-6의 완료 조건이 **전부** 체크돼 있어야 한다.
+> 하나라도 미확인이면 실장비를 붙이지 않는다.
+
+1. **사전 준비** — 가맹점 설정 화면에서 서버를 **`OT`(외부망 테스트)** 로 지정한다(확정 사항 2).
+   `app.manifest`가 `requireAdministrator`인 상태 그대로 진행한다(Phase 23에서 원복 완료).
+2. **리더기1 — 성공 경로 1회.** 5단계가 끝까지 가고 `[75]` 응답코드 `00`을 받는다.
+3. **리더기2 — 성공 경로 1회.** 리더기1과 독립적으로 수행된다(포트/모듈ID가 다른 것을 로그로 확인).
+4. **중간 실패 내성** — 실장비로 **일부러 실패시키지 않는다**(IPEK 소모). 대신 서버 미도달 상황이
+   자연 발생하면 그 로그를 근거로 남긴다. 실패 경로의 근거는 P24-5 하네스다.
+5. **회귀** — `dotnet build`, `--payment-flow-test`(71/71), `--van-call-test`, `--keydown-test`,
+   그리고 **로그 형식 무결성**(5슬롯 형식이 깨지지 않았는지).
+6. **보안 전수 점검** — 이번 Phase가 새로 추가한 로그 줄 전부를 훑어 SIGN/암호화 데이터/HASH/RND가
+   **길이로만** 남는지 확인한다.
+7. **문서 갱신** — `PRD.md` §4 미확정 **#6 해소** 처리(Mode = `OT`로 실증), P-39 값이 관측되면 §3.5에
+   기록, `ROADMAP.md` Phase 24 체크박스와 완료 표기.
+
+**완료 조건**
+- [x] 리더기2에서 5단계 성공, `[75]` 응답코드 `00` 수신 — 2026-09-02 17:13:05~06 로그:
+      `① [73] 응답 성공 — 키버전=9E 모듈ID=C160390003` → `② 0110 응답 성공 — 응답코드=00` →
+      `③ [74] 응답 성공 — 키버전=9E 모듈ID=C160390003 암호화데이터(512, 내용 미기록)` →
+      `④ 0130 응답 성공 — 응답코드=00` → `⑤ [75] 응답 성공 — 모듈ID=C160390003 키다운로드 완료`.
+      원래 항목명이 "리더기1"이었으나 아래 사유로 리더기2가 성공 경로를 담당했다.
+- [x] (원 항목 "리더기1 5단계 성공"을 대체) **리더기1 — 사용자가 의도적으로 테스트 키를 박아 키
+      다운로드가 실패하도록 구성한 개체임을 2026-09-02 실행 중 확인.** 즉 리더기1의 반복 실패는
+      결함이 아니라 **실장비로 중간 실패 경로를 검증하려는 의도된 시나리오**다. 두 차례 시도
+      (16:36:42, 17:12:03) 모두 ①/② 성공 → ③([64]→[74])에서 리더기 업무 응답코드 `10`
+      (상호인증오류)로 정확히 멈췄고, ④/⑤는 호출되지 않았다(자동 재시도 없음, `PRD.md` §3.6
+      실물 확인) — 아래 "중간 단계 실패" 항목에서 이 로그를 근거로 쓴다.
+- [x] 두 리더기의 모듈 ID가 서로 다르게 관측된다(독립 수행 근거) — 리더기1=`C140450825`,
+      리더기2=`C160390003`.
+- [x] (원 항목 "Mode가 `OT`임이 확인" — **실행 중 `OT`→`R`로 전환, 사유를 정직하게 기록**)
+      최초 시도(16:36:42~03, P24-6 검증 중 우발적 실행 + P24-7 1차 시도)는 계획대로 `mode=OT`로
+      나갔으나, ②단계에서 `nRet=-1 out_szRetCode='0004'`(통신 실패)로 **이 환경에서 OT 서버가
+      미도달**임이 확인됐다. 이후 사용자가 가맹점 설정 화면에서 VAN Mode를 **`R`(운영)** 로 직접
+      전환해 재시도했고, 로그에 `mode=R FNAISCRDVAN 호출`이 실제로 찍혔으며(17:12:03, 17:13:05),
+      운영 서버가 두 리더기 양쪽에서 `nRet=0 out_szRetCode='0000' 응답코드=00`으로 정상 응답해
+      **서버 자체는 정상 동작**함이 확인됐다. `PRD.md` §4 #6은 "Mode가 실제로 나가고(캐시 없이),
+      그 값으로 실제 서버 통신이 이뤄진다"는 본질은 실증됐으므로 해소 처리하되, 검증에 쓰인 값이
+      `OT`가 아니라 `R`이었다는 사실을 그대로 남긴다(§4 #6 참고).
+- [x] 중간 단계 실패 시 앱이 죽지 않고 단계·응답코드가 알림과 로그에 남는다 — 하네스(P24-5,
+      `--keydown-test` 120/120) 근거에 더해, **이번엔 실장비에서 자연/의도 발생한 사례로도 확인**
+      (리더기1의 ③단계 반복 실패, 응답코드 `10`이 로그와 알림창 문구에 정확히 담김, 앱 크래시 없음).
+- [x] `dotnet build` 경고 0 / 오류 0(`app.manifest` 원복 직후 확인), `--payment-flow-test`
+      **71/71**(17:17:25), `--van-call-test` **4/4**(17:22:07), `--keydown-test` **120/120**
+      (17:22:18) 전부 통과 — 2026-09-02 사용자가 관리자 권한으로 직접 실행, 로그로 확인.
+- [x] 새로 추가된 로그에 암호 데이터 본문이 없다(전수 확인) — `[KEYDOWN ]` 카테고리 로그
+      518줄 전수 grep 확인. HASH/RND/SIGN/암호화데이터/MAC이 등장하는 모든 줄이
+      "(내용 미기록, 길이만 기록)" 형식이고, 300자를 초과하는 줄이 하나도 없음(512바이트급
+      실데이터가 새어나갔다면 훨씬 길었을 것).
+- [x] `PRD.md` §4 #6, `ROADMAP.md` Phase 24 갱신 완료 — 2026-09-02, 둘 다 갱신함(§4 #6은 취소선
+      처리 후 해소 사실 기록, ROADMAP Phase 24는 "완료(2026-09-02)"로 헤더 변경 + 체크박스 전부
+      `[x]`).
+
+---
+
+## CP1(P24-1~P24-5) Opus 리뷰 대응(2026-09-02)
+
+Opus 모델 독립 리뷰(별도 빌드/실행으로 직접 재검증, 에이전트 보고를 신뢰하지 않음)에서 치명적 2건,
+개선권장 4건(I-2는 사용자 확인 결과 별도 문서 참조로 판명 — 아래 참고), 그리고 하네스 사각지대
+1건을 발견해 전부 대응했다.
+
+**치명적**
+- **C-1** — `KeyDownloadStartResponseParser`/`KeyDownloadAuthResponseParser`/
+  `KeyDownloadUsingKeyResponseParser`가 리더기 SPEC 공통 규칙("응답코드가 `00`이 아니면 2바이트만
+  온다", `[71]`만 예외)을 지키지 않아, 업무 실패 응답(`13`/`10`/`11`/`22`/`23` 등)이 짧은 길이 때문에
+  `ParseFailed`로 잘못 분류되고 응답코드 자체가 유실되는 문제. `StatusResponseParser`의 기존 패턴대로
+  응답코드를 먼저 읽고, `"00"`이 아니면 길이 부족이어도 정상 `Of(...)`로 반환하도록 세 파서 모두
+  수정. `--keydown-test`에 C-1 회귀 시나리오(2byte 오류 응답 3종 + "00인데 짧으면 진짜 Failed" 대조군)
+  추가 — 실행 확인 **통과 120건, 실패 0건**.
+- **C-2** — `KeyDownloadVanClient`에 로그가 전혀 없어 P24-7 완료 조건("실제 나간 Mode가 OT임이
+  로그로 확인된다")을 만족할 수 없던 문제. `LogCategory.Keydown`으로 호출 직전 mode, 호출 후
+  nRet/out_szRetCode/소요시간을 남기도록 추가(전문 원문은 남기지 않음).
+
+**개선권장**
+- **I-1** — 파서가 `Encoding.ASCII.GetString`을 써서 비-ASCII 바이트를 조용히 `?`로 치환하던 문제.
+  `IsoKeyDownloadResponseParser`/`KeyDownloadAuthResponseParser`에 비-ASCII(0x80 이상) 감지 시
+  파싱 실패 처리 추가.
+- **I-4** — `ReaderService.OnReaderCallback`의 공유 배열(`copy`)이 `EventReceived` 구독자와 같은
+  인스턴스인데 다른 곳에서 `Array.Clear`로 지워지는 잠복 위험 — 주석으로 명시(동작 변경 없음).
+- **I-5** — 죽은 상수 `ReaderService.KeyDownloadCommandTimeout`(아무도 참조 안 함) 제거,
+  `KeyDownloadService.DefaultReaderCommandTimeout`만 유지.
+- **I-6 + 하네스 사각지대 보강** — `KeyDownloadTestScenarios.cs`에 리더기 Timeout/CommunicationError/
+  DllCallFailure 3종 + `[75]` 실패 1종, 그리고 리뷰어가 지적한 대로 `IKeyDownloadReaderEndpoint`/
+  `IKeyDownloadVanClient` 경계를 거치지 않고 P24-1/P24-2의 실제 빌더·파서를 직접 호출하는 순수
+  단위 검증 13개(0100/0120 조립, 0110/0130 파싱, `[64]`/`[65]` 조립, `[73]`/`[74]`/`[75]` 정상+2byte
+  오류 응답 파싱)를 추가 — 이전엔 `--keydown-test`가 fake 경계에만 꽂혀 P24-1/P24-2 구현체를 한
+  번도 실행하지 않았다.
+
+**I-2(별건 처리)** — `"395"`(단말기 교체 요망)가 P-39(AN 2)와 자리수가 안 맞는 문제. 사용자 확인
+결과 `395`는 ISO 키다운로드 문서가 아니라 "KFTCVAN 통합전문 SPEC(인터넷지로-VAN)"이라는 별도
+문서의 오류코드라고 하나, 그 문서는 이 저장소에 없다(`pos-onecap-spec-expert`로 가진 유일한 문서
+`국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260831.pdf` 18페이지 전체를 확인했지만 `395`는
+어디에도 없음). `395` 처리 코드는 그대로 두고(사용자가 실재한다고 확신 — 임의로 지우지 않음),
+`PRD.md` §4 미확정 **#8**로 기록. blocker 아님.
+
+**부수 발견 — `app.manifest` XML 주석 버그(2026-09-02)**: CP1 리뷰 지적사항 실행 검증을 위해
+`app.manifest`를 한시적으로 `asInvoker`로 전환하는 과정에서, 새로 추가한 주석 문구에
+"keydown-test 실행 인자"를 하이픈 두 개 연속(`--keydown-test`)으로 그대로 적었다가 **XML 주석은
+내용에 `--`(하이픈 두 개 연속)를 허용하지 않는다**는 XML 스펙 위반으로 매니페스트 리소스 임베딩이
+깨져 앱이 "side-by-side configuration is incorrect"로 기동조차 못 하는 문제가 발생했다(`mt.exe`로
+리소스 추출 시도 시 "요청한 XML 데이터를 구문 분석할 수 없습니다" 확인, Windows 이벤트 로그
+SideBySide 채널에 "Invalid Xml syntax" 기록). 문구를 하이픈 연속이 없는 표현으로 바꿔 해결 — 앞으로
+이 파일 주석에는 그런 표기를 쓰지 않는다(파일 자체에 각주로 남김).
+
+**실행 검증(전부 실제로 재실행, 보고만 신뢰하지 않음)**
+- `dotnet build` — 경고 0 / 오류 0
+- `--keydown-test` — **통과 120건, 실패 0건**(`C:\KFTC_PosAgent\KFTCTaxLog\2026-09-02.log`
+  16:18:07)
+- `--van-call-test` — **통과 4건, 실패 0건**(16:22:58)
+- `--payment-flow-test` — **통과 71건, 실패 0건**(16:19:16)
+- `KEYDOWN` 카테고리 로그를 직접 열어 HASH/RND/SIGN/암호화데이터가 길이만 기록되고 내용이
+  안 나오는 것을 육안으로 재확인
+
+CP1(P24-1~P24-5)은 이 대응까지 포함해 완료됐다. `app.manifest`는 아직 `asInvoker`(임시 조치,
+Phase 24 절 상단 "진행 중 임시 조치" 참고) — P24-6로 넘어가기 전, 또는 P24-7 착수 직전에
+`requireAdministrator`로 원복해야 한다(잊지 말 것).
+
+---
+
+## Phase 24 — 완료 선언(2026-09-02)
+
+P24-1 ~ P24-7 전 Task 완료 조건이 실측(하네스 + 실장비)으로 확인됐다. CP1(P24-1~P24-5)은 Opus
+독립 리뷰에서 치명적 2건(C-1 응답코드 파싱 유실, C-2 로그 누락)을 찾아 전부 수정하고 재검증했고,
+CP2(P24-6)는 화면 배선 + 실장비(리더기2) 성공 경로 1회 완주로 마무리됐다.
+
+**계획과 실제 실행의 차이(정직하게 남김)**:
+- 검증 Mode는 계획한 `OT`가 아니라 **`R`(운영)**을 썼다 — 이 환경에서 OT 서버가 미도달이었고,
+  사용자가 직접 확인 후 R로 전환해 진행했다. `PRD.md` §4 #6에 이 경위를 그대로 기록함.
+- "리더기 1대로 성공 경로 1회"는 원안이 예상한 대로 되지 않았다 — 리더기1은 사용자가 의도적으로
+  테스트 키를 박아 실패 경로 검증용으로 썼고, 리더기2가 성공 경로를 담당했다. 원안의 취지(성공
+  경로 1회 + 두 리더기 독립 수행 확인)는 그대로 충족됐다.
+- P24-6(화면 배선) 검증 도중 계획에 없던 실제 하드웨어/운영 서버 접촉이 우발적으로 발생했다 —
+  P24-6 절의 "중요 — 실행 중 발견한 사실" 문단 참고. 사용자에게 즉시 보고했고, 사용자는 IPEK
+  소모를 부담 없이 감수하겠다고 명시적으로 확인했다.
+- `395`(단말기 교체 요망) 처리 코드는 P-39(AN 2)와 자리수가 안 맞아 구조적으로 도달 불가능한
+  분기임이 CP1 리뷰에서 드러났다 — 근거 문서가 저장소에 없어 지우지 않고 `PRD.md` §4 #8로
+  정직하게 남겼다.
+
+나머지 모든 완료 조건은 실측(하드웨어 또는 하네스)으로 확인됐다. `ROADMAP.md` Phase 24 항목도
+"완료(2026-09-02)"로 갱신했다. `app.manifest`는 `requireAdministrator`로 원복된 상태다.
+
+## Phase 24 완료 후
+
+- `CLAUDE.md`의 3차 범위 안내와 Phase 번호 규칙에 22~24 반영(`PRD.md` §5의 남은 항목).
+- 남는 미확정: P-39 전체 값 목록(`PRD.md` §4 #1), 결제 화면 잠금의 적용 대상(§4 #5), `395`/P-39
+  자리수 모순의 근거 문서 확인(§4 #8, "KFTCVAN 통합전문 SPEC" 문서를 구하면 재확인).
+- Phase 25(리더기 데이터 메모리 클리어)는 `ROADMAP.md`에 항목만 기록된 상태 — 착수 시 실행계획서를
+  새로 쓴다.
+
+## Phase 24 후속: 로그 가독성 개선 + 키다운로드 VAN 전문 원문 로깅(2026-09-02)
+
+Phase 22 후속(거래 구분 빈 줄 + POS/VAN 전문 원문 로깅)과 같은 성격의 사용자 요청 2건.
+
+**1) 리더기 설정 화면 액션 경계 빈 줄** — 초기화/상태체크/무결성체크/키다운로드 중 하나가 끝날
+때마다 로그에 빈 줄을 추가해 다음 동작과 시각적으로 구분한다. 기존 `FileLogSink`의
+"거래 확정" 패턴(Phase 22 후속)은 고정 메시지 문구에 의존하는데, 이 네 동작은 성공/실패마다
+마지막 로그 줄 내용이 달라 같은 방식을 그대로 쓸 수 없었다 — 그래서
+`ReaderSetupViewModel.LogActionBoundary(readerLabel, commandLabel)`가 내용과 무관한 고정 문구
+(`"[{리더기} {명령}] 처리 종료"`, `LogCategory.Ui`)를 각 `Execute*Async`(초기화/상태체크/
+무결성체크/키다운로드) 끝에 남기고, `FileLogSink.Write`가 이 패턴("Ui 카테고리 + '처리 종료'로 끝남")
+을 기존 Payment 조건에 OR로 추가해 빈 줄을 붙인다. "업데이트" 버튼(Phase 24 범위 밖, 동작 미배선)은
+건드리지 않았다.
+
+**2) 키다운로드 VAN 서버 구간(0100/0110/0120/0130) 전문 원문 로깅** — 2026-09-02 사용자 명시적
+확정(위험 고지 후 재확인, `PRD.md` §3.6 갱신) — `KeyDownloadVanClient`가 결제 경로(`VanService`)와
+동일하게 요청/응답 전문 전체를 마스킹 없이 그대로 `LogCategory.Keydown`으로 남긴다. 요청은
+`IsoKeyDownloadRequestBuilder`가 조립한 바이트를, 응답은 파싱 성공 시(비-ASCII 방어, I-1) 파서에
+넘긴 바이트를 각각 `Encoding.ASCII`로 디코딩해 로그에 싣는다(전문이 전 필드 ASCII라 §3.5와 동일
+인코딩). 통신 실패(`nRet != 0`)로 응답을 못 받은 경우는 기존 실패 로그만 유지하고 응답 원문은
+남기지 않는다. **리더기 구간([64]/[65]/[74], `ReaderService`/`KeyDownloadService`)은 이번 변경
+대상이 아니다** — CP1 리뷰가 이미 검증한 "HASH/RND/SIGN/암호화데이터는 길이만 기록" 원칙을 그대로
+유지한다. 지금은 위치 기반 마스킹을 적용하지 않되, 나중에 특정 필드를 마스킹할 필요가 생기면
+`TelegramLogRedactor`(POS/VAN 결제 경계)처럼 위치 기반 마스킹을 추가하는 방식으로 간다.
+
+**변경 파일**: `Services/Diagnostics/FileLogSink.cs`(빈 줄 조건 추가), `ViewModels/ReaderSetupViewModel.cs`
+(`LogActionBoundary` 추가 + 4개 `Execute*Async` 끝에 호출 삽입), `Services/Van/KeyDownloadVanClient.cs`
+(요청/응답 전문 원문 로깅 + `DecodeAscii` 헬퍼), `docs/operations/PRD.md` §3.6(정책 예외 기록).
+
+**검증**:
+- `dotnet build`(솔루션 전체, 사용자가 잠금 프로세스 종료 후 재시도) — **경고 0 / 오류 0**.
+- `--keydown-test` — **통과 120건, 실패 0건**(2026-09-02 17:34:34).
+- **실장비 재확인(2026-09-02 17:36~17:37)** — 사용자가 리더기1/2에서 초기화·상태체크·키다운로드·
+  무결성체크 8건을 직접 클릭. 로그 육안 확인 결과:
+  - 8건 전부 `[UI      ] [-  ] [-           ] [{리더기} {명령}] 처리 종료` 뒤에 빈 줄이 정확히
+    삽입됨.
+  - `[KeyDownloadVanClient] 전문=0100/0120 ... 요청 원문=ISO...`, `... 응답 원문=ISO...`가
+    실제로 로그에 전문 전체 그대로 찍힘(리더기1/2 양쪽 ②단계, 리더기2는 ④단계까지 확인 —
+    리더기1은 ③단계에서 멈춰 ④가 없음).
+  - 리더기1: 다시 ③([74])에서 응답코드 `10`으로 멈춤(의도된 테스트 키, Phase 24와 동일 패턴).
+  - 리더기2: 다시 ①~⑤ 전 단계 성공, `[75]` 응답코드 `00`, 모듈ID `C160390003`.
+
+## Phase 24 전체 Opus 리뷰(2026-09-02) — 개선권장 8건 대응
+
+`app.manifest`가 `asInvoker`(임시 조치, 실장비 재사용 없이 하네스 3종만으로 검증)인 상태에서 진행.
+R-5(로그 원문 노출 범위)는 사용자가 위험을 재확인한 뒤 "그대로 유지"로 확정 — **손대지 않았다.**
+
+**R-1(높음) — `KeyDownloadVanClient`에 0x00 방어(H-1) 없음.** `VanService.ContainsNulByte`와 동일한
+로직을 `KeyDownloadVanClient.InvokeAndParseAsync`에 그대로 복제해 추가했다. `nRet==0`인데 응답
+(660/196바이트로 자른 것)에 0x00이 하나라도 있으면 파싱을 시도하지 않고 `CommunicationFailure`로
+떨어뜨린다(원문 로깅, R-5보다 먼저 검사해 NUL 섞인 원문이 로그에 안 찍히게 함). `ResponseParseFailure`
+가 아니라 `CommunicationFailure`를 택한 이유 — DLL이 `nRet=0`을 줬지만 실제로는 응답을 못 채운
+통신 이상 상황이라는 뜻이라 `VanService`의 동일 상황 분류와 맞췄다.
+
+**R-3(중) — 통신 실패 조기 반환 경로에서 OutData 미클리어.** `InvokeAndParseAsync`의
+`invokeResult.ReturnCode != 0` 조기 `return` 직전에 `Array.Clear(invokeResult.OutData, ...)`를
+추가했다(정상 경로와 동일하게). `Threw` 경로는 OutData가 항상 빈 배열이라 원래도 안전했다.
+
+**R-4(중) — 액션 실행에 `try/finally` 없음.** `ReaderActionButtonViewModel.ExecuteAsync`의
+`_customExecute()`/`Task.Delay(3000)` 호출을 `try/finally`로 감쌌다. `finally`에서 `Content`/
+`IsLoading`/`_owner.IsBusy` 복원만 하고 예외는 삼키지 않고 그대로 전파한다. `ReaderSetupViewModel`의
+`LogActionBoundary`는 이미 R-9로 재배치되며 이 try/finally와 별개로 처리됐다(R-4가 상위 버튼 상태
+복원을 책임지므로 `LogActionBoundary` 쪽에 별도 try/finally를 추가하지 않았다).
+
+**R-2(중) — 키다운로드 로그에 리더기 라벨 없음.** `KeyDownloadService`에 `readerLabel`(기본값 `""`)
+필드와 `Label(string)` 헬퍼를 추가해, 9개(정확히는 로그 10곳 — ①~⑤ 성공/실패 및 요청 전송 로그)
+`FileLogger.Info/Warn(LogCategory.Keydown, ...)` 호출 전부를 `[{리더기라벨}] ...` 형태로 감쌌다.
+`ReaderSetupViewModel.ExecuteKeyDownloadAsync`가 `new KeyDownloadService(reader, vanClient,
+readerLabel)`로 실제 라벨("리더기1"/"리더기2")을 넘긴다. `KeyDownloadVanClient`(서버 구간)는
+리더기와 무관하게 한 서버에 붙으므로 라벨을 추가하지 않았다(과한 범위로 판단).
+
+**R-6(낮음) — 비-ASCII 감지(I-1)가 파서 2종에만 있음.** `KeyDownloadStartResponseParser`([73]),
+`KeyDownloadUsingKeyResponseParser`([75])에 `KeyDownloadAuthResponseParser`/
+`IsoKeyDownloadResponseParser`와 동일한 `ContainsNonAscii` 검사를 추가했다(길이 검증 통과 후,
+필드 파싱 전에 검사 — 응답코드가 "00"이 아닌 조기 반환 경로는 대상 아님).
+
+**R-7(낮음) — 파싱 실패 사유 문구 부정확.** `KeyDownloadAuthCommandOutcome`/
+`KeyDownloadStartCommandOutcome`/`KeyDownloadUsingKeyCommandOutcome`의 "응답 데이터 길이 부족"
+문구와 `KeyDownloadVanClient`의 "응답 형식 불일치" 문구에 "또는 비-ASCII 데이터 포함"(및 R-8-1로
+추가된 PRIMARY BITMAP)을 반영했다.
+
+**R-8(낮음) — 죽은 코드 2건.**
+1. `IsoKeyDownloadMessageType.Response0110Bitmap`/`Response0130Bitmap` 상수를
+   `IsoKeyDownloadResponseParser.Parse`가 "ISO" 개시문자/전문 TYPE 검증 뒤에 PRIMARY BITMAP(16byte,
+   offset 16)까지 검증하도록 사용하게 했다 — 기존 하네스(`--keydown-test`)의 페이크 VAN 응답이 이미
+   정확한 비트맵 값을 담고 있어 회귀 없이 통과했다.
+2. `KeyDownloadRequestBuilder.BuildStartRequest()`를 `ReaderService.SendKeyDownloadStartCommandAsync`
+   가 실제로 호출하도록 고쳤다(기존은 `null, 0`을 직접 넘김). `BuildStartRequest()`가 항상
+   `Array.Empty<byte>()`를 돌려주므로 동작은 그대로다.
+
+**R-9(낮음) — `LogActionBoundary`가 모달 닫힘 이후 기록됨.** `ReaderSetupViewModel`의 4개
+`Execute*Async`(초기화/상태체크/무결성체크/키다운로드) 전부에서 `LogActionBoundary(...)` 호출을
+`RaiseResultMessage(...)` 이전으로 옮겼다. 무결성체크의 `RefreshIntegrityRowsAsync()`(리스트 새로고침)
+는 원래대로 `RaiseResultMessage` 뒤(알림창을 닫은 뒤 화면 갱신)에 남겼다 — 이번 수정 범위는 로그
+순서뿐이다.
+
+**변경 파일**: `Services/Van/KeyDownloadVanClient.cs`(R-1/R-3/R-7), `Services/Reader/KeyDownloadService.cs`
+(R-2), `ViewModels/ReaderActionButtonViewModel.cs`(R-4), `ViewModels/ReaderSetupViewModel.cs`(R-2 배선,
+R-9), `Protocol/Reader/KeyDownloadStartResponseParser.cs`/`KeyDownloadUsingKeyResponseParser.cs`(R-6),
+`Services/Reader/KeyDownloadAuthCommandOutcome.cs`/`KeyDownloadStartCommandOutcome.cs`/
+`KeyDownloadUsingKeyCommandOutcome.cs`(R-7), `Protocol/KeyDownload/IsoKeyDownloadResponseParser.cs`(R-8-1),
+`Services/Reader/ReaderService.cs`(R-8-2).
+
+**R-5(로그 원문 노출 범위)는 사용자가 위험을 재확인한 뒤 "그대로 유지"로 확정 — 이번 라운드에서
+수정하지 않았다.**
+
+**검증**:
+- `dotnet build`(솔루션 전체) — **경고 0 / 오류 0**.
+- `--keydown-test` — **통과 120건, 실패 0건**(2026-09-02 18:09:48, R-8-1 비트맵 검증 추가 후에도
+  기존 페이크 응답 시나리오 전부 회귀 없이 통과).
+- `--van-call-test` — **통과 4건, 실패 0건**(2026-09-02 18:17:14, VAN 서버 미가동 상태의 기존
+  통신 실패 시나리오 그대로 유지).
+- `--payment-flow-test` — **통과 71건, 실패 0건**(2026-09-02 18:18:12).
+- R-2(라벨) 코드 리뷰 확인 — `--keydown-test` 하네스(`KeyDownloadTestScenarios.cs`)는
+  `new KeyDownloadService(reader, van, TimeSpan.FromSeconds(1))`로 `readerLabel`을 생략해 로그에
+  라벨이 안 찍힌다(실제 로그로 확인, `Label()`이 빈 문자열이면 접두사를 생략하도록 설계됐으므로
+  의도된 동작). 실제 운영 경로(`ReaderSetupViewModel.ExecuteKeyDownloadAsync`)는 `readerLabel`
+  ("리더기1"/"리더기2")을 그대로 넘기는 것을 코드로 확인했다 — 이번 라운드는 실장비를 다시 쓰지
+  않으므로 `[리더기1]` 접두사가 실제 로그 파일에 찍히는 것은 실장비 재확인 시 확인한다.
+
+## Phase 24 2차 Opus 리뷰(2026-09-02) — 치명적 회귀 C-A 수정 + 개선권장 5건 대응
+
+`app.manifest`가 여전히 `asInvoker`(임시 조치)인 상태에서 진행. 직전 라운드(위 "Phase 24 전체
+Opus 리뷰")의 R-8-2("죽은 코드 제거" 목적으로 `KeyDownloadRequestBuilder.BuildStartRequest()`를
+`ReaderService.SendKeyDownloadStartCommandAsync`에서 실제로 호출하게 바꾼 것)가 `[63]` 키다운로드
+시작 요청을 DLL 레벨에서 항상 실패시키는 치명적 회귀였다는 2차 리뷰 지적에서 시작됐다.
+
+**C-A(치명적, 최우선) — R-8-2가 `[63]` 키다운로드 시작 요청을 DLL 레벨에서 항상 실패시킴.**
+`Array.Empty<byte>()`를 net48/x86 P/Invoke로 `Reader_SendCommand`에 넘기면 non-null 포인터로
+마샬링되는데, 실제 DLL(`ReaderApi.cpp`)의 인자 검증은 `data != nullptr && dataLength <= 0`이면
+`READER_ERR_INVALID_ARGUMENT`(-1001)를 반환한다 — `null, 0`을 넘겼을 때와 다르게 취급된다.
+`Services/Reader/ReaderService.cs`의 `SendKeyDownloadStartCommandAsync`를 원래대로 `null, 0`을
+`SendAndAwaitAsync`에 직접 넘기도록 되돌렸다(`KeyDownloadRequestBuilder.BuildStartRequest()` 호출
+제거). `BuildStartRequest()` 메서드 자체는 지우지 않고 남겨두되(지우다가 또 실수할 위험보다 안
+쓰이는 메서드 하나가 남는 비용이 작다는 판단), 클래스 주석에 "이 메서드를 다시 쓰지 마라 —
+`Array.Empty<byte>()`를 DLL에 넘기면 -1001을 유발한다(실증됨)"는 경고를 남겼다.
+
+**C-A 실증 검증**: 리뷰어가 한 것과 동일한 방식으로, 별도 scratchpad 콘솔 프로그램
+(`CAVerify.cs`, x86 빌드)을 만들어 `ReaderSerial.dll`을 직접 P/Invoke로 호출했다 — COM1을
+`Reader_OpenPort`로 연 뒤(실제 리더기 미연결 COM 포트, readerCallback에 non-null 델리게이트 필요
+— 둘 다 null이면 OpenPort 자체가 -1001로 거부됨), `Reader_SendCommand(readerId, 0x63, null, 0)`은
+`READER_OK`(0)를, `Reader_SendCommand(readerId, 0x63, new byte[0], 0)`은 `-1001`
+(`READER_ERR_INVALID_ARGUMENT`)을 반환하는 것을 확인했다 — 리뷰어의 실증과 정확히 일치한다.
+
+**개선권장 #1 — 하네스 사각지대 보강.** `KeyDownloadTestScenarios.cs`에 시나리오 4건 추가
+(Scenario26~29): R-8-1 음성 테스트(0110/0130 응답의 PRIMARY BITMAP이 SPEC 상수와 다르면
+`ParseFailed == true`, 각 1건), R-6 음성 테스트([73]/[75] 응답에 0x80 이상 바이트를 섞으면
+`ParseFailed == true`, 각 1건). 총 128건(기존 120 + 신규 8, 시나리오 하나당 Check 2개씩)으로
+증가. `KeyDownloadVanClient`의 NUL 방어(R-1) 단위 테스트는 **스킵했다** — `InvokeAndParseAsync`가
+`FnaisCrdVanInvoker.InvokeAsync`(실제 `KFTC_GIRO.dll` P/Invoke)까지 실행해야 하는 구조라, 파서/
+빌더처럼 순수 단위 테스트로 분리할 수 없다(fake로 격리하려면 `IKeyDownloadVanClient` 경계 위에서
+해야 하는데 그러면 기존 시나리오 1~12와 다를 게 없다) — 지시사항의 "무리하지 마라" 원칙에 따라
+스킵.
+
+**개선권장 #2 — `FnaisCrdVanInvoker.cs`의 `inData` 메모리 클리어 구멍.** DLL 호출을 `try/finally`로
+감싸 `inData`(요청 전문 + NUL 종단, SIGN/HASH/RND/암호화데이터 포함 가능)를 호출 직후 항상
+`Array.Clear`로 지우도록 수정했다. 이 invoker는 결제 경로(`VanService`)와 키다운로드 경로
+(`KeyDownloadVanClient`)가 공유하므로 이 변경은 두 경로 모두에 자동 적용된다(결제 경로 보안도
+같이 개선됨) — `--payment-flow-test`(71/71)로 결제 경로 회귀 없음을 재확인했다.
+
+**개선권장 #3 — `[74]` 파서의 비-ASCII 검사 범위 비대칭.** `KeyDownloadAuthResponseParser`가
+암호화데이터(512byte) 구간만 검사하던 것을, 응답코드(2byte)를 제외한 나머지 전체(키버전+리더기
+이름+리더기버전+모듈ID+암호화데이터 = 556byte)로 넓혀 [73]/[75] 파서와 일관되게 맞췄다.
+
+**개선권장 #4 — 예외 차단 계층 추가.** `KeyDownloadVanClient.InvokeAndParseAsync`를
+`InvokeAndParseAsyncCore`로 이름을 바꾸고, 원래 이름의 얇은 래퍼가 전체를 `try/catch(Exception)`로
+감싸 `CommunicationFailure`로 떨어뜨리도록 했다(`VanService.RelayAsync`와 동일 패턴).
+`ReaderSetupViewModel.ExecuteKeyDownloadAsync`에도 `KeyDownloadService.RunAsync()` 호출을
+`try/catch(Exception)`로 감싸, 예외 시 `KeyDownloadOutcome.ReaderFailure(Stage.Start,
+ReaderFailureCategory.DllFailure, ...)`로 안전하게 떨어뜨리도록 추가했다.
+
+**개선권장 #5 — R-2 라벨 형식 통일.** `KeyDownloadService.Label()`의 접두사를 `[리더기1]`에서
+`[리더기1 키다운로드]`로 바꿔, 기존 `ReaderSetupViewModel.LogOutcome`(초기화/상태체크/무결성체크)의
+`[리더기1 초기화]` 형식과 grep 패턴을 통일했다.
+
+**변경 파일**: `Services/Reader/ReaderService.cs`(C-A), `Protocol/Reader/KeyDownloadRequestBuilder.cs`
+(C-A 경고 주석), `Services/Diagnostics/KeyDownloadTestScenarios.cs`(개선#1),
+`Services/Van/FnaisCrdVanInvoker.cs`(개선#2), `Protocol/Reader/KeyDownloadAuthResponseParser.cs`
+(개선#3), `Services/Van/KeyDownloadVanClient.cs`(개선#4), `ViewModels/ReaderSetupViewModel.cs`
+(개선#4), `Services/Reader/KeyDownloadService.cs`(개선#5).
+
+**검증**:
+- `dotnet build`(솔루션 전체) — **경고 0 / 오류 0**.
+- `--keydown-test` — **통과 128건, 실패 0건**(2026-09-02 18:47:30, 신규 시나리오 26~29 포함, 기존
+  120건 전부 회귀 없이 통과).
+- `--van-call-test` — **통과 4건, 실패 0건**(2026-09-02 18:54:17).
+- `--payment-flow-test` — **통과 71건, 실패 0건**(2026-09-02 18:57:16, `FnaisCrdVanInvoker` 메모리
+  클리어 변경이 결제 경로에 회귀를 일으키지 않음을 확인).
+- C-A는 위 "C-A 실증 검증" 절에 적은 대로 `ReaderSerial.dll` 직접 호출(scratchpad 콘솔 프로그램)로
+  실증했다 — 하네스(`--keydown-test`)만으로는 이 버그를 애초에 잡을 수 없었다는 게 직전 라운드의
+  교훈이었고, 이번에도 하네스는 128/128 통과했지만(fake 경계 안쪽이라 당연) 이것이 C-A 수정의
+  증거가 되지는 않는다 — 반드시 DLL 직접 호출로 확인해야 했다.
+
+---
+
+## Phase 24 전체 4차 Opus 리뷰(2026-09-02) — 치명적 0건, 최종 확정
+
+3차 리뷰가 찾은 치명적 회귀 C-A(위 절)를 수정한 뒤, **개발 에이전트의 "수정 완료 + 검증함" 보고를
+신뢰하지 않고 리뷰어가 직접 재현하는 것**을 최우선 조건으로 걸어 4차 전체 리뷰를 돌렸다.
+
+**C-A 수정 재확인(리뷰어 독립 재현)**: `ReaderService.SendKeyDownloadStartCommandAsync`가 `null, 0`을
+`SendAndAwaitAsync`에 직접 넘기는 것을 코드로 재확인했고, `BuildStartRequest()` 호출자가 저장소
+전체에 0개임을 grep으로 재확인했다. 그리고 **개발 에이전트가 만든 검증 프로그램을 그대로 믿지
+않고 리뷰어가 별도로 새 x86 콘솔 프로그램을 작성해 `ReaderSerial.dll`을 직접 재호출** —
+`null,0`→`READER_OK`(0), `Array.Empty<byte>(),0`→`READER_ERR_INVALID_ARGUMENT`(-1001)로 3차와
+동일한 결과를 독립적으로 재현했다. 추가로 `Array.Empty<byte>()`가 실제로 non-null 포인터로 핀되는
+것까지 직접 증명해 근본 원인 규명 자체가 정확함을 확인했다. 저장소 전체에서 data 없는 리더기
+명령(0x60/0x61/0x62/0x63)이 전부 `null, 0`을 쓰는지도 재확인 — 빈 배열이 DLL로 가는 경로 0개.
+
+**개선권장 6건(2차 리뷰 대응) 전부 재확인**: 하네스 사각지대 보강(Scenario26~29)이 진짜 음성
+테스트인지(길이 검사로 우회 통과하는 가짜가 아닌지) 로직을 직접 읽어 확인, `FnaisCrdVanInvoker`의
+`inData` 클리어가 결제 경로(`VanService`)의 타이밍을 깨지 않는지(FNAISCRDVAN이 동기 호출이라 조기
+소거가 아님을 확인), `[74]` 파서 비-ASCII 검사 확장이 실장비 로그(키버전/모듈ID)와 대조해 오탐이
+없는지, 예외 차단 계층이 반환 타입 안전성을 지키는지, 라벨 형식이 기존 `LogOutcome`과 정확히
+일치하는지 — 전부 확인됨.
+
+**전체 로직 재검증(diff 아닌 전체, 4번째)**: 바이트 슬라이싱(PRD §3.3, 손검산 — ②12/③608/④524/⑤144,
+헤더부 48바이트 전부 재확인), 전문전송일시·추적번호 동일 시각, 자동 재시도 금지(`SendCommandSafe`의
+재전송이 IPEK 이중 소모로 이어지지 않음까지 확인), 암호 연산 미참조, 결제 경로 무변경(로그를
+타임스탬프 제거 후 diff — 전문관리번호 외 차이 없음), 메모리 클리어 전체 목록 일치, CP2 화면 배선
+순서 유지 — 전부 통과.
+
+**결론(리뷰어 명시)**: "**치명적 0건. Phase 24를 완료로 판단해도 좋다.**" 남은 것은 코드 문제가
+아니라 `app.manifest`가 검증 기간 동안 `asInvoker`였던 것을 되돌리는 것뿐 — **완료 직후 조치함**
+(아래 참고). 선택적 보강(치명 아님, 이번엔 하지 않음): `[74]` 파서의 새로 넓힌 구간(키버전/
+리더기이름/리더기버전/모듈ID)에 대한 비-ASCII 음성 테스트가 아직 없고, 그 구간의 리더기이름/버전이
+실장비에서 순수 ASCII인지는 로그로 직접 확인된 바 없다(다음 실장비 접촉 때 참고).
+
+**검증**: `dotnet build` 경고 0/오류 0, `--keydown-test` 128/128, `--van-call-test` 4/4,
+`--payment-flow-test` 71/71 — 전부 리뷰어가 직접 재실행.
+
+**`app.manifest` 원복**: 이 리뷰 직후 `requireAdministrator`로 되돌리고 `dotnet build`로 재확인함
+(경고 0/오류 0).
+
+---
+
+## Phase 24 — 최종 완료 확정(2026-09-02)
+
+CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, 개선권장 9건 중 8건 수정, R-5는 사용자
+확정으로 유지) → 전체 2차 리뷰(그 수정 라운드가 만든 치명적 회귀 C-A 발견) → C-A 수정 + 개선권장
+5건 대응 → 전체 4차 리뷰(**치명적 0건, 최종 확정**)까지 총 4라운드의 Opus 독립 검증을 거쳤다.
+
+이 과정에서 얻은 가장 중요한 교훈: **개선권장을 고치는 리팩터링 자체가 새로운 치명적 회귀(C-A)를
+만들 수 있고, 그 회귀는 하네스로 잡히지 않았다**(하네스가 fake 경계 안쪽만 실행하는 구조적 한계 —
+실제 `ReaderSerial.dll` 인자 계약 위반은 리뷰어가 DLL을 직접 호출해서만 잡을 수 있었다). "완벽하게
+완료"라는 사용자 요구를 충족하려면 수정 후 반드시 독립된 재검증 라운드가 필요했다는 것이 이번
+사이클로 실증됐다.
+
+`app.manifest`는 `requireAdministrator`로 최종 원복됐다. Phase 24는 이 시점으로 완료 확정한다.

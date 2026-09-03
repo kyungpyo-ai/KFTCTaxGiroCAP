@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Threading.Tasks;
 using KFTCOneCAP.Wpf.Interop;
 using KFTCOneCAP.Wpf.Protocol.Pos;
@@ -62,37 +61,37 @@ internal sealed class VanService : IVanRelayService
             // 하고 나머지 필드는 원문 그대로 남긴다.
             string redactedRequestBody = TelegramLogRedactor.Redact(transactionTypeCode, body);
 
-            // NUL 종단 — char*는 C 문자열이므로 DLL이 strlen으로 길이를 잴 가능성이 있다. 본문은
-            // 공백 패딩된 고정 길이이고 내부에 0x00이 없으므로, "본문 길이 + 1" 크기로 배열을 잡고
-            // 마지막 바이트를 0으로 남겨 두면 고정 길이/NUL 종단 두 해석 모두에서 안전하다.
-            byte[] inData = new byte[body.Length + 1];
-            Buffer.BlockCopy(body, 0, inData, 0, body.Length);
-            // inData[body.Length]는 배열 기본값 0으로 이미 NUL.
-
             // 매 호출마다 새로 읽는다(캐시 금지, PRD.md §2.6) — 화면에서 서버를 바꾸면 다음 호출부터
             // 바로 반영돼야 한다.
             string vanMode = _loadSettings().VanMode;
-            byte[] mode = BuildNulTerminatedAscii(vanMode);
-
-            // 매 호출마다 새로 할당한다 — 재사용하면 이전 거래의 잔여 바이트가 다음 응답에 섞일 수
-            // 있다. 카드 데이터가 흐르는 경로이므로 특히 중요하다.
-            byte[] outData = new byte[KftcGiroNative.OutDataBufferSize];
-            byte[] outRetCode = new byte[KftcGiroNative.RetCodeBufferSize];
-
-            var stopwatch = Stopwatch.StartNew();
 
             // P22-6(PRD.md §1.5 경계 표 "VAN") — FNAISCRDVAN 호출 직전. 개선권장 1(CP2 Opus 리뷰) —
             // 실제로 나가는 mode(R/OT/IT)를 한 토큰 남긴다. 민감정보가 아니므로 마스킹하지 않는다.
             // P23-8 "OT/R이 FNAISCRDVAN 첫 인자로 실제로 나가는 것을 로그로 확인"의 선행 조건.
             FileLogger.Info(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} mode={vanMode} FNAISCRDVAN 호출 원문={redactedRequestBody}", code: null, txId);
 
-            // FNAISCRDVAN은 블로킹 호출이다(타임아웃 인자를 받는 것 자체가 근거) — RelayAsync가
-            // async인데 그냥 호출하면 호출 스레드를 최대 타임아웃 시간만큼 붙잡는다. Task.Run으로
-            // 감싸 그 블로킹을 별도 스레드로 밀어낸다.
-            int nRet = await Task.Run(() => KftcGiroNative.FNAISCRDVAN(
-                mode, inData, outData, outRetCode, KftcGiroNative.DefaultTimeoutSeconds)).ConfigureAwait(false);
+            // P24-3(docs/operations/development_plan.md) — P/Invoke 호출·NUL 종단·버퍼 할당·예외
+            // 차단은 FnaisCrdVanInvoker로 옮겨졌다. 이 메서드는 그 결과를 해석만 한다(응답 절단,
+            // H-1/L-1 방어, 마스킹 로깅은 여기 그대로 남는다 — invoker마다 규칙이 다르기 때문).
+            FnaisCrdVanInvokeResult invokeResult = await FnaisCrdVanInvoker.InvokeAsync(
+                vanMode, body, KftcGiroNative.DefaultTimeoutSeconds).ConfigureAwait(false);
 
-            stopwatch.Stop();
+            if (invokeResult.Threw)
+            {
+                if (invokeResult.IsDllLoadFailure)
+                {
+                    FileLogger.Error(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} DLL 로드 실패: {invokeResult.Exception!.GetType().Name}: {invokeResult.Exception.Message}", code: null, txId);
+                    return VanRelayOutcome.CommunicationFailure(VanFailureKind.DllLoadFailure, $"{invokeResult.Exception.GetType().Name}: {invokeResult.Exception.Message}");
+                }
+
+                // DLL 호출 실패로 앱이 죽으면 안 된다(PRD §9) — 어떤 예외도 밖으로 던지지 않는다.
+                FileLogger.Error(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} 예상치 못한 예외: {invokeResult.Exception!.GetType().Name}: {invokeResult.Exception.Message}", code: null, txId);
+                return VanRelayOutcome.CommunicationFailure(VanFailureKind.CommunicationFailure, $"{invokeResult.Exception.GetType().Name}: {invokeResult.Exception.Message}");
+            }
+
+            int nRet = invokeResult.ReturnCode;
+            byte[] outData = invokeResult.OutData;
+            byte[] outRetCode = invokeResult.OutRetCode;
 
             string retCodeText = DecodeNulTerminated(outRetCode);
 
@@ -102,7 +101,7 @@ internal sealed class VanService : IVanRelayService
             FileLogger.Info(
                 LogCategory.Van,
                 $"[VanService] 거래구분={transactionTypeCode} nRet={nRet} out_szRetCode='{retCodeText}' " +
-                $"본문길이={bodyLength} 소요={stopwatch.ElapsedMilliseconds}ms",
+                $"본문길이={bodyLength} 소요={invokeResult.ElapsedMilliseconds}ms",
                 code: null, txId);
 
             if (nRet == 0)
@@ -176,14 +175,6 @@ internal sealed class VanService : IVanRelayService
             FileLogger.Error(LogCategory.Van, $"[VanService] 거래구분={transactionTypeCode} 예상치 못한 예외: {ex.GetType().Name}: {ex.Message}", code: null, txId);
             return VanRelayOutcome.CommunicationFailure(VanFailureKind.CommunicationFailure, $"{ex.GetType().Name}: {ex.Message}");
         }
-    }
-
-    private static byte[] BuildNulTerminatedAscii(string value)
-    {
-        byte[] ascii = System.Text.Encoding.ASCII.GetBytes(value);
-        byte[] result = new byte[ascii.Length + 1];
-        Buffer.BlockCopy(ascii, 0, result, 0, ascii.Length);
-        return result;
     }
 
     private static bool ContainsNulByte(byte[] buffer)

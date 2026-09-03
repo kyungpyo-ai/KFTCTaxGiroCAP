@@ -19,5 +19,16 @@ namespace KFTCOneCAP.Wpf.Protocol.Reader
 
         internal const byte TRANSACTION_INFO_REQUEST = 0x2B;
         internal const byte CARD_READ_RESPONSE = 0x3B;
+
+        // Phase 24(P24-2) — 리더기 키다운로드 3종(PRD §3.4). 값 출처는 development_plan.md
+        // "P24-2. 리더기 전문 3종 + ReaderService 명령 3종" 지시(0x63/0x73, 0x64/0x74, 0x65/0x75).
+        internal const byte KEY_DOWNLOAD_START_REQUEST = 0x63;
+        internal const byte KEY_DOWNLOAD_START_RESPONSE = 0x73;
+
+        internal const byte KEY_DOWNLOAD_AUTH_REQUEST = 0x64;
+        internal const byte KEY_DOWNLOAD_AUTH_RESPONSE = 0x74;
+
+        internal const byte KEY_DOWNLOAD_USING_KEY_REQUEST = 0x65;
+        internal const byte KEY_DOWNLOAD_USING_KEY_RESPONSE = 0x75;
     }
 }
