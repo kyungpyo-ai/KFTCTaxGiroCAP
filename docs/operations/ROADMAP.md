@@ -1,4 +1,4 @@
-# 3차 범위(운영 기능) 개발 로드맵 — Phase 22~24
+# 3차 범위(운영 기능) 개발 로드맵 — Phase 22~25
 
 > 요구사항 정본은 같은 폴더의 `PRD.md`다. Task 단위 작업 지시/완료 조건은 각 Phase 착수 직전에
 > `development_plan.md`에 작성한다. **Phase 번호는 1차(0~6, `docs/home_reader_setup/ROADMAP.md`),
@@ -16,8 +16,12 @@
 
 - **로그(22)가 먼저**인 이유: 나머지 두 Phase의 디버깅 기반이고, 앱 전체를 가로지르는 관심사라
   나중에 넣으면 이미 작성된 코드를 다시 훑어야 한다. 현재 로그 호출 지점이 151곳이다.
-- **키다운로드(24)가 마지막**인 이유: `FNAISCRDVAN`의 Mode 인자를 Phase 23의 가맹점 설정값에서
+- **키다운로드(24)가 세 번째**인 이유: `FNAISCRDVAN`의 Mode 인자를 Phase 23의 가맹점 설정값에서
   받아야 한다. (서버 구간 SPEC 미확정은 2026-08-31에 해소됐다.)
+- **메모리 클리어(25)가 마지막**인 이유: 이미 동작이 검증된 결제 Flow의 타입을 바꾸는 작업이라,
+  기능이 다 들어온 뒤에 해야 회귀 여부를 판단할 기준(정상 동작하는 상태)이 존재한다. 22~24에서
+  새로 추가된 코드까지 한 번에 같은 방식으로 정리할 수 있다는 이점도 있다.
+  (이 Phase는 2026-09-03 인증 시험 기준을 확보하면서 착수가 확정됐다 — PRD §4.1.)
 
 ---
 
@@ -151,7 +155,7 @@ P23-8 참고). 타임아웃 30초/0초(→120초)는 실제 하드웨어로 재�
       (PRD §3.1)
 - [x] 오류 처리 — 단계별 중단, 자동 재시도 없음, 실패 문구에 단계와 응답코드 포함.
       서버 `395`는 "단말기 교체 요망" 안내 (PRD §3.6) — `395` 자체는 P-39(AN 2)와 자리수가 안
-      맞는 구조적으로 죽은 분기임이 CP1 리뷰에서 드러났다(`PRD.md` §4 미확정 #8 참고, blocker 아님)
+      맞는 구조적으로 죽은 분기임이 CP1 리뷰에서 드러났다(`PRD.md` §5 미확정 #8 참고, blocker 아님)
 - [x] `KEYDOWN` 카테고리 로깅 — 단계별 시작·응답. **SIGN/암호화 데이터는 길이만 기록** (PRD §3.6) —
       P24-7에서 518줄 전수 확인(300자 초과 줄 없음, 전부 "내용 미기록" 형식)
 - [x] 실장비 검증 — 리더기2로 성공 경로 1회(완주), 리더기1로 의도된 실패 경로 검증(③단계에서
@@ -165,35 +169,83 @@ P23-8 참고). 타임아웃 30초/0초(→120초)는 실제 하드웨어로 재�
 
 ---
 
-## Phase 25 — 리더기 데이터 메모리 클리어 (착수 전, 항목만 기록)
+## Phase 25 — 카드정보 메모리 클리어 (PRD §4) — 착수 전
 
-**2026-09-02 Phase 24 계획 중 발견.** `ReaderSerial.dll`은 콜백 반환 즉시 자기 내부 버퍼를
-`SecureZeroMemory`로 지우지만(`docs/reader_dll/API명세서.md` §7), **그 경계를 넘어 우리 쪽
-`Marshal.Copy`로 복사된 이후의 managed 데이터는 지우는 코드가 이 저장소 어디에도 없다**
-(`Array.Clear`/`CryptographicOperations.ZeroMemory` 사용처 0건, 전수 grep 확인). 카드번호·
-암호화 데이터·EMV 데이터·PIN(`#51`)이 `CardReadData`(불변 `string`)로 파싱되고, `PaymentOrchestrator`가
-그걸 POS/VAN 전문 `byte[]` 본문에 복사해 넣은 뒤로도, 처리가 끝난 후 GC가 회수할 때까지 프로세스
-메모리에 평문/암호문 그대로 남는다.
+**목표**: 인증 시험 기준(민감정보 메모리 삭제)에 맞춰, 카드정보를 **덮어쓸 수 있는 타입**으로 바꾸고
+사용 완료 후 **3회 덮어쓰기**한다. 요구사항 정본은 `PRD.md` §4 — 그 절이 근거(인증 기관 안내 원문),
+현황 전수 조사표, 방침, 알려진 한계를 모두 담고 있다.
 
-- **범위가 크다**: 카드리딩 콜백(`ReaderService.OnReaderCallback`) → `CardReadResponseParser` →
-  `PaymentOrchestrator`(POS 요청/응답 전문 본문) → `PinFieldEncoder` → 리더기 설정 화면 무결성체크
-  응답까지, 이미 실거래 검증을 마친 결제 Flow 전체를 건드린다(Phase 23 CP2급 위험).
-- **타입 변경이 선행돼야 한다**: `CardNumber`/`EncryptedData` 등이 지금 **불변 `string`**이라
-  `Array.Clear`가 적용되지 않는다 — `char[]`/`byte[]` 기반으로 바꾸는 구조 변경이 먼저 필요하다.
-- Phase 24(키다운로드)의 신규 데이터(SIGN/HASH/RND/암호화 데이터)는 Phase 24 자체 완료 조건으로
-  이미 클리어를 요구하므로(`development_plan.md` P24-2/P24-3/P24-5) 이 Phase의 대상이 아니다 —
-  Phase 25는 **기존(Phase 15~20) 결제 Flow의 소급 적용**만 다룬다.
-- 착수 시점에 `development_plan.md`에 Task 단위 실행계획서를 새로 작성한다.
+> **왜 이 Phase가 생겼나** — 2026-09-02 Phase 24 계획 중, `ReaderSerial.dll`은 콜백 반환 즉시 자기
+> 내부 버퍼를 `SecureZeroMemory`로 지우지만(`docs/reader_dll/API명세서.md` §7) **그 경계를 넘어온
+> managed 데이터를 지우는 코드가 이 저장소에 하나도 없다**는 것이 드러나 항목만 기록해 뒀다.
+> 2026-09-03 사용자가 인증 시험 기관 안내(현행 DoD 3회 덮어쓰기 / 개정 예정 1회+해제·GC,
+> `string` 대신 `byte[]`·`char[]` 권고)를 확보하면서 착수 근거와 구체적 기준이 확정됐다.
+
+> **Phase 24와의 관계** — 키다운로드 경로는 이미 `Array.Clear`(1회)로 지우고 있다. 이 Phase에서
+> **같은 `SecureClear`(3회)로 교체해 방식을 통일한다**(PRD §4.3.5). 즉 Phase 25는 "기존 결제 Flow의
+> 소급 적용"에 더해 "덮어쓰기 방식 일원화"까지 다룬다(2026-09-03 사용자 확정 — 착수 전 스텁에는
+> 키다운로드가 대상 밖으로 적혀 있었으나 이때 바뀌었다).
+
+**이 Phase의 위험도** — 이미 실거래 검증을 마친 결제 Flow 전체(카드리딩 콜백 → `CardReadData` →
+`PaymentOrchestrator` → `PinFieldEncoder` → POS 응답)의 **타입을 바꾼다.** Phase 23 CP2급 이상으로
+회귀 위험이 높고, Phase 24에서 "개선권장을 고치는 리팩터링이 새 치명적 회귀를 만든" 전례가 있다.
+그래서 검증은 **수정한 부분이 아니라 결제 Flow 전체 로직**을 대상으로 한다.
+
+### 순서
+
+- [ ] **P25-1 `SecureClear` 헬퍼** — 덮어쓰기의 유일한 지점(PRD §4.3.1). 3회, 마지막 패스 `0x00`,
+      횟수는 상수 하나. `byte[]`/`char[]` 오버로드, `null`·빈 배열 무해 통과. JIT 최적화에 덮어쓰기가
+      제거되지 않는 구현 방식을 확정하고 **Release 빌드 실측으로 확인**한다(PRD §4.4 #4)
+- [ ] **P25-2 키다운로드 경로 소급 적용** — 기존 `Array.Clear` 호출 8곳을 `SecureClear`로 교체
+      (PRD §4.3.5). 호출부 구조 무변경. Phase 24의 `--keydown-test` 하네스가 그대로 통과하는지 확인
+- [ ] **P25-3 타입 변경 ①: `CardReadData`** — 19개 필드 전부를 `char[]`/`byte[]` 기반으로 전환
+      (PRD §4.3.2). `CardReadResponseParser`, `CardReadCommandOutcome`, `CardReadRoundResult`까지
+      연쇄 변경. **이 Task가 이 Phase에서 가장 넓게 번진다**
+- [ ] **P25-4 타입 변경 ②: PIN 경로** — `PaymentNoticeViewModel._pinDigits` → `PinEnteredEventArgs`
+      → `CollectPinAsync` → `PaymentOrchestrator`의 `pin` → `PinFieldEncoder`까지 `string` 제거
+      (PRD §4.2 #5·#6). `PinFieldEncoder`는 SEED 암호화가 확정되면 본문이 바뀔 자리이므로
+      (`docs/payment_relay/PRD.md` §10) 격리 구조를 깨지 않는다
+- [ ] **P25-5 임시 버퍼 즉시 클리어** — PRD §4.2의 #1, #2, #8, #9, #12, #13을 만든 메서드 안에서
+      `try/finally`로 즉시 클리어(PRD §4.3.3). `FnaisCrdVanInvoker.inData`(#10)는 이미 있으므로
+      `SecureClear`로 교체만
+- [ ] **P25-6 거래 종료 일괄 클리어** — PRD §4.2의 #3~#7, #11을 거래 1건 종료 `finally`에서 일괄
+      클리어(PRD §4.3.3). 정상·예외·타임아웃·POS 연결 끊김·조기 return을 모두 통과하는지 경로별로
+      확인한다
+- [ ] **P25-7 무결성체크 응답 판정** — 리더기 설정 화면 무결성체크 응답에 카드정보가 포함되는지
+      확인하고, 포함되면 같은 방식으로 처리한다(PRD §4.2 #14)
+- [ ] **P25-8 로그 현황 점검** — 민감정보가 로그 문자열로 흘러가는 경로를 전수 점검해 `PRD.md` §4.5에
+      표로 기록한다. **구조는 바꾸지 않고, 마스킹 누락이 발견된 곳만 고친다**(2026-09-03 사용자 확정).
+      `LogRingBuffer`(최근 500건 메모리 상주), `TelegramLogRedactor`의 `#46`/`#51` 처리, 키다운로드
+      VAN 구간 원문 로깅(§3.6)을 반드시 포함
+- [ ] **P25-9 진단 하네스(심사 증적)** — `--payment-flow-test`/`--keydown-test`와 같은 방식의 CLI
+      진단 모드를 추가해, 클리어 후 버퍼에 내용이 남지 않았음을 읽어서 확인하고 로그로 남긴다
+      (PRD §4.6). 심사에서 실증을 요구받으면 이것을 그대로 돌린다
+- [ ] **P25-10 실장비 검증** — 실제 리더기 + 실제 카드로 결제를 끝까지 돌려 타입 변경으로 인한 회귀가
+      없음을 확인한다. 하네스는 `IReaderEndpoint`/`IVanRelayService` fake 경계 안쪽을 못 보므로
+      (Phase 24 C-A 회귀의 교훈) **실장비 왕복을 생략하지 않는다**
+
+### 검증 방식
+
+Phase 22~24와 같은 **Opus 다회 리뷰 루프**(dev 구현 → Opus 전체 검증 → 수정 → 재검증 반복,
+2026-09-03 사용자 확정). 리뷰 대상은 수정 부분이 아니라 **결제 Flow 전체**다.
+
+### 완료 기준
+
+1. 카드정보(`CardReadData` 19개 필드 + PIN)가 `string`이 아닌 덮어쓰기 가능한 타입으로 관리되고,
+   사용 완료 후 3회 덮어쓰기(마지막 `0x00`)된다 — 진단 하네스로 실증.
+2. 결제 Flow 전체가 실장비로 회귀 없이 끝까지 동작한다.
+3. `PRD.md` §4.2 표의 모든 항목이 "대상"에서 "적용 완료"로 정리되고, §4.5 로그 점검 표가 채워진다.
+4. Opus 전체 리뷰에서 치명적 0건.
 
 ---
 
 ## 참고 문서
 
-- `PRD.md` — 3차 범위 요구사항 정본. **§4에 미확정 사항 표**가 있다
+- `PRD.md` — 3차 범위 요구사항 정본. **§5에 미확정 사항 표**가 있다(2026-09-03 §4 신설로 §4→§5)
 - `development_plan.md` — Task 단위 실행계획서 (각 Phase 착수 시 작성)
 - `docs/reader_dll/spec/암호화리더기설계서_20250122.pdf` — **Phase 24 리더기 구간 정본**
   (§1.11 프로세스, §2.1 전문 종류, §2.2 응답 코드, §3.4~§3.6 전문 상세)
-- `docs/reader_dll/spec/ISO 키다운로드.pdf` — Phase 24 서버 구간 근거(4페이지 발췌본, 부족분은 PRD §4.1)
+- `docs/reader_dll/spec/ISO 키다운로드.pdf` — Phase 24 서버 구간 근거(4페이지 발췌본, 부족분은 PRD §5 미확정 #1)
 - `docs/reader_dll/DLL연동가이드.md` — `ReaderSerial.dll` API 5종·CALLBACK·재연결 패턴
 - `docs/payment_relay/PRD.md` §2.3 — `FNAISCRDVAN` 계약(유일한 근거)
 - `C:\Project\MerchantSetup_OnPaintIcons_Clean_CP949\ShopSetupDlg.cpp` — Phase 23 원본 화면
