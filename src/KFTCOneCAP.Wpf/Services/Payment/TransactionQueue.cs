@@ -84,6 +84,16 @@ internal sealed class TransactionQueue
             }
             finally
             {
+                // Phase 25 P25-6(PRD.md §4.2 #7, 요청 쪽) — item.Request.Telegram의 원본 _body를
+                // 여기서 지운다. **PaymentOrchestrator.RunCardTransactionAsync의 finally에서 지우지
+                // 않는다** — 위 catch 블록의 PosResponseTelegram.Failure(item.Request, ...)가 실패
+                // 응답을 합성할 때 item.Request.Telegram을 Clone()해야 하므로, 그보다 먼저 지워버리면
+                // #3/#6/#7/#8/#51 외의 필드(전문관리번호·금액 등)가 전부 깨진 실패 응답이 POS로 나간다
+                // (구현 중 발견해 계획을 수정한 지점 — PRD.md §4.3.3 근거 문단 참고). InvokeCompletedSafely
+                // 가 이미 SendResponse(동기, 프레임 송신까지 완료)를 호출했으므로, 이 지점(성공/예외
+                // 두 분기 모두가 합류하는 finally)이 "요청을 더 이상 아무도 읽지 않는" 가장 이른
+                // 시점이다.
+                item.Request.Telegram.ClearBody();
                 _isProcessing = false;
             }
         }

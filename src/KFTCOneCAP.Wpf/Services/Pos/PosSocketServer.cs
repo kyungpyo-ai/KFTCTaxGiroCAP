@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using KFTCOneCAP.Wpf.Protocol.Pos;
+using KFTCOneCAP.Wpf.Security;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Payment;
 
@@ -303,7 +304,20 @@ internal sealed class PosSocketServer
         string requestTxId = request.Read(ManagementNumberFieldNumber);
         // 사용자 요청(2026-09-01) — 전문 원문(위치기반 마스킹 적용, TelegramLogRedactor 클래스 요약
         // 참고)을 로그에 남긴다. 902614 #46(암호화된 카드정보)만 마스킹되고 나머지는 원문 그대로다.
-        string redactedRequestBody = TelegramLogRedactor.Redact(request.TransactionTypeCode, request.Telegram.ToBody());
+        //
+        // Phase 25 P25-5(PRD.md §4.2 #9) — ToBody()가 만드는 이 복사본은 Redact 호출 한 줄에만
+        // 쓰이고 결과(문자열)만 남는다. request.Telegram 자신의 원본 _body(#7)와는 다른 배열이므로
+        // 즉시 지워도 요청 처리에 영향이 없다.
+        byte[] requestBodyForLog = request.Telegram.ToBody();
+        string redactedRequestBody;
+        try
+        {
+            redactedRequestBody = TelegramLogRedactor.Redact(request.TransactionTypeCode, requestBodyForLog);
+        }
+        finally
+        {
+            SecureClear.Clear(requestBodyForLog);
+        }
         FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] {remote} 요청 수신 전문={request.TransactionTypeCode} 원문={redactedRequestBody}", code: null, requestTxId);
 
         _queue.Enqueue(request, response =>
@@ -339,6 +353,9 @@ internal sealed class PosSocketServer
         catch (Exception ex)
         {
             FileLogger.Error(LogCategory.Pos, $"[PosSocketServer] 응답 직렬화 실패: {ex}");
+            // Phase 25 P25-6 — 직렬화 실패로 이 응답을 포기하는 경로도 거래 종료다. 여기서 반환하면
+            // 아래 정상 경로의 ClearBody()를 지나치므로 이 조기 return 앞에서 지운다.
+            response.Telegram.ClearBody();
             return;
         }
 
@@ -348,10 +365,39 @@ internal sealed class PosSocketServer
         string responseTxId = response.Read(ManagementNumberFieldNumber);
         string resultCode = response.Read(ResultCodeFieldNumber);
         // 사용자 요청(2026-09-01) — 요청 로그와 동일 원칙(TelegramLogRedactor).
-        string redactedResponseBody = TelegramLogRedactor.Redact(response.Telegram.Schema.TransactionTypeCode, response.Telegram.ToBody());
+        //
+        // Phase 25 P25-5(PRD.md §4.2 #9) — 위 요청 로그와 같은 이유로 ToBody() 복사본을 즉시 지운다.
+        // response.Telegram 자신의 원본 _body(#7)와는 다른 배열이다.
+        byte[] responseBodyForLog = response.Telegram.ToBody();
+        string redactedResponseBody;
+        try
+        {
+            redactedResponseBody = TelegramLogRedactor.Redact(response.Telegram.Schema.TransactionTypeCode, responseBodyForLog);
+        }
+        finally
+        {
+            SecureClear.Clear(responseBodyForLog);
+        }
         FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] {remote} 응답 송신 원문={redactedResponseBody}", resultCode, responseTxId);
 
-        WriteFrame(frame, stream, writeLock, remote, "응답");
+        try
+        {
+            WriteFrame(frame, stream, writeLock, remote, "응답");
+        }
+        finally
+        {
+            // Phase 25 P25-5(PRD.md §4.2 #13) — 송신 frame(길이 헤더 + ToFrame()의 body 복사본).
+            // WriteFrame은 동기 stream.Write 한 번으로 끝나므로, 반환 시점엔 이미 이 배열이 필요
+            // 없다. frame은 response.Telegram의 원본 _body(#7)와도 다른 배열(ToFrame 내부에서 새로
+            // 만듦)이라 여기서 지워도 아래 #7 클리어와 겹치지 않는다.
+            SecureClear.Clear(frame);
+        }
+
+        // Phase 25 P25-6(PRD.md §4.2 #7, 응답 쪽) — response.Telegram의 원본 _body는 위 ToBody()/
+        // ToFrame() 복사본들과 별개로 아직 살아 있다. 프레임을 실제로 쓴(성공/실패 무관, try/finally로
+        // 이미 처리됨) 뒤인 지금이 "송신이 끝난 뒤"(§4.3.3)다 — 이 이후로 이 응답 객체를 다시 읽는
+        // 코드는 없다(WriteFrame이 이 메서드의 마지막 소비 지점).
+        response.Telegram.ClearBody();
     }
 
     /// <summary>완성된 프레임(길이 헤더 포함)을 소켓에 쓰는 공통 지점 — 정상 응답과 P17-3의 프로토콜

@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Linq;
 using KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
+using KFTCOneCAP.Wpf.Security;
 
 namespace KFTCOneCAP.Wpf.Protocol.Pos;
 
@@ -93,15 +94,23 @@ public sealed class PosResponseTelegram
     public byte[] ToFrame()
     {
         byte[] bodyBytes = Telegram.ToBody();
+        try
+        {
+            if (bodyBytes.Length > 9999)
+                throw new PosProtocolException($"응답 본문이 길이 필드(4자리) 범위를 초과함: {bodyBytes.Length}바이트");
 
-        if (bodyBytes.Length > 9999)
-            throw new PosProtocolException($"응답 본문이 길이 필드(4자리) 범위를 초과함: {bodyBytes.Length}바이트");
+            byte[] lengthBytes = PosMessageEncoding.Value.GetBytes(bodyBytes.Length.ToString("D4", CultureInfo.InvariantCulture));
 
-        byte[] lengthBytes = PosMessageEncoding.Value.GetBytes(bodyBytes.Length.ToString("D4", CultureInfo.InvariantCulture));
-
-        byte[] frame = new byte[lengthBytes.Length + bodyBytes.Length];
-        Buffer.BlockCopy(lengthBytes, 0, frame, 0, lengthBytes.Length);
-        Buffer.BlockCopy(bodyBytes, 0, frame, lengthBytes.Length, bodyBytes.Length);
-        return frame;
+            byte[] frame = new byte[lengthBytes.Length + bodyBytes.Length];
+            Buffer.BlockCopy(lengthBytes, 0, frame, 0, lengthBytes.Length);
+            Buffer.BlockCopy(bodyBytes, 0, frame, lengthBytes.Length, bodyBytes.Length);
+            return frame;
+        }
+        finally
+        {
+            // Phase 25 P25-5(PRD.md §4.2 #9) — Telegram._body(#7)의 복사본일 뿐, 이 메서드가 반환하는
+            // frame(별도 배열)에 이미 옮겨 적혔으므로 이 로컬 사본은 여기서 지운다.
+            SecureClear.Clear(bodyBytes);
+        }
     }
 }

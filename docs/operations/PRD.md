@@ -847,21 +847,21 @@ RSA2048 서명 검증, AES128 암·복호화, SHA256 해시, DUKPT 키 파생은
 
 | # | 지점 | 보관 형태 | 현재 클리어 | 판정 |
 |---|---|---|---|---|
-| 1 | `ReaderService.OnReaderCallback`의 `Marshal.Copy` 대상 `byte[] copy` | `byte[]` | 키다운로드 명령만 있음(`[73]/[74]/[75]`). **카드리딩 `[3B]` 응답은 없음** | 대상 |
-| 2 | `ReaderService`의 카드리딩 요청 `byte[] data`(`TransactionInfoRequestBuilder.Build`) | `byte[]` | 없음 | 대상 |
-| 3 | `CardReadData` 19개 필드 | **`string`(불변)** | 없음. **덮어쓰기 자체가 불가능** | 대상 — 타입 변경 필요 |
-| 4 | `CardReadCommandOutcome` / `CardReadRoundResult`가 들고 있는 `CardData` 참조 | 참조 | 없음 | 대상 |
-| 5 | PIN — `PaymentNoticeViewModel._pinDigits` | `List<char>` | 없음(`List<T>.Clear()`는 net48에서 내부적으로 `Array.Clear`를 호출하지만 **명시적 3회 덮어쓰기가 아니고, 애초에 호출되지도 않는다**) | 대상 |
-| 6 | PIN — `PinEnteredEventArgs.Pin` → `CollectPinAsync`의 `TaskCompletionSource<string>` → `PaymentOrchestrator`의 `string? pin` → `PinFieldEncoder.ToTelegramValue` 반환값 | **`string`(불변)** | 없음. 덮어쓰기 불가 | 대상 — 타입 변경 필요 |
-| 7 | `PosTelegram._body`(POS 요청/응답 전문 본문 — `#46` 암호화 카드데이터, `#51` PIN 포함) | `byte[]` | 없음 | 대상 |
-| 8 | `PosTelegram.Write()` 내부의 `valueBytes`/`padded`(필드 1개 쓸 때마다 새로 생성) | `byte[]` | 없음 | 대상(임시 버퍼) |
-| 9 | `PosTelegram.ToBody()`/`PosResponseTelegram.ToFrame()`이 매번 만드는 복사본 | `byte[]` | 없음 | 대상(임시 버퍼) |
-| 10 | `FnaisCrdVanInvoker`의 `inData`(NUL 종단 복사본) | `byte[]` | **있음**(Phase 24에서 추가, 결제·키다운로드 공용) | 방식만 통일 |
-| 11 | `FnaisCrdVanInvoker`의 `outData`/`outRetCode`(VAN 응답 원본 4096B) | `byte[]` | 키다운로드 경로만 있음(`KeyDownloadVanClient`). **결제 경로(`VanService`)는 없음** | 대상 |
-| 12 | `VanService`가 잘라 만든 `responseBody` | `byte[]` | 없음 | 대상 |
-| 13 | `PosSocketServer`의 수신 요청 `body`, 송신 `frame` | `byte[]` | 없음 | 대상 |
-| 14 | 리더기 설정 화면 무결성체크 응답 | — | 없음 | Phase 25 착수 시 카드정보 포함 여부를 확인해 판정 |
-| 15 | 키다운로드 SIGN/HASH/RND/암호화데이터(`KeyDownloadService`, `KeyDownloadVanClient`, `ReaderService`) | `byte[]` | **있음**(`Array.Clear` 1회) | 방식만 통일 → §4.3.5 |
+| 1 | `ReaderService.OnReaderCallback`의 `Marshal.Copy` 대상 `byte[] copy` | `byte[]` | **있음**(2026-09-03 P25-5, `SendCardReadCommandAsync`가 `MapCardReadOutcome` 직후 지운다). **보강(2026-09-03 Phase 25 최종 전체 리뷰)**: P25-5의 클리어는 **대기 중이던 라운드가 이 배열을 결과로 인수한 경우에만** 실행된다 — ① 로컬 타임아웃으로 라운드를 이미 회수한 뒤 실제 0x3B가 뒤늦게 도착(§8.4, P25-10 실장비 검증의 타임아웃 경로가 여기 해당), ② 같은 라운드에 대한 중복 CALLBACK(§8.2, CAS 실패로 폐기), ③ 이 대기와 무관한 UNSOLICITED 이벤트(0x76 카드 감지 등) 세 경로에서는 `copy`가 어디에도 전달되지 않고 그대로 버려져 덮어쓰기를 거치지 않았다. `CompletePendingIfMatches`가 "인수했는가"를 `bool`로 돌려주고, 인수하지 않았으면 `OnReaderCallback`이 `EventReceived` 통지 뒤 `SecureClear`로 지우도록 고쳤다 | **적용 완료** |
+| 2 | `ReaderService`의 카드리딩 요청 `byte[] data`(`TransactionInfoRequestBuilder.Build`) | `byte[]` | **있음**(2026-09-03 P25-5, DLL 호출 직후 `try/finally`) | **적용 완료** |
+| 3 | `CardReadData` 19개 필드 | `char[]`(2026-09-03 P25-3에서 전환, 이전 `string`) | **있음** — `Dispose()`가 19개 필드 전부 `SecureClear`(P25-6에서 거래 종료 `finally`가 호출) | **적용 완료**(타입 변경 §4.3.2) |
+| 4 | `CardReadCommandOutcome` / `CardReadRoundResult`가 들고 있는 `CardData` 참조 | 참조 | 참조만 들고 있어 별도 클리어 대상 아님(#3의 `Dispose()`가 실제 버퍼를 지운다) | **해당 없음** — 판정 정정(2026-09-03) |
+| 5 | PIN — `PaymentNoticeViewModel._pinDigits` | `char[]`(2026-09-03 P25-4에서 전환, 이전 `List<char>`) | **있음** — 정상완료 시 자체 `SecureClear`, 취소/타임아웃/창닫힘은 `StopPinTimers`가 멱등하게 처리 | **적용 완료** |
+| 6 | PIN — `PinEnteredEventArgs.Pin` → `CollectPinAsync`의 `TaskCompletionSource<string>` → `PaymentOrchestrator`의 `string? pin` → `PinFieldEncoder.ToTelegramValue` 반환값 | `char[]`(2026-09-03 P25-4에서 전환, 이전 `string`) | **있음**(P25-6, 거래 종료 `finally`에서 `SecureClear.Clear(pin)`). **보강(2026-09-03 Phase 25 최종 전체 리뷰)**: `CollectPinAsync`의 `Task.WhenAny(pinTask, interruptTask)`에서 취소/Timeout이 근소한 차이로 이긴 경우, 사용자가 이미 4자리를 완성해 `CompletePinAsync`가 만든 복사본이 이 메서드에서 반환되지 않아 거래 종료 `finally`의 클리어가 닿지 못했다 — 패자 `CardData`를 지우는 `CardReadBroadcaster`와 같은 방식으로 `pinTask`에 fire-and-forget 연속 작업을 붙여 결과가 도착하는 대로 지우도록 고쳤다 | **적용 완료**(타입 변경 §4.3.2) |
+| 7 | `PosTelegram._body`(POS 요청/응답 전문 본문 — `#46` 암호화 카드데이터, `#51` PIN 포함) | `byte[]` | **있음**(2026-09-03 P25-6) — 요청 쪽은 `TransactionQueue.WorkerLoop`의 `finally`(응답 송신까지 끝난 뒤), 응답 쪽은 `PosSocketServer.SendResponse`가 `WriteFrame` 뒤 `PosTelegram.ClearBody()`로 지운다. **구현 중 발견**: `PaymentOrchestrator.RunCardTransactionAsync`의 `finally`에서 요청 본문을 지우면, 그 뒤 `TransactionQueue`의 예외 처리 경로가 `PosResponseTelegram.Failure(item.Request, ...)`로 실패 응답을 `Clone()`할 때 이미 지워진 본문을 복제해 필드가 깨진다 — 그래서 클리어 지점을 `RunCardTransactionAsync`가 아니라 `TransactionQueue`로 옮겼다(development_plan.md P25-6 "구현 중 발견" 참고). **VAN 응답이 요청 필드를 에코하는 경우도 커버됨(2026-09-03 P25-10 사용자 질의로 재확인)**: 원캡↔VAN 구간이 POS↔원캡과 **같은 전문 형식**을 쓰므로(§3.3/§4.10), VAN이 승인 응답에 요청 카드데이터 필드를 그대로 반사해 돌려줄 가능성이 있다. 이 클리어는 **필드 단위가 아니라 응답 전문 `byte[]` 전체를 `ClearBody()`로 한 번에 지운다** — `PosResponseTelegram.Relay`가 VAN 응답 바이트를 복사 없이 그대로 감싸므로, 에코된 값이 어느 POSITION에 있든 상관없이 이 전체 클리어에 자동으로 포함된다(필드별로 "이건 카드데이터다"를 판단해 선택적으로 지웠다면 에코 필드를 놓쳤을 수 있다 — 버퍼 전체 클리어 방식이 이 시나리오를 별도 대응 없이 커버한 것) | **적용 완료** |
+| 8 | `PosTelegram.Write()` 내부의 `valueBytes`/`padded`(필드 1개 쓸 때마다 새로 생성) | `byte[]` | **있음**(2026-09-03 P25-5) — `char[]` 오버로드에만 적용(`string` 오버로드는 민감하지 않은 필드 전용이라 대상 아님) | **적용 완료** |
+| 9 | `PosTelegram.ToBody()`/`PosResponseTelegram.ToFrame()`이 매번 만드는 복사본 | `byte[]` | **있음**(2026-09-03 P25-5/P25-6부속) — `ToFrame()` 내부 복사본, `PosSocketServer`의 요청/응답 로깅용 `ToBody()` 복사본 각각 `try/finally` | **적용 완료** |
+| 10 | `FnaisCrdVanInvoker`의 `inData`(NUL 종단 복사본) | `byte[]` | **있음**(Phase 24에서 추가, 결제·키다운로드 공용, 2026-09-03 P25-2에서 `SecureClear`로 방식 통일) | **적용 완료** |
+| 11 | `FnaisCrdVanInvoker`의 `outData`/`outRetCode`(VAN 응답 원본 4096B) | `byte[]` | **있음**(2026-09-03 P25-5) — `VanService.RelayAsync`도 키다운로드 경로와 동일하게 `try/finally`로 추가(당초 P25-6으로 계획했으나 구현 중 즉시 클리어가 안전함을 확인해 P25-5로 재분류) | **적용 완료** |
+| 12 | `VanService`가 잘라 만든 `responseBody` | `byte[]` | **대상 아님으로 판정 정정(2026-09-03)** — `VanRelayOutcome.Success(responseBody)` → `PosResponseTelegram.Relay` → `PosTelegram.FromBytes`(복사 없음)로 이어져 **그대로 #7(응답 본문) 그 자체가 된다.** 별도 임시 버퍼가 아니므로 #7의 클리어(위 참고)가 이 값도 지운다 — `VanService` 안에서 지우면 승인 응답이 깨진다 | **해당 없음** — #7에 통합 |
+| 13 | `PosSocketServer`의 수신 요청 `body`, 송신 `frame` | `byte[]` | 송신 `frame`: **있음**(2026-09-03 P25-5, `SendResponse`가 `WriteFrame` 뒤 즉시 클리어). 수신 `body`: **대상 아님으로 판정 정정** — `PosRequestTelegram.Parse(body)` → `PosTelegram.FromBytes`(복사 없음)로 그대로 #7(요청 본문)이 된다 — 별도 버퍼가 아니다 | 송신: **적용 완료** / 수신: **해당 없음** — #7에 통합 |
+| 14 | 리더기 응답 파서 3종 — `InitResponseParser`(0x70)/`IntegrityResponseParser`(0x72)/`StatusResponseParser`(0x71) | 응답코드 `string`(2), `StatusResponseParser`만 추가로 `ReaderAuthId`(16)/`ModuleId`(10) `string` | 해당 없음 | **판정 완료(2026-09-03 P25-7) — 대상 아님.** Init/Integrity는 응답코드 2byte만 담아 카드정보가 원천적으로 없다. Status만 `ReaderAuthId`/`ModuleId`를 담지만 이건 **리더기 하드웨어 식별자**(H/W모델명12+F/W버전4, 모델코드3+IPEK버전1+Y1+M1+`####`4 — `StatusResponseParser.cs` 클래스 주석과 SPEC 원문 §3.2 표 그대로, CP3 Opus 리뷰 개선권장 F3에서 "일련번호"라는 SPEC에 없는 표현을 바로잡음)지 카드소유자 정보가 아니다 — `CardReadData.ReaderAuthId`(§4.4 #5)와 같은 비대칭 논리: 장비 식별자는 `ObservedIdentityStore`에 이미 영속화되는 값이라 메모리 클리어 대상에서 제외한다. `char[]` 전환도 하지 않는다(전환 대상은 카드정보뿐 — 확정 사항 3은 "카드정보"에 한정, 장비 식별자는 범위 밖) |
+| 15 | 키다운로드 SIGN/HASH/RND/암호화데이터(`KeyDownloadService`, `KeyDownloadVanClient`, `ReaderService`) | `byte[]` | **있음**(`Array.Clear` 1회 → 2026-09-03 P25-2에서 `SecureClear`(3회)로 방식 통일) | **적용 완료** |
 
 ### 4.3 구현 방침 (2026-09-03 확정)
 
@@ -928,13 +928,34 @@ RSA2048 서명 검증, AES128 암·복호화, SHA256 해시, DUKPT 키 파생은
    덮어쓰기 → `FreeHGlobal`)로 옮겨야 한다. **이번 범위에서는 하지 않는다** — 인증 기준이 요구하는
    사항이 아니고(문구는 덮어쓰기와 해제/GC만 말한다) 모든 사용처를 래퍼 경유로 바꾸는 큰 변경이다.
    심사에서 지적받으면 그때 해당 필드만 pin 처리한다.
+   **실측으로 확인됨(2026-09-03 P25-9부속, 실장비 902614 승인 1건)** — VAN 승인 직후(PIN 대기 중,
+   카드정보가 아직 필요한 시점)와 거래 확정 3분 뒤(클리어 완료 후) 두 시점의 프로세스 메모리를
+   각각 덤프해, 실카드 BIN으로 확보한 정확한 트랙2 패턴으로 대조했다. `CardReadData`의 managed
+   `char[]` 필드(UTF-16LE 인코딩)는 클리어 후 **완전히 0건**으로 사라져 `Dispose()`가 실제로
+   지웠음을 확인했다. 반면 리더기 raw 응답의 원본 `byte[]`(ASCII 인코딩)는 클리어 전 2건에서
+   클리어 후 1건으로 줄었지만 **완전히 0이 되지는 않았다** — 코드 추적 결과 이 배열의 유일한
+   소비 경로(`ReaderService.SendCardReadCommandAsync`)가 이미 `SecureClear`로 지우고 있고, 그
+   지점 이후로 이 값을 참조하는 살아있는 객체가 없는(거래가 완전히 끝난 지 3분 지난) 시점에도
+   잔재가 남아 있어, **GC가 그 이전에 이동시킨 옛 위치의 복사본**으로 판정했다(신규 누락 아님).
+   덤프 파일은 실카드 PAN 평문을 담고 있어 검증 직후 즉시 삭제했다(`development_plan.md` P25-9부속
+   완료 조건 참고).
 2. **프로세스 강제 종료·크래시** — 클리어 코드가 실행되지 못한다. 어떤 시점 선택으로도 막을 수 없다.
 3. **`string`으로 남는 잔재** — §4.3.2의 타입 변경 범위 밖(로그 문자열, 화면 표시용 마스킹 문자열 등)에
    민감정보가 흘러 들어가면 그것은 지울 수 없다. 그래서 §4.5의 로그 점검을 함께 한다.
 4. **`net48` 제약** — `CryptographicOperations.ZeroMemory`가 없다(.NET Core 3.0+). 직접 구현한
-   `SecureClear`로 대체한다. 다만 JIT가 "결과를 읽지 않는 쓰기"로 보고 덮어쓰기를 제거할 이론적
-   가능성이 있으므로, 최적화에 지워지지 않도록 구현한다(구현 방법은 Phase 25 착수 시 확정하고
-   Release 빌드 실측으로 확인한다).
+   `SecureClear`로 대체한다. JIT가 "결과를 읽지 않는 쓰기"로 보고 덮어쓰기를 제거할 이론적 가능성은
+   `MethodImplOptions.NoOptimization`으로 그 메서드를 MinOpts로 강제해 최적화 패스 자체가 돌지 않게
+   막았다(2026-09-03 P25-1, `SecureClear` 클래스 주석 참고) — Release 빌드 실측(`--secure-clear-self-test`)
+   으로 실제 결과도 확인했다. 다만 이 실측은 "버퍼가 기능적으로 0이 된다"의 증거이지 그 자체로 JIT
+   방어의 증거는 아니다(CP1 Opus 리뷰에서 지적됨) — 방어의 실제 근거는 `NoOptimization`의 구조적
+   특성이다.
+5. **`ReaderAuthId`의 메모리·저장소 비대칭** — `CardReadData.ReaderAuthId`는 다른 18개 필드와 동일하게
+   `char[]`로 관리되고 거래 종료 시 지워지지만, Phase 22 P22-7이 이 값을 진단 컨텍스트로
+   `ObservedIdentityStore`(SQLite `observed_identity` 테이블)에 **영속화**한다(§1.6). 저장 호출
+   (`PaymentOrchestrator`)에 넘길 때만 `new string(...)`으로 변환한다 — 이 한 곳이 카드리딩 경로에서
+   `string`이 생기는 유일한 지점이다. 인증 기준이 요구하는 대상은 "신용카드 정보"이고 리더기 인증
+   식별 번호는 장비 식별자라 문언상 대상이 아니라고 판단해 **영속화 자체는 유지한다**(P22-7 결정을
+   뒤집지 않는다, 2026-09-03 P25-3 확정).
 
 ### 4.5 로그 현황 점검 (이번 범위: 점검하고 기록까지)
 
@@ -954,6 +975,26 @@ RSA2048 서명 검증, AES128 암·복호화, SHA256 해시, DUKPT 키 파생은
 
 **Phase 25에서 할 일**: 위 세 가지를 포함해 민감정보가 로그 문자열로 흘러가는 경로를 전수 점검하고
 결과를 표로 남긴다. 마스킹 누락이 발견되면 그곳만 고친다.
+
+#### 4.5.1 점검 결과 (2026-09-03 P25-8, 실측 완료)
+
+| 경로 | 남는 값 | 마스킹 여부 | 판정 |
+|---|---|---|---|
+| POS/VAN 전문 원문 로그의 `#46`(암호화된 카드정보, 902614) | 앞 6바이트만 원문, 나머지 `*` | **있음**(`TelegramLogRedactor`) | 정상 — 실측 확인(`2026-09-03.log:7046` 등, `0017EN***...`) |
+| POS/VAN 전문 원문 로그의 `#51`(PIN, 902614) | **평문 그대로**(예: `1234`) | **없음** | **의도된 상태 — 2026-09-01 사용자 기결정, 2026-09-03 재확인**(아래 설명). 이번 Phase에서 고치지 않는다 |
+| POS/VAN 전문 원문 로그의 `#43`(보안단말기 인증번호 = 리더기 인증식별번호+프로그램식별자) | 평문 그대로 | 없음 | **대상 아님** — 마스킹 대상은 2026-09-01 사용자가 필드별로 직접 검토해 `#46` 하나로 확정했다(`TelegramLogRedactor` 클래스 요약). `#43`은 카드소유자 정보가 아니라 장비·프로그램 식별자다 |
+| `LogRingBuffer`(최근 500건 메모리 상주) | 파일 로그와 동일한 문자열(마스킹 적용 후 값) | 파일과 동일 — 별도 마스킹 계층 없음(파일에 이미 마스킹된 문자열이 그대로 들어간다) | 정상 — 별도 위험 아님(`#51`이 파일에 평문으로 남는 이상 링버퍼에도 같은 기간 동안 남는다는 것만 사실로 기록) |
+| 키다운로드 VAN 구간(0100/0110/0120/0130) 원문 로그 | 마스킹 없이 전체 | 없음 | **범위 밖 확정**(§3.6, 2026-09-02 사용자 확정) — 바꾸지 않는다 |
+| 예외 메시지(`PinFieldEncoder`, `PaymentOrchestrator`의 `InvalidOperationException` 등) | 길이·코드만(값 자체 없음) | 해당 없음(애초에 값을 안 담음) | 정상 — 전수 grep 확인(카드정보·PIN 값을 문자열 보간한 예외 메시지 0건) |
+
+**`#51`(PIN) 미마스킹에 대한 최종 판단 근거**: 이 상태는 신규 발견이 아니라 2026-09-01
+P22-6부속에서 사용자가 이미 한 번 마스킹을 넣었다가 "어차피 실제 배포 시엔 SEED 암호화(PRD §10,
+미정)를 넣을 것이므로 지금 미리 마스킹할 필요는 없다"고 리스크를 고지받은 상태에서 도로 뺀
+결정이다. 이 Phase(CP2 Opus 리뷰 개선권장 5)에서 배경을 설명하지 않은 채 "이번에 마스킹 추가"로
+1차 확인을 받았으나, 그건 실질적으로 기존 결정을 뒤집는 일이라 배경을 다시 설명하고 재확인했다 —
+**사용자가 원래 결정(미마스킹 유지)을 재확정했다(2026-09-03).** `TelegramLogRedactor`는 수정하지
+않는다. **SEED 암호화 착수 시 이 결정을 반드시 재검토한다**(그 전까지는 실제 고객 PIN이 이 로그
+경로로 평문 노출되는 상태가 계속된다 — 알려진 위험으로 문서화만 해 둔다).
 
 ### 4.6 검증 — 심사 증적
 

@@ -57,6 +57,93 @@
   로그로 확인한 즉시 requireAdministrator로 되돌렸다. van-call-test는 이번 수정 범위(char 패턴 +
   주석)가 byte 경로를 전혀 건드리지 않아 같은 날 10:47:49 결과를 그대로 유효한 것으로 판단해
   생략했다.
+
+  [원복 완료, 2026-09-03] Phase 25 P25-3(CardReadData 19개 필드 string→char[] 타입 변경) 완료 조건
+  확인을 위해 payment-flow-test/pos-client-test 하네스를 재실행해야 해서 한시적으로 asInvoker로
+  낮췄다. payment-flow-test 71/71(11:08:18), pos-client-test 7개 시나리오 전체 완료(기대한 동작들과
+  일치, 11:08:59)를 로그로 확인한 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-03] Phase 25 P25-4(PIN 경로 string→char[] 타입 변경) 완료 조건 확인을 위해
+  payment-flow-test 하네스를 재실행해야 해서 한시적으로 asInvoker로 낮췄다. payment-flow-test
+  71/71(11:18:51, PIN 취소·타임아웃·연속거래 시나리오 포함)을 로그로 확인한 즉시
+  requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-03] Phase 25 P25-5(임시 버퍼 즉시 클리어)와 P25-6(거래 종료 일괄 클리어 —
+  PosTelegram.ClearBody, TransactionQueue/PosSocketServer 배선) 완료 조건 확인을 위해
+  payment-flow-test/keydown-test/van-call-test/pos-client-test/repeat-transactions-test 하네스를
+  재실행해야 해서 한시적으로 asInvoker로 낮췄다. 이 라운드에서 FakePaymentNoticePresenter가 PIN
+  배열을 복사 없이 넘겨 SecureClear가 테스트 필드 자체를 지워버리는 하네스 버그를 발견·수정했다
+  (실제 PaymentNoticeViewModel은 원래도 복사본을 넘겼으므로 운영 코드 버그 아님). payment-flow-test
+  71/71(11:35:46), pos-client-test 7개 시나리오 전체 완료(11:36:20), repeat-transactions-test
+  50건 실패 0건·핸들/WorkingSet 평탄(11:37:21), keydown-test 128/128(11:26:20), van-call-test
+  통과 4건/실패 0건(11:31:14)을 로그로 확인한 즉시 requireAdministrator로 되돌렸다.
+  [원복 완료, 2026-09-03] Phase 25 CP2(P25-3~P25-6) 독립 Opus 리뷰 라운드. 리뷰어가 보고를 믿지 않고
+  하네스를 직접 재실행하기 위해 한시적으로 asInvoker로 낮췄다. payment-flow-test 71/71(11:44:18),
+  pos-client-test 7개 시나리오 전체 완료(11:49:15, 클라이언트가 받은 응답의 #9가 온전함을 확인),
+  keydown-test 128/128(11:49:51), repeat-tx-test 50건 실패 0건·핸들 639~641/WorkingSet 130MB
+  평탄(11:50:52)을 로그로 확인했다. 추가로 FakePaymentNoticePresenter의 방어적 복사를 일부러
+  되돌려 payment-flow-test가 실제로 4건 실패(12:01:10)하는 것을 재현하고, 원복 후 71/71
+  (12:02:17)로 복귀하는 것까지 확인한 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-03] CP2 Opus 리뷰 개선권장 4건(VanService 잘못된 주석, PosTelegram.Write(char[])
+  예외 경로 미클리어, CardReadBroadcaster 패자 CardData 미Dispose, PinFieldEncoder SEED 대비 주석)
+  수정 후 재검증을 위해 한시적으로 asInvoker로 낮췄다. payment-flow-test 71/71(12:10:22),
+  pos-client-test 7개 시나리오 전체 완료(12:10:55), keydown-test 128/128(12:11:02),
+  repeat-tx-test 50건 실패 0건(12:12:14)을 로그로 확인한 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-03] Phase 25 P25-9(memory clear test 심사 증적 하네스, 앞에 하이픈 두 개 —
+  이 주석에는 XML 파싱 버그 재발 방지를 위해 하이픈 없이 적는다) 완료 조건 확인을 위해 Release 빌드로
+  실행해야 해서 한시적으로 asInvoker로 낮췄다. **부수 발견**: 이 절을 처음 적을 때 인자 표기에
+  하이픈 두 개를 그대로 써서 매니페스트 리소스 파싱이 또 깨졌다(Phase 24에서 겪은 것과 동일한
+  버그 — "side-by-side configuration is incorrect", Start-Process로 재현). 하이픈 없는 표기로
+  즉시 정정하고 재빌드해 해결했다. 8개 시나리오(CardReadData.Dispose 19필드, 재호출 안전성, PIN
+  버퍼, PosTelegram.ClearBody, 키다운로드 608B 버퍼, 음성 대조군) 전부 통과(13:03:11)를 로그로
+  확인한 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-03] Phase 25 CP3(P25-7~P25-9) 독립 Opus 리뷰 라운드. 리뷰어가 보고를 믿지 않고
+  memory clear test(앞에 하이픈 두 개) 하네스와 회귀 하네스를 Release 빌드로 직접 재실행하기 위해
+  한시적으로 asInvoker로 낮췄다. memory clear test 8/8(13:12:41), keydown-test 128/128(13:12:56),
+  payment-flow-test 71/71(13:14:22)을 로그로 확인했다. 추가로 CardReadData.Dispose()의
+  CardNumber 클리어를 일부러 지워 하네스가 실제로 7통과/1실패로 잡아내는 것을(13:09:38) 재현하고,
+  PaymentOrchestrator의 CardData.Dispose() 호출부를 지운 경우에는 두 하네스 모두 통과해버리는
+  사각지대도 확인한 뒤 둘 다 원복하고 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-03] CP3 Opus 리뷰 개선권장 3건(memory clear test의 필드 개수 검사가 항진명제 —
+  리플렉션 기반 교차 확인으로 수정, PaymentOrchestrator의 CardData.Dispose 호출부 소실을 어떤
+  하네스도 못 잡던 사각지대 — payment-flow-test에 Scenario19 신설로 메움, PRD 모듈ID 설명이 SPEC
+  원문과 불일치 — 정정) 수정 후 재검증을 위해 한시적으로 asInvoker로 낮췄다. memory-clear-test
+  Release 8/8(13:20:24, 리플렉션 검사 19==19 확인), payment-flow-test 73/73(13:21:32, Scenario19
+  포함). Scenario19가 사각지대를 실제로 잡는지 재현하기 위해 PaymentOrchestrator의
+  CardData.Dispose() 호출을 일부러 주석 처리 → 72통과/1실패(13:22:42, Scenario19만 실패)로 검증
+  능력을 확인하고 원복(git diff로 사보타주 흔적 0건 확인) → payment-flow-test 73/73(13:23:53),
+  keydown-test 128/128(13:23:59)으로 재확인한 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-03] Phase 25 P25-10(실장비 검증) + P25-9부속(외부 프로세스 메모리 덤프 검증)
+  수행. procdump가 관리자 권한 프로세스에 접근 불가(이 환경은 UAC 보안 데스크톱이 원격 화면에
+  표시되지 않아 승인 불가, Phase 24 CP1 리뷰 때와 동일한 제약)해서 검증 동안만 asInvoker로 낮췄다.
+  실카드로 902614를 카드리딩→PIN 입력(1234)→거래 확정(#7=000)까지 실장비로 완주했고(14:47:30),
+  VAN 승인 직후(PIN 대기 중, 14:45:34) 덤프1, 거래 확정 3분 뒤 덤프2를 procdump -ma로 각각 떴다.
+  800000으로 실카드 BIN(35641514)을 확보해 정확한 카드 관련 패턴을 두 덤프에서 대조 — 덤프1엔
+  트랙2 형태 문자열이 ASCII 2건/UTF16LE 1건 있었고, 덤프2엔 UTF16LE 0건(CardReadData.Dispose()가
+  managed char[]를 실제로 지웠음을 확인)·ASCII 1건 잔존. 코드 추적 결과 이 raw byte[]의 유일한
+  소비 경로(ReaderService.SendCardReadCommandAsync)가 이미 SecureClear로 지우고 있고 거래 종료
+  후 3분 뒤라 참조하는 살아있는 객체가 없어, GC 세대 압축이 만든 옛 위치의 복사본(PRD.md §4.4 #1
+  기지 한계)으로 판정 — 신규 누락 아님. 덤프 파일 2개는 검증 직후 즉시 삭제했다(카드 PAN 평문
+  포함, 커밋 금지). 이어서 회귀 하네스 6종을 재검증했다 — payment-flow-test 73/73(14:55:33),
+  keydown-test 128/128(14:55:43), pos-client-test 7개 시나리오 전체 완료(14:57:04), repeat-tx-test
+  50건 실패 0건(14:57:36), memory-clear-test(Release) 8/8(14:57:55), van-call-test 통과 4건/실패
+  0건(15:02:54) 전량 통과를 로그로 확인한 즉시 requireAdministrator로 되돌렸다.
+  [원복 완료, 2026-09-03] Phase 25 최종 전체 리뷰(P25-10 이후, 결제 Flow 전체 대상) 라운드. 리뷰어가
+  Release 빌드로 하네스를 직접 재실행하기 위해 한시적으로 asInvoker로 낮췄다. secure clear self test
+  종합=통과(15:26:16), memory clear test 8/8(15:26:23), payment-flow-test 73/73(15:27:26),
+  keydown-test 128/128(15:27:55)로 수정 전 기준선을 확보했다. 이어서 Scenario19의 검증 능력을
+  재현하려고 PaymentOrchestrator의 CardData.Dispose() 호출을 일부러 주석 처리해 72통과/1실패
+  (15:29:30, Scenario19만 실패)를 확인하고 원복(사보타주 흔적 0건 확인), payment-flow-test
+  73/73(15:31:01)과 pos-client-test 7개 시나리오 전체 완료(15:31:58 — 응답 원문 706바이트가 온전하고
+  #7/#9가 살아 있어 요청 본문 클리어가 응답을 깨지 않음을 로그로 확인)로 복귀한 즉시
+  requireAdministrator로 되돌렸다. 이 라운드에서 ReaderService의 CALLBACK 데이터 미클리어 경로
+  (로컬 타임아웃 후 뒤늦게 도착한 0x3B, 중복 CALLBACK, UNSOLICITED 이벤트)를 발견해 수정했다
+  (PRD.md §4.2 #1 보강).
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

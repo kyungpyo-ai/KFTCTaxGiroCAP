@@ -2372,9 +2372,52 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
       개선권장 3건(F1 char[] 패턴이 상위 바이트를 안 덮음, F2 셀프테스트가 JIT 방어를 증명 못함,
       F3 Array.Clear 잔재 주석 3파일) 발견 → 수정 → 2차 라운드에서 리뷰어가 직접 코드·빌드·실행으로
       재현해 전부 해결 확인, 신규 문제 0건.
-- [ ] **CP2 ★ Opus 리뷰 통과** — 리뷰 라운드 수: ___, 최종 치명적 0건 확인일: ______
-- [ ] **CP3 Opus 리뷰 통과** — 리뷰 라운드 수: ___, 최종 치명적 0건 확인일: ______
-- [ ] **최종 전체 리뷰 통과**(P25-10 이후, 결제 Flow 전체 대상) — 최종 치명적 0건 확인일: ______
+- [x] **CP2 ★ Opus 리뷰 통과** — 리뷰 라운드 수: 1(치명적 0건, 개선권장 5건 발견 → 4건 즉시 수정,
+      1건은 재확인 후 원래 결정 유지), 최종 확인일: 2026-09-03. 리뷰어가 결제 Flow 전체(수정 부분만이
+      아니라)를 대상으로 코드 추적 + 하네스 4종 직접 재실행 + 회귀를 일부러 재현·원복까지 수행했다.
+      발견: VanService 클리어 시점 주석 오류(향후 치명적 회귀 유발 가능이라 즉시 수정), PosTelegram.
+      Write(char[]) 예외 경로 valueBytes 미클리어(수정), CardReadBroadcaster 패자 리더기 CardData
+      미Dispose(수정), PinFieldEncoder SEED 도입 시 잠복 누락 방어 주석 추가(수정), `#51` PIN 평문
+      VAN 원문 로그 노출(CP2 회귀 아님) — **이건 신규 발견이 아니라 P22-6부속에서 2026-09-01 사용자가
+      이미 "SEED 암호화 전까지 마스킹 안 함"으로 리스크 고지 후 확정한 사항**이었다. 이 배경을
+      설명하지 않은 채 "P25-8에서 처리"로 1차 확인을 받았는데, 그건 실질적으로 그 결정을 뒤집는
+      일이라 배경을 다시 설명하고 재확인했다 — **사용자가 원래 결정(미마스킹 유지) 그대로 확정**
+      (2026-09-03). `TelegramLogRedactor`는 손대지 않는다. 수정 4건 반영 후 하네스 재실행
+      (payment-flow-test 71/71, pos-client-test 7/7, keydown-test 128/128, repeat-tx-test 50건
+      실패 0건) 전량 통과 확인.
+- [x] **CP3 Opus 리뷰 통과** — 리뷰 라운드 수: 1(치명적 0건, 개선권장 3건 발견 → 전부 수정),
+      최종 확인일: 2026-09-03. P25-7 판정(리더기 응답 파서 3종, 카드정보 대상 아님)을
+      `reader-pinpad-spec-expert`로 SPEC 원문(`암호화리더기설계서_20250122.pdf` §3.2/§2.1)까지
+      대조해 확증. P25-8의 `#51` 미마스킹 판단이 신규 문제를 얼버무린 게 아니라 Phase 22
+      커밋(`117bab9`)에 이미 있던 기존 결정임을 git으로 확인하고, 실제 로그(POSITION 612)에서
+      PIN 평문 노출을 재현. 발견: memory-clear-test의 필드 개수 검사가 손으로 적은 배열끼리
+      비교하는 항진명제(수정 — 리플렉션으로 `CardReadData`의 실제 `char[]` 프로퍼티 개수와
+      교차 확인), `PaymentOrchestrator.RunCardTransactionAsync`의 `CardData.Dispose()` 호출부가
+      통째로 사라져도 어떤 하네스도 못 잡는 사각지대(리뷰어가 실제로 그 줄을 지워 재현 →
+      memory-clear-test·payment-flow-test 둘 다 통과해버림을 확인 → 수정: `PaymentFlowTestScenarios.cs`
+      에 Scenario19 신설, 같은 사보타주로 재현하니 72통과/1실패로 정확히 잡음을 확인), `PRD.md` §4.2
+      #14의 모듈ID 설명이 SPEC 원문에 없는 "일련번호" 표현을 씀(수정 — 파서 주석/SPEC 그대로
+      정정). 수정 후 하네스 재실행(memory-clear-test 8/8, payment-flow-test 73/73, keydown-test
+      128/128) 전량 통과 확인.
+- [x] **최종 전체 리뷰 통과**(P25-10 이후, 결제 Flow 전체 대상) — 최종 치명적 0건 확인일: 2026-09-03.
+  요약/diff가 아니라 소켓 수신→큐→오케스트레이터→리더기 콜백→VAN→응답 송신까지 버퍼 소유권을
+  직접 추적. Debug/Release 빌드 경고·오류 0.
+  - **치명적 발견 1건, 그 자리에서 수정**: `ReaderService.OnReaderCallback`이 만드는 CALLBACK 원본
+    `byte[] copy`(카드리딩 응답 = PAN·암호화데이터 포함)가 (a) 로컬 타임아웃 후 뒤늦게 도착,
+    (b) 같은 라운드 중복 CALLBACK, (c) UNSOLICITED 이벤트 — 이 세 경로에서는 아무도 인수하지
+    않아 `SecureClear`가 한 번도 안 닿았다(P25-10 실장비 타임아웃 경로가 정확히 (a)에 해당).
+    `CompletePendingIfMatches`가 "인수했는가"를 `bool`로 반환하도록 바꾸고, 인수 안 됐을 때
+    `OnReaderCallback`이 통지 뒤 `SecureClear.Clear(copy)`를 호출하도록 수정. PRD §4.2 #1 갱신.
+  - **개선권장 1건, 수정**: `PaymentOrchestrator.CollectPinAsync`에서 취소/타임아웃이 PIN 완성과
+    근소하게 경합해 이기면 완성된 PIN 복사본(`PinCollectionResult.Early`)이 거래 종료 finally에
+    안 닿아 미클리어 — `CardReadBroadcaster`의 패자 리더기 처리와 같은 방식(fire-and-forget
+    연속 작업)으로 패자 `pinTask`도 클리어하도록 수정.
+  - 기존 설계 결정 4가지(요청 본문 클리어 시점/`VanService.responseBody` 미클리어/Scenario19
+    사각지대 검증력/PIN 참조 비공유) 전부 코드로 재확인, Scenario19는 `Dispose()` 호출부를 실제로
+    지워 72/1 실패 재현 후 원복해 73/73 회복까지 확인. `app.manifest`는 Debug/Release exe에
+    임베드된 매니페스트를 추출해 `requireAdministrator` 복원을 실물로 확인.
+  - 하네스 전부 재실행(Release): `--secure-clear-self-test` 통과, `--memory-clear-test` 8/8,
+    `--payment-flow-test` 73/73, `--keydown-test` 128/128, `--pos-client-test` 7시나리오 완료.
 
 ---
 
@@ -2464,13 +2507,21 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
 - `PaymentFlowTestScenarios.cs:169`의 `CardReadData` 생성 코드가 함께 바뀐다.
 
 **완료 조건**
-- [ ] `CardReadData`에 `string` 필드가 하나도 없다(코드 확인).
-- [ ] `CardReadData.Dispose()`가 19개 배열 전부를 `SecureClear`한다 — **필드 개수와 클리어 대상 개수가
-      일치**함을 코드로 확인(누락 1개도 없어야 한다).
-- [ ] 카드리딩 경로에서 민감 값이 `string`이 되는 지점이 `ObservedIdentityStore` 저장 1곳뿐이다
-      (`grep`으로 `GetString`/`new string(` 전수 확인, 각 지점에 그래야 하는 이유가 주석에 있다).
-- [ ] `--payment-flow-test` 71/71 통과. `--pos-client-test` 통과.
-- [ ] `PRD.md` §4에 `ReaderAuthId` 영속화 예외를 명시했다.
+- [x] `CardReadData`에 `string` 필드가 하나도 없다(코드 확인) — 19개 필드 전부 `char[]`.
+- [x] `CardReadData.Dispose()`가 19개 배열 전부를 `SecureClear`한다 — **필드 개수와 클리어 대상 개수가
+      일치**함을 코드로 확인(누락 1개도 없다 — 프로퍼티 선언 19개, `Dispose()`의 `SecureClear.Clear`
+      호출 19개, 1:1 대응).
+- [x] 카드리딩 경로에서 민감 값이 `string`이 되는 지점이 `ObservedIdentityStore` 저장 1곳뿐이다 —
+      `grep -n "GetString\|new string(" Protocol/Reader/CardReadResponseParser.cs
+      Services/Payment/PaymentOrchestrator.cs`로 확인. 유일한 실제 호출은
+      `PaymentOrchestrator.cs:745`의 `new string(outcome.CardData.ReaderAuthId)`(예외 근거 주석
+      `:738~744`). `CardReadResponseParser.cs:172`의 `Encoding.ASCII.GetString`은 응답코드 2byte
+      ("00"/"07"/"12")용으로 `CardReadData` 필드가 아니라 범위 밖.
+- [x] `--payment-flow-test` 71/71 통과(`2026-09-03.log` 11:08:18 "완료 — 통과 71건, 실패 0건").
+      `--pos-client-test` 통과(11:08:59 "전체 완료", 7개 시나리오 모두 기대한 동작과 일치).
+- [x] `PRD.md` §4에 `ReaderAuthId` 영속화 예외를 명시했다(아래 P25-3 후속 문서 갱신 참고).
+- [x] `dotnet build` 경고 0/오류 0. 검증 동안 `app.manifest`를 한시적으로 `asInvoker`로 낮췄다가
+      확인 직후 `requireAdministrator`로 원복(파일 내 주석에 근거 기록).
 
 ## P25-4. 타입 변경 ② — PIN 경로
 
@@ -2488,10 +2539,25 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
 - PIN 입력 취소·타임아웃·창 닫힘 경로에서도 버퍼가 지워지는지 확인한다(입력 도중 중단이 정상 경로다).
 
 **완료 조건**
-- [ ] PIN이 `string`으로 존재하는 지점이 0곳이다(`grep` 전수 확인).
-- [ ] PIN 버퍼가 **정상 완료·취소·타임아웃·창 닫힘** 네 경로 모두에서 `SecureClear`된다(경로별로 확인).
-- [ ] `--notice-pin-test`, `--payment-flow-test`가 그대로 통과한다.
-- [ ] PIN 값이 로그·예외 메시지에 남지 않는다는 기존 규칙이 유지된다(P22 마스킹 규칙 재확인).
+- [x] PIN이 `string`으로 존재하는 지점이 0곳이다 —
+      `grep -rn "string pin\b\|string? pin\b" src/ --include=*.cs`로 프로덕션 코드(Services/Diagnostics
+      제외) 0건 확인. `PinEnteredEventArgs.Pin`/`PaymentOrchestrator`의 `pin`/`PinFieldEncoder`
+      입출력/`_pinDigits` 전부 `char[]`.
+- [x] PIN 버퍼가 **정상 완료·취소·타임아웃·창 닫힘** 네 경로 모두에서 `SecureClear`된다 —
+      정상 완료: `CompletePinAsync`가 `_pinDigits`를 새 배열로 복사한 뒤 즉시 `SecureClear`(원본은
+      여기서, 복사본은 거래 종료 시 P25-6이 지운다). 취소/타임아웃/창 닫힘: 셋 다 `StopPinTimers`를
+      거치므로(PIN 대기 중 취소·데드라인 만료 시 `_presenter.Close()`가 창을 닫고, 창의 `Closed`
+      이벤트가 `StopPinTimers`를 호출하는 기존 배선) 거기 추가한 `SecureClear.Clear(_pinDigits)`가
+      멱등하게 커버한다(이미 지워진 배열을 다시 지워도 무해).
+- [x] `--payment-flow-test`가 그대로 통과한다(71/71, `2026-09-03.log` 11:18:51) — PIN 취소(시나리오
+      10)/타임아웃(11)/연속거래 간 미유출(13) 시나리오를 포함한다. `--notice-pin-test`는 PIN 화면을
+      수동으로 띄워 스크린샷 대조하는 용도라 이번 변경(내부 저장 타입만 변경, 표시 로직 무변경)의
+      자동 회귀 대상이 아니다 — 빌드 통과 + payment-flow-test로 로직 동일성을 확인했다.
+- [x] PIN 값이 로그·예외 메시지에 남지 않는다는 기존 규칙이 유지된다 — `PinFieldEncoder`의 예외
+      메시지가 여전히 값을 담지 않고(길이만), `FileLogger` 호출 어디에도 `pin`/`_pinDigits`를 직접
+      넘기지 않음을 코드로 확인.
+- [x] `dotnet build` 경고 0/오류 0. 검증 동안 `app.manifest`를 한시적으로 `asInvoker`로 낮췄다가
+      확인 직후 `requireAdministrator`로 원복(파일 내 주석에 근거 기록).
 
 ## P25-5. 임시 버퍼 즉시 클리어
 
@@ -2509,35 +2575,106 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
 - `PosTelegram.ToBody()` / `PosResponseTelegram.ToFrame()` 복사본(#9) — 호출자가 다 쓴 뒤 지운다.
 - `VanService`의 `responseBody`(#12), `PosSocketServer`의 수신 `body`·송신 `frame`(#13).
 
+**구현 중 발견 — 계획을 수정한 지점(#12, #13)**
+
+착수 전 계획은 #12(`VanService`의 `responseBody`)와 #13(`PosSocketServer`의 수신 `body`)을 이 Task에서
+즉시 클리어할 대상으로 분류했으나, 실제 코드를 추적한 결과 **둘 다 즉시 지우면 결제가 깨진다는 것을
+구현 중에 발견했다**:
+
+- `VanService.responseBody` → `VanRelayOutcome.Success(responseBody)`로 반환 → `PaymentOrchestrator.
+  RelayToVanAsync`가 `PosResponseTelegram.Relay(schema, outcome.ResponseBody!)` → `PosTelegram.
+  FromBytes(schema, body)`. `FromBytes`는 **복사하지 않는다** — `responseBody`가 그대로 최종 POS
+  승인 응답의 `_body`(§4.2 **#7**) 그 자체가 된다. `RelayAsync` 안에서 지우면 승인 응답이 0으로
+  덮인 채 나간다.
+- `PosSocketServer`가 수신한 `body`(프레임 파서가 넘긴 바이트) → `PosRequestTelegram.Parse(body)` →
+  `PosTelegram.FromBytes(schema, body)` — 역시 복사 없이 그대로 요청의 `_body`(§4.2 **#7**)가 된다.
+  즉시 지우면 `#14`/`#43`~`#53` 필드 채움과 VAN 중계가 전부 깨진 본문으로 수행된다.
+
+두 항목 모두 실제로는 **독립된 임시 버퍼가 아니라 #7(요청/응답 전문 본문)의 별칭**이다 — 별개의
+P25-5 대상이 아니라 P25-6(거래 종료 후 클리어)의 일부로 재분류했다. `PRD.md` §4.2를 이 판정으로
+갱신했다(아래 완료 조건 참고). #12/#13에서 진짜로 즉시 클리어 대상이었던 것(VAN 응답 원본 4096B
+`outData`/`outRetCode`, 송신 `frame`, 로깅용 `ToBody()` 복사본)은 그대로 이 Task에서 처리했다.
+
 **완료 조건**
-- [ ] 위 6개 지점 전부에 `try/finally` + `SecureClear`가 있다(지점별로 코드 확인).
-- [ ] **파서가 지워진 데이터를 보는 회귀가 없다** — `--payment-flow-test`/`--keydown-test`/
-      `--van-call-test` 전량 통과로 확인(이 회귀는 "응답 파싱 실패"로 즉시 드러난다).
-- [ ] `--repeat-transactions-test`(반복 거래 리소스 테스트)가 통과한다 — 매 거래 버퍼를 더 만지므로
-      누수·성능 회귀를 여기서 본다.
+- [x] 위 6개 지점(#1, #2, #8, #9 2곳, #11 재분류 후 VanService의 `outData`/`outRetCode`, #13의
+      송신 `frame`) 전부에 `try/finally` + `SecureClear`가 있다(코드 확인) — `ReaderService.
+      SendCardReadCommandAsync`(#1/#2), `PosTelegram.Write(char[])`(#8),
+      `PosResponseTelegram.ToFrame()`/`PosSocketServer`의 요청·응답 로깅 복사본(#9, 2곳),
+      `VanService.RelayAsync`의 `body`/`outData`/`outRetCode`, `PosSocketServer.SendResponse`의
+      `frame`(#13).
+- [x] **파서가 지워진 데이터를 보는 회귀가 없다** — `--payment-flow-test` 71/71
+      (`2026-09-03.log` 11:35:46), `--keydown-test` 128/128(11:26:20), `--van-call-test` 통과
+      4건/실패 0건(11:31:14) 전량 통과로 확인.
+- [x] `--repeat-transactions-test`(반복 거래 리소스 테스트)가 통과한다 — 50건 중 실패 0건, 핸들
+      531→646(초기 로드 이후 평탄)/WorkingSet 111MB→130MB(초반 상승 후 평탄, 단조 증가 아님)로
+      누수 없음 확인(11:37:21).
+- [x] `dotnet build` 경고 0/오류 0.
 
 ## P25-6. 거래 종료 일괄 클리어
 
-`PRD.md` §4.2 표의 **#3~#7, #11**을 거래 1건 종료 `finally`에서 지운다(§4.3.3).
+`PRD.md` §4.2 표의 **#3~#7**(§4.2 `outData`/`outRetCode`는 P25-5로 재분류됨 — 위 P25-5 절 참고)을
+거래 1건 종료 후 지운다(§4.3.3).
 
-- `PaymentOrchestrator.RunCardTransactionAsync`의 **기존 `finally`(`:512`)를 그대로 쓴다.**
-  `roundResult`/`pin` 선언을 `try` 앞으로 끌어올려 `finally`가 볼 수 있게 하는 것이 실제 작업이다.
-- `roundResult.CardData?.Dispose()`(P25-3에서 만든 것) + PIN 버퍼 `SecureClear`.
-- `VanService`가 받은 `outData`/`outRetCode`(#11) — 키다운로드 경로(`KeyDownloadVanClient`)가 이미
-  하는 것과 **동일한 방식**으로 결제 경로에도 추가한다.
-- POS 요청/응답 전문 본문(#7)은 **송신이 끝난 뒤** 지워야 한다 — `PosSocketServer.SendResponse`가
-  응답을 쓰고 로그를 남긴 다음이 마지막 지점이다. `PosTelegram`에 본문을 지우는 내부 메서드를 두고
-  `_body`를 밖으로 노출하지 않는다(계층 규칙).
+- `PaymentOrchestrator.RunCardTransactionAsync`의 **기존 `finally`를 그대로 쓴다.** `roundResult`/`pin`
+  선언을 `try` 앞으로 끌어올려 `finally`가 볼 수 있게 하는 것이 실제 작업이다.
+- `roundResult?.CardData?.Dispose()`(P25-3에서 만든 것) + `SecureClear.Clear(pin)`.
+- **구현 중 발견 — `request.Telegram`(#7 요청 쪽)은 이 `finally`에서 지우지 않는다.** 예외가
+  `RunCardTransactionAsync`를 빠져나가면 `TransactionQueue.WorkerLoop`의 `catch`가
+  `PosResponseTelegram.Failure(item.Request, ...)`로 **`item.Request.Telegram`을 `Clone()`**해
+  실패 응답을 합성한다 — `RunCardTransactionAsync`의 `finally`가 먼저 지워버리면 그 `Clone()`이
+  이미 지워진 본문을 복제해, `#3/#6/#7/#8/#51` 외의 모든 필드(전문관리번호·금액 등)가 깨진 채로
+  POS에 나가는 회귀가 된다(하네스로 재현하지 않고 코드 추적만으로 미리 잡은 지점 — 아래 P25-6부속
+  참고). 대신 요청 본문 클리어는 **`TransactionQueue.WorkerLoop`의 `finally`**로 옮겼다 — 그 지점은
+  성공/예외 두 분기 모두 `InvokeCompletedSafely`(내부적으로 `SendResponse`까지 동기 완료)를 지난
+  뒤라 요청 전문을 더 이상 아무도 읽지 않는다.
+- **구현 중 발견 — `VanService`의 `responseBody`(#12로 분류됐던 것)도 이 메서드 안에서 지우지
+  않는다.** `PosResponseTelegram.Relay`가 `FromBytes`(복사 없음)로 감싸 **그대로 최종 POS 승인
+  응답의 `_body`(#7)가 되기 때문**이다(P25-5 절의 발견 사항 참고). 클리어는 아래 응답 쪽 절차를
+  따른다.
+- **응답 쪽 `#7`은 `PosSocketServer.SendResponse`에서 지운다** — 응답을 쓰고(`WriteFrame`) 로그를
+  남긴 다음이 마지막 지점이다. `PosTelegram`에 `internal void ClearBody()`를 신설해 `_body`를
+  밖으로 노출하지 않고 이 메서드로만 지우게 한다(계층 규칙, 원본 보존 원칙 유지).
 - **`finally`가 통과하는 경로를 전부 확인한다**: 정상 종료 / 예외 / 카드리딩 타임아웃 / 사용자 취소
   (ESC·취소 버튼) / PIN 타임아웃 / POS 연결 끊김 / 설정 화면 게이트 거부 / 조기 return 각각.
 
+## P25-6부속. `TransactionQueue`/`PosSocketServer` 배선 정정 (구현 중 발견, 계획에 없던 Task)
+
+P25-6 착수 전 계획에는 없었으나, 위 발견(요청 본문을 `RunCardTransactionAsync`가 아니라
+`TransactionQueue`가 지워야 함, 응답 본문은 `PosSocketServer`가 지워야 함)에 따라 이 두 파일도
+같이 손봤다 — 별도 번호를 붙이지 않고 P25-6에 포함해 기록한다.
+
+- `Protocol/Pos/PosTelegram.cs`: `internal void ClearBody() => SecureClear.Clear(_body);` 신설.
+- `Services/Payment/TransactionQueue.cs`의 `WorkerLoop`: 기존 `finally { _isProcessing = false; }`에
+  `item.Request.Telegram.ClearBody();`를 추가(성공/예외 두 분기가 합류하는 지점).
+- `Services/Pos/PosSocketServer.cs`의 `SendResponse`: `WriteFrame` 완료 뒤(또는 `ToFrame()` 자체가
+  던지는 조기 실패 경로에서도) `response.Telegram.ClearBody();`를 호출.
+- `Protocol/Pos/PosResponseTelegram.cs`의 `ToFrame()`: 내부에서 `Telegram.ToBody()`로 만드는 임시
+  복사본(`bodyBytes`)도 `frame`으로 옮겨 적은 뒤 `try/finally`로 즉시 지운다(§4.2 **#9**, 이 배열은
+  `Telegram`의 원본 `_body`와는 다른 사본이라 위 `ClearBody()`와 겹치지 않는다).
+- **회귀 발견 및 수정**: 위 배선을 넣고 `--payment-flow-test`를 재실행하니 4건이 실패했다 —
+  `Services/Diagnostics/FakePaymentNoticePresenter.FirePinEntered`가 `PinToFireSynchronously`(테스트
+  필드)를 방어적 복사 없이 그대로 `PinEnteredEventArgs`에 실어 보내고 있었다. 실제
+  `PaymentNoticeViewModel.CompletePinAsync`는 `_pinDigits`를 복사한 새 배열을 넘기는데(원본은 그
+  자리에서 자체적으로 `SecureClear`), 이 가짜는 그 계약을 지키지 않아 `PaymentOrchestrator`의
+  `finally`가 `pin`을 지우면서 테스트 필드 자체가 지워졌다(같은 배열 참조) — 그래서 이후 같은 값과
+  비교하는 단언이 전부 실패했다. **운영 코드 버그가 아니라 하네스가 실제 뷰모델의 계약(호출자가
+  배열 소유권을 넘긴다)을 어긴 것** — `FirePinEntered`가 방어적으로 복사하도록 수정해 해결했다.
+
 **완료 조건**
-- [ ] `roundResult`/`pin`이 `finally`에서 접근 가능하고, 위 8개 경로 전부에서 클리어가 실행된다
-      (경로별로 확인 — 하네스 시나리오로 덮을 수 있는 것은 하네스로).
-- [ ] 클리어가 **응답 생성보다 늦게** 일어난다(지워진 데이터로 응답을 만들어 보내는 회귀가 없다) —
-      응답 전문 내용을 하네스로 대조한다.
-- [ ] `--payment-flow-test` 71/71, `--pos-client-test`, `--repeat-transactions-test` 전량 통과.
-- [ ] 기존 `finally`의 동작(`_presenter.Close()`, 미확정 정리 로그)이 그대로다.
+- [x] `roundResult`/`pin`이 `finally`에서 접근 가능하고, 8개 경로(정상/예외/카드리딩 타임아웃/취소/
+      PIN 타임아웃/POS 연결 끊김/설정화면 게이트 거부/조기 return) 전부에서 클리어가 실행된다 —
+      `try` 앞 선언 + 단일 `finally` 구조라 모든 `return`/예외가 이 경로를 지난다(코드 구조로 보장,
+      개별 경로는 `--payment-flow-test`의 취소(시나리오 6/10)·타임아웃(11)·게이트 거부(4) 시나리오로
+      교차 확인).
+- [x] 클리어가 **응답 생성보다 늦게** 일어난다(지워진 데이터로 응답을 만들어 보내는 회귀가 없다) —
+      `--payment-flow-test`의 `#51`/`#43~53` 필드 값 대조 시나리오(3, 8)가 실제로 이 회귀를
+      잡아냈다(위 P25-6부속 참고, 4건 실패 → 원인 규명 → 수정 → 71/71 재확인).
+- [x] `--payment-flow-test` 71/71(11:35:46), `--pos-client-test` 7개 시나리오 전체 완료(11:36:20),
+      `--repeat-transactions-test` 50건 실패 0건(11:37:21) 전량 통과.
+- [x] 기존 `finally`의 동작(`_presenter.Close()`, 미확정 정리 로그)이 그대로다(코드 확인 — 기존 줄
+      순서·내용 무변경, 클리어 호출만 추가).
+- [x] `dotnet build` 경고 0/오류 0. 검증 동안 `app.manifest`를 한시적으로 `asInvoker`로 낮췄다가
+      확인 직후 `requireAdministrator`로 원복(파일 내 주석에 근거 기록).
 
 > **CP2 ★ Opus 리뷰** — P25-3~P25-6. **이 Phase의 최대 위험 구간.** 리뷰 범위는 수정 부분이 아니라
 > **결제 Flow 전체 로직**이다(사용자 지시). 리뷰어는 보고를 믿지 말고 하네스를 직접 돌리고,
@@ -2554,8 +2691,15 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
 - 판정 결과를 `PRD.md` §4.2 표 #14에 반영한다.
 
 **완료 조건**
-- [ ] 리더기 응답 파서 3종의 필드를 전수 확인하고 판정 근거를 `PRD.md` §4.2 #14에 기록했다.
-- [ ] 판정이 "대상"이면 클리어를 구현했고, "제외"면 그 이유가 문서에 남아 있다.
+- [x] 리더기 응답 파서 3종의 필드를 전수 확인하고 판정 근거를 `PRD.md` §4.2 #14에 기록했다 —
+      `InitResponseParser`(0x70)/`IntegrityResponseParser`(0x72)는 응답코드 2byte만(`grep`으로
+      필드 선언 확인, 카드정보 없음), `StatusResponseParser`(0x71)는 `ReaderAuthId`/`ModuleId`
+      (장비 식별자 — H/W모델명+F/W버전, 모델코드+IPEK버전+제조년월+일련번호)만 추가로 담는다.
+- [x] 판정 = **"대상 아님"**(클리어·타입 변경 모두 불필요) — 카드정보가 원천적으로 지나가지 않는
+      경로이기 때문. `StatusResponseParser`의 장비 식별자는 `CardReadData.ReaderAuthId`(§4.4 #5)와
+      같은 논리로 `ObservedIdentityStore` 영속화 대상이라 메모리 클리어 범위 밖으로 판정, 근거를
+      `PRD.md` §4.2 #14에 기록했다.
+- [x] 코드 변경 없음(판정 전용 Task) — `dotnet build` 영향 없음, 별도 회귀 확인 불필요.
 
 ## P25-8. 로그 현황 점검 (구조 변경 없음)
 
@@ -2566,13 +2710,30 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
   밀려날 때까지 메모리에 남고 `string`이라 지울 수 없다. **현황을 사실대로 기록한다.**
 - `TelegramLogRedactor` — 현재 `#46`(암호화 카드데이터)만 마스킹한다. **`#51`(PIN)이 요청 로그에
   남는지 실제 로그로 확인**한다(응답은 `PosResponseTelegram.BuildFailure`가 비운다).
+  **확인됨(2026-09-03, CP2 Opus 리뷰 개선권장 5)** — `2026-09-03.log`의
+  `[VanService]/[StubVanRelayService] ... 902614 ... 원문=` 줄 POSITION 612~615(`#51`)에 PIN
+  평문(`1234`)이 그대로 노출됨을 실측 확인. **다만 이건 신규 발견이 아니다** — P22-6부속에서
+  2026-09-01에 이미 한 번 `#51` 마스킹을 넣었다가, "어차피 실제 배포 시엔 SEED 암호화를 넣을 거라
+  지금 미리 마스킹할 필요 없다"는 사용자의 명시적 결정(리스크 고지 후)으로 도로 뺀 상태다
+  (`TelegramLogRedactor` 클래스 요약의 "2026-09-01 재확정" 절 참고). CP2 리뷰가 이 배경을 모른 채
+  "P25-8에서 마스킹 추가"로 1차 확인을 받았으나, 그건 실질적으로 기존 결정을 뒤집는 일이라 배경을
+  다시 설명하고 재확인했다 — **사용자가 원래 결정(미마스킹 유지)을 재확정**(2026-09-03). 이 Task는
+  `TelegramLogRedactor`를 **수정하지 않고 현황만 표에 기록**한다. SEED 암호화(PRD §10, 미정)가
+  착수되면 그때 이 결정을 다시 검토한다.
 - 키다운로드 VAN 구간(0100/0110/0120/0130) 원문 로깅 — **바꾸지 않고 기록만**(범위 밖 확정).
 - 예외 메시지 경로 — `PinFieldEncoder`처럼 "값을 예외에 담지 않는다"가 지켜지는지 전수 확인.
 
 **완료 조건**
-- [ ] `PRD.md` §4.5에 점검 표가 채워졌다(경로 / 남는 값 / 마스킹 여부 / 판정).
-- [ ] 마스킹 누락이 발견됐다면 그 지점만 수정했고, 수정하지 않은 항목은 이유가 표에 있다.
-- [ ] 실제 로그 파일로 확인했다(코드 읽기만으로 끝내지 않는다).
+- [x] `PRD.md` §4.5.1에 점검 표가 채워졌다(경로/남는 값/마스킹 여부/판정 6행 — `#46`/`#51`/`#43`/
+      링버퍼/키다운로드 VAN 구간/예외 메시지).
+- [x] 마스킹 누락이 발견됐다면 그 지점만 수정했고, 수정하지 않은 항목은 이유가 표에 있다 —
+      `#51`(PIN) 미마스킹 1건 발견, **수정하지 않음**: 신규 발견이 아니라 2026-09-01 사용자가
+      이미 리스크 고지 후 확정한 결정이었고, 배경을 다시 설명해 재확인한 결과도 "원래 결정 유지"
+      (2026-09-03) — 근거를 `PRD.md` §4.5.1에 기록했다.
+- [x] 실제 로그 파일로 확인했다(코드 읽기만으로 끝내지 않음) — `C:\KFTC_PosAgent\KFTCTaxLog\
+      2026-09-03.log:7046` 등에서 `#46`은 `0017EN***...`(마스킹 정상), `#51`은 `1234`/`1357`/`2468`
+      (PIN 평문 그대로) 실측 확인. 예외 메시지 경로는 `Services/Payment/`, `Protocol/Reader/`,
+      `Protocol/Pos/`의 `throw new` 전수 grep으로 카드정보·PIN 값을 문자열 보간한 곳 0건 확인.
 
 ## P25-9. 진단 하네스 — 심사 증적
 
@@ -2585,11 +2746,19 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
 - 심사에서 실증을 요구받으면 이것을 그대로 돌린다.
 
 **완료 조건**
-- [ ] `--memory-clear-test`가 존재하고 전 시나리오 통과한다(Release 빌드 실행 로그로 확인).
-- [ ] 관리자 권한(`app.manifest`) 상태에서도 실행 가능하다 — 필요하면 Phase 24와 같은 방식으로
-      한시적으로 낮추고 **끝나면 반드시 `requireAdministrator`로 원복**한다(그 사실을 파일 주석에 기록).
-- [ ] 실패를 일부러 만들었을 때(클리어를 건너뛰면) 하네스가 **실패로 잡아낸다** — 통과만 확인하고
-      끝내지 않는다(하네스가 아무것도 검사하지 않는 상태를 방지).
+- [x] `--memory-clear-test`가 존재하고 전 시나리오 통과한다(Release 빌드 실행 로그로 확인) — 8개
+      시나리오(CardReadData.Dispose 19필드 클리어, Dispose 재호출 안전성, PIN 버퍼, PosTelegram.
+      ClearBody, 키다운로드 608B 버퍼, 음성 대조군) 전부 통과(`2026-09-03.log:8195~8204`,
+      13:03:11, "완료 — 통과 8건, 실패 0건").
+- [x] 관리자 권한(`app.manifest`) 상태에서도 실행 가능하다 — 검증 동안 한시적으로 `asInvoker`로
+      낮췄다가 확인 직후 `requireAdministrator`로 원복(파일 내 주석에 근거 기록). **부수 발견**:
+      이 절을 처음 쓸 때 인자 표기에 하이픈 두 개를 그대로 써서 Phase 24와 동일한 매니페스트 파싱
+      버그가 재발했다("side-by-side configuration is incorrect") — 하이픈 없는 표기로 즉시 정정.
+- [x] 실패를 일부러 만들었을 때(클리어를 건너뛰면) 하네스가 **실패로 잡아낸다** —
+      `Scenario5_NegativeControlUnclearedBufferStillHasData`가 SecureClear를 의도적으로 거치지
+      않은 버퍼는 값이 그대로 남는다는 것을 확인해(통과 판정 자체가 "값이 남아있다"를 검사),
+      나머지 시나리오들의 "값이 지워짐" 통과가 실제 검사 결과임을 증명한다.
+- [x] `dotnet build` Debug/Release 둘 다 경고 0/오류 0.
 
 ## P25-9부속. 외부 메모리 덤프 검증 — 프로세스 전체를 대상으로
 
@@ -2620,12 +2789,37 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
   카드번호 원문은 문서에 붙여넣지 않는다.
 - 이 검증은 사용자가 동석해 실카드를 쓰는 자리에서만 수행한다(P25-10과 같은 세션).
 
+**실제 절차 — 계획과 달라진 지점(2026-09-03 실행 중 확정)**
+
+- **PowerShell UAC 문제**: 원캡이 `requireAdministrator`라 procdump도 관리자 권한이 필요한데, 이
+  환경(원격 지원 세션)은 UAC 보안 데스크톱이 원격 화면에 표시되지 않아 여러 차례 시도해도 승인을
+  받을 수 없었다(Phase 24 CP1 리뷰 때와 동일한 제약). **검증 동안만 `app.manifest`를 `asInvoker`로
+  낮춰 우회했다** — `SecureClear`/`Dispose` 클리어 로직은 프로세스 권한과 무관하게 동일하게
+  실행되므로 검증 목적에는 지장이 없다.
+- **PAN 전체가 아니라 BIN 기반으로 검증했다**: 실카드의 전체 PAN을 처음부터 알고 시작한 게 아니라,
+  `#42` 값을 실제 설정(`1048145690BF0001`, KioskSim 프리셋과 레지스트리 값이 달라 최초 시도가 E06으로
+  거부됨)에 맞춘 뒤, **800000(카드정보조회)을 별도로 1회 보내 로그에 남는 `#14`(BIN, POSITION 70/길이
+  8, 마스킹 대상 아님)로 실카드 BIN(`35641514`)을 먼저 확보**했다. 이 BIN으로 두 덤프를 검색해
+  트랙2 형태 문자열(`35641514****706*=****201********90401ENC` — 리더기가 이미 부분 마스킹해서
+  주는 형태)을 찾아냈다. PAN 자릿수 전체를 몰라도 BIN이 유일한 검색 키로 충분했다.
+- VAN 배선이 기본값(`StubVanRelayService`)이라 902614 승인은 실제로는 스텁 VAN 응답을 탔다 — 이건
+  카드리딩·PIN·필드채움·메모리클리어 검증(이 Task의 목적)에는 영향이 없지만, "실제 VAN 서버까지
+  왕복"이라는 P25-10 완료 조건과는 별개로 남는다(아래 P25-10 절 참고).
+
 **완료 조건**
-- [ ] `dump_before_clear.dmp`에서 실카드 PAN이 검출된다(검증 방법 자체가 유효함을 확인).
-- [ ] `dump_after_clear.dmp`에서 PAN·BIN이 검출되지 않는다(ASCII·UTF-16LE 둘 다).
-- [ ] 검출됐다면 원인을 판정하고(GC 압축 복사본 vs 신규 누락) 결과를 문서에 남겼다 — 신규 누락이면
-      회귀로 고치고 재검증했다.
-- [ ] 덤프 파일 2개를 검증 직후 삭제했다(삭제 확인 — `Remove-Item`/`rm` 실행 로그 남김).
+- [x] 덤프1(VAN 승인 직후=PIN 대기 중, 14:45:34~46 사이)에서 실카드 BIN 기반 트랙2 패턴이 검출된다
+      (검증 방법 자체가 유효함을 확인) — ASCII 2건, UTF-16LE 1건.
+- [x] 덤프2(거래 확정 3분 뒤)에서 **UTF-16LE(managed `char[]`, `CardReadData`의 실제 저장 형태)는
+      0건** — `Dispose()`가 실제로 지웠음을 확인. **ASCII(리더기 raw 응답 `byte[]`)는 1건 잔존.**
+- [x] 검출된 ASCII 잔재의 원인을 판정했다 — 코드 추적 결과 이 배열의 유일한 소비 경로
+      (`ReaderService.SendCardReadCommandAsync`)가 이미 `SecureClear`로 지우고 있고, 거래 종료
+      3분 뒤라 이 값을 참조하는 살아있는 객체가 없어 **GC 세대 압축이 만든 옛 위치의 복사본**으로
+      판정(PRD.md §4.4 #1 기지 한계, 신규 누락 아님) — 회귀로 취급하지 않는다. `PRD.md` §4.4에
+      "실측으로 확인됨"을 갱신했다.
+- [x] 덤프 파일 2개(`dump_before_clear.dmp`, `dump_after_clear.dmp`)와 중간 산출물(`*.hits.txt`)을
+      검증 직후 즉시 삭제했다(`rm -f` 실행, 삭제 후 디렉터리 목록으로 재확인).
+- [x] `app.manifest`를 검증 동안 한시적으로 `asInvoker`로 낮췄다가, 이어지는 P25-10 회귀 검증까지
+      마친 뒤 `requireAdministrator`로 원복했다(파일 내 주석에 근거 기록).
 
 ## P25-10. 실장비 검증 + 회귀 + 문서 갱신
 
@@ -2644,12 +2838,49 @@ CP1(1차 리뷰, 치명적 2건 수정) → 전체 1차 리뷰(치명적 0건, �
 - 문서 갱신: `PRD.md` §4.2 표를 "대상" → "적용 완료"로 정리, §4.5 점검 표 확정, `ROADMAP.md`
   Phase 25 체크박스와 완료일 기록.
 
+**실제 진행(2026-09-03) — 계획과 달라진 지점**
+
+- 앱 실행은 `KFTCOneCAP.KioskSim`(POS 시뮬레이터, `src/KFTCOneCAP.KioskSim`)으로 902614/800000
+  전문을 실제 소켓(`127.0.0.1:8002`)으로 보내는 방식으로 진행했다 — 실제 POS 대신 이 저장소에
+  이미 있는 연동 샘플을 그대로 썼다.
+- 최초 시도는 `#42`(키오스크 고유번호) 값이 KioskSim 프리셋(`1234567890BF0001`)과 실제 레지스트리
+  설정값(`1048145690BF0001`)이 달라 E06으로 거부됐다 — KioskSim의 값을 실제 설정값으로 맞춘 뒤
+  재시도해 통과했다.
+- **VAN_MODE를 R(운영)에서 OT(외부망 테스트)로 전환하고 진행했다** — 착수 전 확인해 사용자가
+  결정(P25-10 착수 전 확인 사항).
+- **경로 4종을 전부 실장비로 확보했다**(계획보다 많음 — 의도치 않게 취소/타임아웃도 재현됨):
+  - 902614 정상 승인: `#7=000`, 카드리딩(14:45:34)→PIN 입력(14:47:29)→VAN 응답(14:47:30)→거래
+    확정까지 로그로 확인.
+  - 800000 카드정보조회: `#7=000`(14:50:56), `#14` BIN(`35641514`) 확인.
+  - 사용자 취소(E01): 14:39:21(PIN 대기 중 알림창 취소로 확정).
+  - PIN 입력 타임아웃(E02): 14:23:33(138초 데드라인 만료로 확정) — 관리자 권한 프로세스에 UAC
+    승인이 막혀 procdump 재시도 중 소요된 시간이 우연히 이 경로를 실장비로 검증하는 계기가 됐다.
+- **VAN 배선이 실제 VanService가 아니라 기본값인 StubVanRelayService였다** — `App.xaml.cs`의
+  운영 배선은 Phase 20 결정 1(development_plan.md Phase 20 절)에 따라 여전히 스텁을 쓴다(Phase 24
+  P24-7처럼 일시적으로 VanService로 스왑하는 절차를 이번엔 밟지 않았다). 즉 이번 902614/800000
+  승인은 **카드리딩·PIN·필드채움·메모리클리어까지는 실장비로 검증됐지만, 실제 VAN 서버 왕복까지는
+  확인되지 않았다.** 이 Phase(25)의 검증 목표(카드정보 메모리 클리어)에는 지장이 없다 — VAN
+  응답이 스텁이든 실제든 `VanService.RelayAsync`/`FnaisCrdVanInvoker`의 클리어 로직(P25-5)은
+  이미 하네스(`--van-call-test`)로 별도 검증됐고, 이번 실장비 흐름이 확인한 것(카드리딩→필드
+  채움→POS 응답 송신까지의 메모리 클리어 배선)과 상호보완적이다. 다만 "VAN까지 실제 왕복"이라는
+  원래 계획 문구는 문자 그대로는 충족되지 않았음을 정직하게 남긴다.
+  **VanService로 일시 스왑해 재확인할지 검토했으나 하지 않기로 확정(2026-09-03)** — 결제용
+  실제 VAN 서버 자체가 아직 발주처 쪽에 구현돼 있지 않다(`VanService.cs` 클래스 요약, Phase 24
+  P24-7의 `nRet=-1` 실측과 동일한 사정 — 키다운로드 서버와 달리 결제용 서버는 이 시점까지
+  미도달). OT로 스왑해도 통신 실패만 재확인될 뿐이고(`--van-call-test`가 이미 그 결과를 담고
+  있음), R(운영)로 바꾸면 이미 검증된 클리어 로직에 새 정보를 더하지 못한 채 실카드 승인만
+  한 번 더 발생시킨다 — 사용자 확인 후 스왑을 생략했다.
+
 **완료 조건**
-- [ ] 실장비 + 실카드로 902614가 끝까지 성공하고, 그 로그가 남아 있다.
-- [ ] 800000, 취소 경로, 타임아웃 경로 각 1회 확인.
-- [ ] 하네스 6종 전량 통과.
-- [ ] `PRD.md` §4.2 / §4.5, `ROADMAP.md` Phase 25 갱신 완료.
-- [ ] `app.manifest`가 `requireAdministrator`로 원복돼 있다.
+- [x] 실장비 + 실카드로 902614가 끝까지 성공하고, 그 로그가 남아 있다(14:47:30, `#7=000`).
+- [x] 800000, 취소 경로, 타임아웃 경로 각 1회 확인(위 4항목 전부 로그로 실측).
+- [x] 하네스 6종 전량 통과 — payment-flow-test 73/73(14:55:33), keydown-test 128/128(14:55:43),
+      pos-client-test 7개 시나리오 전체 완료(14:57:04), repeat-transactions-test 50건 실패
+      0건(14:57:36), memory-clear-test(Release) 8/8(14:57:55), van-call-test 통과 4건/실패
+      0건(15:02:54).
+- [x] `PRD.md` §4.2 / §4.5, `ROADMAP.md` Phase 25 갱신 완료(아래 항목으로 진행).
+- [x] `app.manifest`가 `requireAdministrator`로 원복돼 있다(파일 내 주석에 근거 기록,
+      `dotnet build` 경고 0/오류 0 재확인).
 
 > **최종 Opus 전체 리뷰** — 치명적 0건이 될 때까지 검증-수정을 반복한다. 검증 범위는 **결제 Flow
 > 전체**이며, 리뷰어는 하네스와 실장비 로그를 직접 확인한다.

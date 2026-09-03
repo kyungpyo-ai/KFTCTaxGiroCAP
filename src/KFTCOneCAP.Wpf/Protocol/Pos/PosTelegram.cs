@@ -1,4 +1,5 @@
 using System;
+using KFTCOneCAP.Wpf.Security;
 
 namespace KFTCOneCAP.Wpf.Protocol.Pos;
 
@@ -80,6 +81,32 @@ public sealed class PosTelegram
         Buffer.BlockCopy(padded, 0, _body, field.Position, field.Length);
     }
 
+    /// <summary><see cref="Write(int,string)"/>의 <c>char[]</c> 버전(Phase 25 P25-3) — 카드정보처럼
+    /// <c>string</c>으로 만들면 지울 수 없는 값을 위한 경로다. 동작은 동일(CP949 인코딩 + 패딩)하고
+    /// 값 자체를 문자열화하지 않는다. <c>valueBytes</c>/<c>padded</c>는 이 메서드 안에서 만들어져
+    /// <c>_body</c>로 옮겨 적은 뒤 더 필요 없으므로 즉시 지운다(Phase 25 P25-5, PRD.md §4.2 #8 —
+    /// <see cref="Write(int,string)"/>은 민감하지 않은 필드만 계속 쓰므로 지우지 않는다). <c>GetBytes</c>
+    /// 호출부터 <c>try</c>로 감싼다 — <see cref="PosField.Pad"/>가 필드 길이 초과로 예외를 던지는
+    /// 경로에서도 이미 만들어진 <c>valueBytes</c>가 지워지지 않고 남는 문제를 CP2 Opus 리뷰
+    /// 개선권장 2(2026-09-03)에서 잡았다.</summary>
+    public void Write(int fieldNumber, char[] value)
+    {
+        PosField field = Schema[fieldNumber];
+        byte[]? valueBytes = null;
+        byte[]? padded = null;
+        try
+        {
+            valueBytes = PosMessageEncoding.Value.GetBytes(value);
+            padded = field.Pad(valueBytes);
+            Buffer.BlockCopy(padded, 0, _body, field.Position, field.Length);
+        }
+        finally
+        {
+            SecureClear.Clear(valueBytes);
+            SecureClear.Clear(padded);
+        }
+    }
+
     /// <summary>원본 버퍼의 복사본. 소켓에 실제로 나가는 본문(길이 헤더는 프레이머가 별도로 붙인다).</summary>
     public byte[] ToBody()
     {
@@ -87,4 +114,13 @@ public sealed class PosTelegram
         Buffer.BlockCopy(_body, 0, copy, 0, _body.Length);
         return copy;
     }
+
+    /// <summary>
+    /// Phase 25 P25-6(PRD.md §4.2 #7) — 원본 <c>_body</c>를 3회 덮어쓴다. 이 거래가 더 이상 이 인스턴스를
+    /// 참조하지 않는 시점(요청은 <c>TransactionQueue.WorkerLoop</c>가 응답 송신까지 끝난 뒤, 응답은
+    /// <c>PosSocketServer.SendResponse</c>가 프레임을 쓴 뒤)에만 호출한다. <c>_body</c>를 그대로
+    /// 노출하지 않고 이 메서드로만 지우게 해 원본 보존 원칙(클래스 요약)이 클리어 시점에도 깨지지
+    /// 않도록 한다 — 밖에서 배열을 꺼내 임의로 조작할 수 없다.
+    /// </summary>
+    internal void ClearBody() => SecureClear.Clear(_body);
 }

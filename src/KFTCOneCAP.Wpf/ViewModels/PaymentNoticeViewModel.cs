@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KFTCOneCAP.Wpf.Security;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Payment;
 
@@ -96,7 +97,7 @@ public sealed partial class PaymentNoticeViewModel : ObservableObject
     /// 같은 분리 패턴). "정확히 한 번"은 <see cref="_pinCompleted"/> sticky 플래그가 보장하며, 유일한
     /// 호출처는 <see cref="CompletePinAsync"/>다.
     /// </summary>
-    internal void RaisePinEnteredEvent(string pin) => PinEntered?.Invoke(this, new PinEnteredEventArgs(pin));
+    internal void RaisePinEnteredEvent(char[] pin) => PinEntered?.Invoke(this, new PinEnteredEventArgs(pin));
 
     // ── P18-3: PIN 입력 로직 ────────────────────────────────────────────────
 
@@ -110,7 +111,11 @@ public sealed partial class PaymentNoticeViewModel : ObservableObject
 
     private const int PinMaxLength = 4;
 
-    private readonly List<char> _pinDigits = new(PinMaxLength);
+    // Phase 25 P25-4(PRD.md §4.3.2) — List<char> 대신 고정 길이 char[]로 관리한다. List<T>는 내부
+    // 배열이 증설되면 옛 배열이 참조 없이 남아 지울 수 없다(이 리스트는 초기 용량이 이미
+    // PinMaxLength라 실제로는 증설되지 않지만, 타입 자체가 그 가능성을 열어 두는 것 자체가 문제라
+    // 원천적으로 배열로 바꾼다). 실제 입력 자릿수는 PinLength(ObservableProperty)가 별도로 추적한다.
+    private readonly char[] _pinDigits = new char[PinMaxLength];
 
     // 창이 닫힐 때(Close 경로) 반드시 취소한다 — Phase 13 Opus 리뷰 H-1(데모 DispatcherTimer가 창을
     // 닫아도 계속 발화하며 창/뷰모델을 붙들던 누수)과 같은 함정을 Task.Delay + 토큰 취소로 피한다.
@@ -175,19 +180,19 @@ public sealed partial class PaymentNoticeViewModel : ObservableObject
         // StopPinTimers가 CTS를 Dispose한 뒤라면 그 접근이 ObjectDisposedException을 던진다
         // (2026-08-27 Phase 18 최종 검증 M-1). Dispatcher.Invoke(Send)로 들어오는 Close가 이미 큐에
         // 쌓인 클릭(Input, 더 낮은 우선순위)보다 먼저 처리될 수 있어 실제로 열리는 순서다.
-        if (_pinTimersStopped || _pinCompleted || string.IsNullOrEmpty(digit) || _pinDigits.Count >= PinMaxLength)
+        if (_pinTimersStopped || _pinCompleted || string.IsNullOrEmpty(digit) || PinLength >= PinMaxLength)
         {
             return;
         }
 
-        _pinDigits.Add(digit[0]);
-        PinLength = _pinDigits.Count;
+        _pinDigits[PinLength] = digit[0];
+        PinLength++;
 
         int generation = ++_pinRevealGeneration;
         RevealedDigit = digit;
         _ = RevealThenMaskAsync(generation, _pinCts.Token);
 
-        if (_pinDigits.Count == PinMaxLength)
+        if (PinLength == PinMaxLength)
         {
             // sticky 플래그는 여기서 즉시 세운다 — 실제 PinEntered 발화는 아래에서 지연되지만, 그
             // 사이의 연타(숫자/삭제)는 이 시점부터 이미 전부 무시된다.
@@ -200,13 +205,13 @@ public sealed partial class PaymentNoticeViewModel : ObservableObject
     private void PinBackspace()
     {
         // PinDigit과 같은 이유로 _pinTimersStopped를 함께 막는다(창이 닫힌 뒤 큐에 남은 클릭 방어).
-        if (_pinTimersStopped || _pinCompleted || _pinDigits.Count == 0)
+        if (_pinTimersStopped || _pinCompleted || PinLength == 0)
         {
             return;
         }
 
-        _pinDigits.RemoveAt(_pinDigits.Count - 1);
-        PinLength = _pinDigits.Count;
+        PinLength--;
+        _pinDigits[PinLength] = '\0'; // 지운 자리는 즉시 NUL로 — 다음 입력이 그 자리를 덮어쓸 때까지 남지 않는다.
         RevealedDigit = null;
         // 진행 중이던 노출→마스킹 지연 작업이 나중에 완료돼도 세대 번호가 달라 아무 효과가 없다.
         _pinRevealGeneration++;
@@ -247,11 +252,14 @@ public sealed partial class PaymentNoticeViewModel : ObservableObject
             return;
         }
 
-        string pin = new(_pinDigits.ToArray());
-        // 거래 간 잔존 금지(P18-3) — 인스턴스가 들고 있던 자릿수 상태를 즉시 비운다. string 자체는
-        // 메모리에서 0으로 덮어쓸 수 없지만(불변+인터닝), 참조를 즉시 끊는 것까지가 이 단계의 폐기
-        // 수준이다(PRD §8.4).
-        _pinDigits.Clear();
+        // 거래 간 잔존 금지(P18-3, PRD §8.4) — _pinDigits는 이 뷰모델 인스턴스가 계속 들고 있는
+        // 버퍼라 그대로 넘기지 않는다. 발화할 값은 새 배열로 복사하고(그 배열은 이후 거래 전체가
+        // 들고 있다가 PaymentOrchestrator.RunCardTransactionAsync의 finally에서 지워진다 — Phase 25
+        // P25-6), _pinDigits 자신은 여기서 즉시 SecureClear한다(Phase 25 P25-4 — 예전에는 string이라
+        // 덮어쓸 수 없어 참조만 끊었지만, 이제 char[]라 실제로 덮어쓸 수 있다).
+        char[] pin = new char[PinMaxLength];
+        Array.Copy(_pinDigits, pin, PinMaxLength);
+        SecureClear.Clear(_pinDigits);
         RevealedDigit = null;
         FileLogger.Info("PaymentNoticeViewModel: PIN 4자리 입력 완료");
 
@@ -275,5 +283,10 @@ public sealed partial class PaymentNoticeViewModel : ObservableObject
         _pinTimersStopped = true;
         _pinCts.Cancel();
         _pinCts.Dispose();
+
+        // Phase 25 P25-4/P25-5 — 취소·타임아웃으로 PIN 입력이 완성되지 못한 채 창이 닫히는 경로
+        // (CompletePinAsync까지 도달하지 못해 그쪽의 SecureClear가 실행되지 않은 경우)를 여기서
+        // 마저 덮는다. SecureClear.Clear는 이미 지워진 배열에 다시 호출해도 무해하다.
+        SecureClear.Clear(_pinDigits);
     }
 }

@@ -364,6 +364,17 @@ public partial class App : Application
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
             System.Threading.Tasks.Task.Run(SecureClearSelfTest.RunAll);
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--memory-clear-test")
+        {
+            // 개발/회귀 검증용(docs/operations/development_plan.md P25-9 완료 조건, 최종 산출물
+            // 아님): 카드리딩 데이터(CardReadData)·PIN 버퍼·POS 전문 본문(PosTelegram)·키다운로드
+            // 버퍼 등 실제 파이프라인 지점을 실제 형태로 채운 뒤 정식 클리어 경로를 호출해 확인한다
+            // — 심사에서 실증을 요구받으면 이 하네스를 그대로 돌린다. Release 빌드로 실행한 결과만
+            // 완료 조건 증적으로 인정한다(SecureClearSelfTest와 동일한 이유). UI는 홈 화면을 그대로
+            // 띄운다.
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+            System.Threading.Tasks.Task.Run(MemoryClearTestScenarios.RunAll);
+        }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--notice-demo")
         {
             // 개발용 결제 알림창 실시간 애니메이션 데모(수동 실행 전용). 예전엔 인자 없는 기본

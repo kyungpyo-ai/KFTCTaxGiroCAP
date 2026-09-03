@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Threading;
 using System.Threading.Tasks;
 using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
 using KFTCOneCAP.Wpf.Protocol.Reader;
+using KFTCOneCAP.Wpf.Security;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 using KFTCOneCAP.Wpf.Services.Reader;
 using KFTCOneCAP.Wpf.Services.Settings;
@@ -209,7 +211,7 @@ internal sealed class PaymentOrchestrator
             requiresPin: false, // 800000은 PIN 단계가 없다(Phase 18 확정 사항 1) — #51 필드 자체가 없음
             fillOneCapFields: (winner, cardData, pin) =>
             {
-                string cardNumber = cardData.CardNumber;
+                char[] cardNumber = cardData.CardNumber;
                 if (cardNumber.Length < 8)
                 {
                     winner.SendInvalidationInit();
@@ -217,8 +219,20 @@ internal sealed class PaymentOrchestrator
                     return PosResponseTelegram.Failure(request, PosResultCodeMapper.ReaderNoCardDataDefensiveCode);
                 }
 
-                string bin = cardNumber.Substring(0, 8);
-                request.Telegram.Write(14, bin); // #14 BIN
+                // #14 BIN — 카드번호 앞 8자리만 잘라 쓰는 임시 버퍼. 이 델리게이트 안에서 만들고
+                // 바로 쓰고 바로 지운다(Phase 25 P25-3/P25-5 — 수명이 이 메서드 안에서 끝나는 임시
+                // 버퍼는 즉시 클리어).
+                char[] bin = new char[8];
+                try
+                {
+                    Array.Copy(cardNumber, bin, 8);
+                    request.Telegram.Write(14, bin); // #14 BIN
+                }
+                finally
+                {
+                    SecureClear.Clear(bin);
+                }
+
                 FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] BIN 채움 완료 — VAN 중계로", code: null, txId);
                 return null; // null = 실패 아님, VAN 중계로 진행
             }).ConfigureAwait(false);
@@ -322,9 +336,9 @@ internal sealed class PaymentOrchestrator
     ///   이 서브필드의 최대 용량(600)을 고정으로 적는다.</item>
     /// </list>
     /// </summary>
-    private static void FillCardApprovalFields(PosRequestTelegram request, CardReadData cardData, string pin)
+    private static void FillCardApprovalFields(PosRequestTelegram request, CardReadData cardData, char[] pin)
     {
-        string readerAuthId = cardData.ReaderAuthId;
+        char[] readerAuthId = cardData.ReaderAuthId;
         if (readerAuthId.Length != 16)
         {
             throw new InvalidOperationException(
@@ -335,30 +349,93 @@ internal sealed class PaymentOrchestrator
         if (programId.Length != 16)
             throw new InvalidOperationException($"프로그램 식별자 상수가 16자가 아님: '{programId}'(길이={programId.Length})");
 
-        request.Telegram.Write(43, readerAuthId + programId); // 보안단말기 인증번호 = 리더기(16)+프로그램(16)
+        // Phase 25 P25-3 — 아래 4개 필드(#43/#45/#46/#53)는 CardReadData의 char[] 필드 여러 개를
+        // 이어붙여야 한다. 예전에는 string + 연산자로 새 string을 만들었지만(지울 수 없음), 이제
+        // 조립용 char[] 버퍼를 직접 만들어 쓰고 즉시 지운다(try/finally) — 이 버퍼들은 이 메서드
+        // 안에서 만들어져 이 메서드 안에서 소비되고 끝나므로 수명이 명확하다(P25-5 원칙과 동일).
+
+        char[] authNumber = new char[32]; // #43 보안단말기 인증번호 = 리더기(16)+프로그램(16)
+        try
+        {
+            Array.Copy(readerAuthId, authNumber, 16);
+            programId.CopyTo(0, authNumber, 16, 16);
+            request.Telegram.Write(43, authNumber);
+        }
+        finally
+        {
+            SecureClear.Clear(authNumber);
+        }
+
         request.Telegram.Write(44, cardData.FallbackCode);
-        request.Telegram.Write(45, cardData.KeyVersion + cardData.Tc + cardData.ModuleId); // 2+6+10=18
-        // "0"+3자리 길이값(리더기 원문)+페이로드 = 4자리 길이 헤더+최대192바이트 = 196바이트(2026-09-01
-        // 사용자 확정, 위 클래스 주석 참고). 마커/WCC는 포함하지 않는다.
-        request.Telegram.Write(46, "0" + cardData.EncryptedDataLengthText + cardData.EncryptedData);
+
+        char[] decryptionInfo = new char[18]; // #45 복호화 정보 = 키버전(2)+TC(6)+모듈ID(10)
+        try
+        {
+            Array.Copy(cardData.KeyVersion, 0, decryptionInfo, 0, 2);
+            Array.Copy(cardData.Tc, 0, decryptionInfo, 2, 6);
+            Array.Copy(cardData.ModuleId, 0, decryptionInfo, 8, 10);
+            request.Telegram.Write(45, decryptionInfo);
+        }
+        finally
+        {
+            SecureClear.Clear(decryptionInfo);
+        }
+
+        // #46 암호화된 카드정보 = "0"+3자리 길이값(리더기 원문)+페이로드 = 4자리 길이 헤더+최대192바이트
+        // = 196바이트(2026-09-01 사용자 확정, 위 클래스 주석 참고). 마커/WCC는 포함하지 않는다.
+        char[] encryptedCardInfo = new char[1 + cardData.EncryptedDataLengthText.Length + cardData.EncryptedData.Length];
+        try
+        {
+            encryptedCardInfo[0] = '0';
+            Array.Copy(cardData.EncryptedDataLengthText, 0, encryptedCardInfo, 1, cardData.EncryptedDataLengthText.Length);
+            Array.Copy(cardData.EncryptedData, 0, encryptedCardInfo, 1 + cardData.EncryptedDataLengthText.Length, cardData.EncryptedData.Length);
+            request.Telegram.Write(46, encryptedCardInfo);
+        }
+        finally
+        {
+            SecureClear.Clear(encryptedCardInfo);
+        }
+
         request.Telegram.Write(48, MapTransactionInputType(cardData.Wcc));
         request.Telegram.Write(50, "2"); // 신용카드 승인 인증방식 고정값(SPEC p.17)
         request.Telegram.Write(51, PinFieldEncoder.ToTelegramValue(pin)); // 값 자체는 로그에 남기지 않는다
-        request.Telegram.Write(53, EmvDataSubfieldLengthPrefix + cardData.EmvEncodedData);
+
+        // #53 EMV DATA = "0600"(4자리 고정 길이 서브필드) + EMV 인코딩 데이터.
+        char[] emvData = new char[EmvDataSubfieldLengthPrefix.Length + cardData.EmvEncodedData.Length];
+        try
+        {
+            EmvDataSubfieldLengthPrefix.CopyTo(0, emvData, 0, EmvDataSubfieldLengthPrefix.Length);
+            Array.Copy(cardData.EmvEncodedData, 0, emvData, EmvDataSubfieldLengthPrefix.Length, cardData.EmvEncodedData.Length);
+            request.Telegram.Write(53, emvData);
+        }
+        finally
+        {
+            SecureClear.Clear(emvData);
+        }
     }
 
     /// <summary>#53 EMV DATA 내부의 4바이트 길이 서브필드 — 실제 데이터 길이가 아니라 이 서브필드의
     /// 최대 용량(600)을 항상 고정으로 적는다(2026-08-27 사용자 확정, 클래스 주석 참고).</summary>
     private const string EmvDataSubfieldLengthPrefix = "0600";
 
-    private static string MapTransactionInputType(string wcc) => wcc switch
+    /// <summary>Phase 25 P25-3 — Wcc가 <c>char[]</c>로 바뀌면서 문자열 스위치를 못 쓰므로 길이 1일
+    /// 때만 단일 문자로 판정한다. 반환값("5"/"2"/"4")은 SPEC 고정 코드일 뿐 카드정보가 아니라
+    /// string으로 둔다.</summary>
+    private static string MapTransactionInputType(char[] wcc)
     {
-        "I" => "5", // IC
-        ";" => "2", // Swipe(MS)
-        "P" => "4", // Pay-On
-        _ => throw new InvalidOperationException(
-            $"거래 입력 유형(#48)을 판단할 수 없는 WCC 값: '{wcc}' — 이 Flow는 IC/Swipe/Pay-On만 다룬다(RF/QR/Key-IN 등은 범위 밖)"),
-    };
+        if (wcc.Length == 1)
+        {
+            switch (wcc[0])
+            {
+                case 'I': return "5"; // IC
+                case ';': return "2"; // Swipe(MS)
+                case 'P': return "4"; // Pay-On
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"거래 입력 유형(#48)을 판단할 수 없는 WCC 값(길이={wcc.Length}) — 이 Flow는 IC/Swipe/Pay-On만 다룬다(RF/QR/Key-IN 등은 범위 밖)");
+    }
 
     /// <summary>
     /// 보안단말기 인증번호(#43)의 프로그램 식별자 절반(16자, 여신협회 등록값). SPEC 확정 전까지
@@ -390,7 +467,7 @@ internal sealed class PaymentOrchestrator
     /// </summary>
     private async Task<PosResponseTelegram> RunCardTransactionAsync(
         PosRequestTelegram request, string txId, int amountFieldNumber, bool requiresPin,
-        Func<IReaderEndpoint, CardReadData, string?, PosResponseTelegram?> fillOneCapFields,
+        Func<IReaderEndpoint, CardReadData, char[]?, PosResponseTelegram?> fillOneCapFields,
         ShopSettings? preloadedShopSettings = null)
     {
         // ===== 참여 후보 결정(§2.2.3) =====
@@ -463,19 +540,25 @@ internal sealed class PaymentOrchestrator
 
         EventHandler onCanceled = (_, _) => OnCanceled(scope);
 
+        // Phase 25 P25-6(PRD.md §4.2 #3~#6) — 거래가 진행되는 동안 계속 필요하므로 try 블록 안에서
+        // 선언할 수 없다(조기 클리어 불가능, §4.3.3 하이브리드 원칙). 아래 finally가 접근할 수 있도록
+        // try 앞으로 끌어올린다. roundResult가 null이면(카드 리딩 전 조기 실패 등) CardData?.Dispose()가
+        // 무해하게 아무 일도 하지 않는다.
+        CardReadRoundResult? roundResult = null;
+        char[]? pin = null;
+
         try
         {
             _presenter.Canceled += onCanceled;
             _presenter.Show(PaymentNoticeState.IcCardRequest);
 
-            CardReadRoundResult roundResult = await RunCardReadingRoundsAsync(participants, amount, transactionDateTime, deadline, scope).ConfigureAwait(false);
+            roundResult = await RunCardReadingRoundsAsync(participants, amount, transactionDateTime, deadline, scope).ConfigureAwait(false);
             if (roundResult.EarlyFailureCode != null)
                 return PosResponseTelegram.Failure(request, roundResult.EarlyFailureCode);
 
             // 902614만 여기서 PIN을 수집한다(Phase 18 P18-4) — 결과 확정은 PIN 대기가 끝난 뒤로
             // 미뤄진다(아래 TryClaim). PIN 대기 중 취소/Timeout이 이기면 CollectPinAsync가 이미
             // InterruptCode로 실패 응답을 만들어 돌려주므로 여기서는 그 값을 그대로 반환한다.
-            string? pin = null;
             if (requiresPin)
             {
                 PinCollectionResult pinResult = await CollectPinAsync(scope, deadline, txId).ConfigureAwait(false);
@@ -514,6 +597,19 @@ internal sealed class PaymentOrchestrator
             _presenter.Canceled -= onCanceled;
             _presenter.Close();
 
+            // Phase 25 P25-6(PRD.md §4.2 #3~#6) — 정상 종료·예외·카드리딩 타임아웃·사용자 취소·PIN
+            // 타임아웃·조기 return 어느 경로든 여기로 모인다(try의 모든 return이 finally를 거친다).
+            // roundResult.CardData(19개 필드)는 fillOneCapFields가 이미 다 써서(#43~53 조립) 이
+            // 시점 이후로는 아무도 참조하지 않는다 — RelayToVanAsync는 roundResult.Winner만 받는다.
+            // **request.Telegram(#7 요청 본문)은 여기서 지우지 않는다** — TransactionQueue의 예외
+            // catch가 나중에 PosResponseTelegram.Failure(item.Request, ...)로 실패 응답을 합성할 때
+            // item.Request.Telegram을 Clone()해야 하므로, 이 메서드의 finally가 먼저 지워버리면
+            // 그 Clone이 이미 지워진 본문을 복제하게 된다(#3/#6/#7/#8/#51 외 필드가 전부 깨진 응답으로
+            // POS에 나간다 — 구현 중 발견해 계획을 수정한 지점). 요청 본문의 클리어 시점은
+            // TransactionQueue.WorkerLoop로 옮겼다(그쪽 finally는 응답 송신까지 끝난 뒤 실행된다).
+            roundResult?.CardData?.Dispose();
+            SecureClear.Clear(pin);
+
             if (scope.Gate.TryClaim(TransactionOutcomeReason.FlowResult))
             {
                 FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 결과가 확정되지 않은 채 거래가 종료됨(예외 경로로 추정) — 대기 중이던 리더기를 정리한다", code: null, txId);
@@ -548,7 +644,7 @@ internal sealed class PaymentOrchestrator
         deadline.Extend(UserInputStepExtension);
         FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] PIN 입력 단계 진입 — 데드라인 {UserInputStepExtension.TotalSeconds:F0}초 연장(남은데드라인={deadline.Remaining.TotalSeconds:F1}s)", code: null, txId);
 
-        var pinTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pinTcs = new TaskCompletionSource<char[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         EventHandler<PinEnteredEventArgs> onPinEntered = (_, e) => pinTcs.TrySetResult(e.Pin);
 
         try
@@ -556,7 +652,7 @@ internal sealed class PaymentOrchestrator
             _presenter.PinEntered += onPinEntered; // ★ ChangeState보다 반드시 먼저(위 클래스 주석 참고)
             _presenter.ChangeState(PaymentNoticeState.PinEntry);
 
-            Task<string> pinTask = pinTcs.Task;
+            Task<char[]> pinTask = pinTcs.Task;
             Task interruptTask = scope.Gate.Interrupted;
             Task firstCompleted = await Task.WhenAny(pinTask, interruptTask).ConfigureAwait(false);
 
@@ -564,10 +660,23 @@ internal sealed class PaymentOrchestrator
             {
                 TransactionOutcomeReason reason = scope.Gate.ClaimedReason!.Value;
                 FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] PIN 입력 대기 중 확정됨({reason}) — 즉시 실패 응답(리더기 초기화는 FireInterruptCleanup이 이미 예약함)", code: null, txId);
+
+                // Phase 25 최종 전체 리뷰(2026-09-03) — 취소/Timeout이 근소한 차이로 이겼지만
+                // 사용자가 4자리를 이미 완성한 경우, PaymentNoticeViewModel.CompletePinAsync가 만든
+                // 복사본(char[4])이 이 경합에서 져 버려진다. 이 경로는 pin을 반환하지 않으므로
+                // RunCardTransactionAsync의 finally에 있는 SecureClear.Clear(pin)이 닿지 못한다 —
+                // 패자 CardData를 지우는 CardReadBroadcaster와 같은 방식으로, 결과가 도착하는 대로
+                // fire-and-forget 연속 작업에서 지운다(이미 완료돼 있으면 즉시 실행된다).
+                _ = pinTask.ContinueWith(
+                    t => SecureClear.Clear(t.Result),
+                    CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+
                 return PinCollectionResult.Early(InterruptCode(reason));
             }
 
-            string pin = await pinTask.ConfigureAwait(false);
+            char[] pin = await pinTask.ConfigureAwait(false);
             FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] PIN 4자리 입력 완료 — 통신중으로 진행(값은 로그에 남기지 않음)", code: null, txId);
             return PinCollectionResult.Success(pin);
         }
@@ -658,7 +767,15 @@ internal sealed class PaymentOrchestrator
 
                     // P22-7(PRD.md §1.6 관측 지점 "카드리딩 응답 — 거래마다, 자동"). 값 자체는 로그에
                     // 남기지 않는다(ObservedIdentityStore 클래스 요약) — DB에만 원문 저장.
-                    _observedIdentityStore.Upsert(winner.ComPortDisplay, ObservedIdentityStore.ReaderAuthIdKey, outcome.CardData.ReaderAuthId);
+                    //
+                    // Phase 25 P25-3 예외(PRD.md §4.2 #14 근거) — ReaderAuthId는 CardReadData의 다른
+                    // 18개 필드와 동일하게 char[]로 관리되고 거래 종료 시 Dispose 대상이지만, 이
+                    // SQLite 저장 호출은 문자열 인자를 요구하는 기존 API(ObservedIdentityStore.Upsert,
+                    // Phase 22)라 여기서만 예외적으로 new string(...)을 만든다. 카드소유자 정보가
+                    // 아니라 리더기 하드웨어 식별자라 영속화 자체는 Phase 22 결정을 유지한다 — "메모리
+                    // 안 char[]는 지우면서 DB엔 남긴다"는 비대칭은 대상이 다르기 때문이다(장비 식별자
+                    // vs 카드정보).
+                    _observedIdentityStore.Upsert(winner.ComPortDisplay, ObservedIdentityStore.ReaderAuthIdKey, new string(outcome.CardData.ReaderAuthId));
 
                     return CardReadRoundResult.Success(winner, outcome.CardData);
 
@@ -911,7 +1028,7 @@ internal sealed class PaymentOrchestrator
     /// 담긴다. <see cref="CardReadRoundResult"/>와 정확히 같은 모양(Phase 18 P18-4).</summary>
     private sealed class PinCollectionResult
     {
-        private PinCollectionResult(string? earlyFailureCode, string? pin)
+        private PinCollectionResult(string? earlyFailureCode, char[]? pin)
         {
             EarlyFailureCode = earlyFailureCode;
             Pin = pin;
@@ -919,10 +1036,10 @@ internal sealed class PaymentOrchestrator
 
         internal string? EarlyFailureCode { get; }
 
-        internal string? Pin { get; }
+        internal char[]? Pin { get; }
 
         internal static PinCollectionResult Early(string code) => new(code, null);
 
-        internal static PinCollectionResult Success(string pin) => new(null, pin);
+        internal static PinCollectionResult Success(char[] pin) => new(null, pin);
     }
 }

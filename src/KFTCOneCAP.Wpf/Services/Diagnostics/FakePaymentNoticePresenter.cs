@@ -81,7 +81,7 @@ internal sealed class FakePaymentNoticePresenter : IPaymentNoticePresenter
     internal bool FirePinEnteredSynchronouslyOnChangeState { get; set; }
 
     /// <summary><see cref="FirePinEnteredSynchronouslyOnChangeState"/>가 켜졌을 때 발화할 PIN 값.</summary>
-    internal string PinToFireSynchronously { get; set; } = "0000";
+    internal char[] PinToFireSynchronously { get; set; } = "0000".ToCharArray();
 
     public void Close()
     {
@@ -103,14 +103,24 @@ internal sealed class FakePaymentNoticePresenter : IPaymentNoticePresenter
     /// <summary>검증 하네스가 원하는 시점에 PIN 입력 완료를 일으킨다(docs/payment_relay/development_plan.md
     /// P18-1) — 실제 <see cref="PinEntered"/> 구독자(<c>PaymentOrchestrator</c>, P18-4에서 배선)가
     /// 그대로 통지받는다. <see cref="FireCanceled"/>와 정확히 같은 패턴.</summary>
-    internal void FirePinEntered(string pin)
+    internal void FirePinEntered(char[] pin)
     {
         lock (_lock)
         {
             History.Add("PinEntered");
         }
 
-        PinEntered?.Invoke(this, new PinEnteredEventArgs(pin));
+        // Phase 25 P25-6(CP2 회귀, 2026-09-03 발견) — 실제 PaymentNoticeViewModel.CompletePinAsync는
+        // _pinDigits를 복사한 새 배열을 넘긴다(원본은 그 자리에서 자체적으로 SecureClear한다).
+        // PaymentOrchestrator는 그렇게 넘겨받은 pin을 자신의 것으로 여기고 거래 종료 시
+        // SecureClear로 지운다 — 실제 계약이 "호출자가 배열 소유권을 넘긴다"이기 때문이다. 이 가짜가
+        // PinToFireSynchronously를 복사 없이 그대로 넘기면 그 SecureClear가 테스트 필드 자체를
+        // 지워버려(같은 배열 참조), 이후 같은 값으로 비교하는 단언이 전부 실패한다(발견 당시 실제
+        // 재현: payment-flow-test 4건 실패). 실제 뷰모델과 같은 계약을 지키도록 여기서 방어적으로
+        // 복사한다.
+        char[] pinCopy = new char[pin.Length];
+        Array.Copy(pin, pinCopy, pin.Length);
+        PinEntered?.Invoke(this, new PinEnteredEventArgs(pinCopy));
     }
 
     /// <summary>현재 <see cref="PinEntered"/>에 붙어 있는 구독자 수 — <see cref="CanceledSubscriberCount"/>와

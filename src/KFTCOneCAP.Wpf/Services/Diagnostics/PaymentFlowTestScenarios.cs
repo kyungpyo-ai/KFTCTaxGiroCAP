@@ -54,6 +54,7 @@ internal static class PaymentFlowTestScenarios
             await Scenario16_KioskIdMismatchRejectsBeforeCardReading().ConfigureAwait(false);
             await Scenario17_KioskIdEmptyConfiguredRejects().ConfigureAwait(false);
             await Scenario18_KioskIdReceivedAllSpacesRejectedEvenIfConfiguredValid().ConfigureAwait(false);
+            await Scenario19_CardApprovalDisposesCardDataAfterTransaction().ConfigureAwait(false);
 
             FileLogger.Info($"[payment-flow-test] 완료 — 통과 {_passCount}건, 실패 {_failCount}건");
         }
@@ -166,14 +167,19 @@ internal static class PaymentFlowTestScenarios
         const string encryptedData = "ENCRYPTEDDATA0001";
         string encryptedDataLengthText = encryptedData.Length.ToString("D3");
 
+        // Phase 25 P25-3 — CardReadData 생성자가 char[]를 받는다. 이 하네스는 가짜 고정값을 만들 뿐이라
+        // ToCharArray()로 변환해서 넘긴다(실제 파싱 경로는 Protocol/Reader/CardReadResponseParser가
+        // string을 거치지 않고 바이트에서 직접 char[]를 만든다 — 이 하네스만의 편의).
         return CardReadCommandOutcome.Success("00", new CardReadData(
-            transactionType: "A", keyVersion: "01", tc: "TC0001", moduleId: "MODULE0001",
-            fallbackCode: "0", amount: "000000000001000", cardNumber: cardNumber,
-            encryptionMarker: "ENC", wcc: wcc, encryptedData: encryptedData,
-            encryptedDataLengthText: encryptedDataLengthText,
-            emvEncodingMethod: "B", emvEncodedData: "EMV0001", readerAuthId: "READERAUTH000001",
-            readerSerialEncryptionMarker: "NOE", readerSerial: "SERIAL0001",
-            readerEncryptionInfo: "READERENCRYPTINFO001", tc3: "TC30001", payOnCertifyCode: "PAYONCERT00000000000000000001"));
+            transactionType: "A".ToCharArray(), keyVersion: "01".ToCharArray(), tc: "TC0001".ToCharArray(),
+            moduleId: "MODULE0001".ToCharArray(),
+            fallbackCode: "0".ToCharArray(), amount: "000000000001000".ToCharArray(), cardNumber: cardNumber.ToCharArray(),
+            encryptionMarker: "ENC".ToCharArray(), wcc: wcc.ToCharArray(), encryptedData: encryptedData.ToCharArray(),
+            encryptedDataLengthText: encryptedDataLengthText.ToCharArray(),
+            emvEncodingMethod: "B".ToCharArray(), emvEncodedData: "EMV0001".ToCharArray(), readerAuthId: "READERAUTH000001".ToCharArray(),
+            readerSerialEncryptionMarker: "NOE".ToCharArray(), readerSerial: "SERIAL0001".ToCharArray(),
+            readerEncryptionInfo: "READERENCRYPTINFO001".ToCharArray(), tc3: "TC30001".ToCharArray(),
+            payOnCertifyCode: "PAYONCERT00000000000000000001".ToCharArray()));
     }
 
     // ===== 시나리오 =====
@@ -215,7 +221,7 @@ internal static class PaymentFlowTestScenarios
         var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
         r1.EnqueueCardReadOutcome(SuccessOutcome(wcc: "I"));
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
-        presenter.PinToFireSynchronously = "1234";
+        presenter.PinToFireSynchronously = "1234".ToCharArray();
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
         PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
@@ -245,7 +251,7 @@ internal static class PaymentFlowTestScenarios
         // Check 이름에 PIN 리터럴을 직접 적지 않는다(P18-5 완료 조건 "#51 값이 어떤 로그에도 나타나지
         // 않는다"는 이 테스트 자신의 로그에도 그대로 적용한다 — presenter.PinToFireSynchronously의
         // 값을 그대로 참조해 이름을 짓는다).
-        Check("902614: #51 = 화면에서 입력한 PIN 그대로(패딩 제거 후)", vanRelay.LastRequest.Read(51) == presenter.PinToFireSynchronously);
+        Check("902614: #51 = 화면에서 입력한 PIN 그대로(패딩 제거 후)", vanRelay.LastRequest.Read(51) == new string(presenter.PinToFireSynchronously));
 
         // PRD §4.10 — VAN 통신 중에는 PROCESSING 화면이 실제로 떠 있어야 한다. 실제 Presenter는 창이
         // 닫힌 뒤의 ChangeState를 "무시 + Warn 로그"로 처리하므로(Views/PaymentNoticePresenter), 호출
@@ -371,7 +377,7 @@ internal static class PaymentFlowTestScenarios
         var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
         r1.EnqueueCardReadOutcome(SuccessOutcome());
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
-        presenter.PinToFireSynchronously = "1234";
+        presenter.PinToFireSynchronously = "1234".ToCharArray();
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
         PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
@@ -392,14 +398,14 @@ internal static class PaymentFlowTestScenarios
         // (PosField.Trim), trim된 값으로 단언하고, POSITION 612~711의 원본 바이트(PIN 4자리 + space
         // 96)는 raw ToBody()로 별도 확인한다. Check 이름에 PIN 리터럴을 직접 적지 않는다(P18-5 완료
         // 조건 "#51 값이 어떤 로그에도 나타나지 않는다"는 이 테스트 자신의 로그에도 그대로 적용한다).
-        Check("902614+PIN: #51 값 = 화면에서 입력한 PIN 그대로(패딩 제거 후)", request.Telegram.Read(51) == presenter.PinToFireSynchronously);
+        Check("902614+PIN: #51 값 = 화면에서 입력한 PIN 그대로(패딩 제거 후)", request.Telegram.Read(51) == new string(presenter.PinToFireSynchronously));
         Check("902614+PIN: #50(신용카드 승인 인증방식) 밀리지 않음(고정값 \"2\")", request.Telegram.Read(50) == "2");
         Check("902614+PIN: #53(EMV DATA) 밀리지 않음(길이 서브필드 \"0600\"으로 시작)", request.Telegram.Read(53).StartsWith("0600"));
 
         byte[] rawBody = request.Telegram.ToBody();
         string raw51 = System.Text.Encoding.ASCII.GetString(rawBody, 612, 100); // PIN은 ASCII 숫자라 CP949/ASCII 동일
         Check("902614+PIN: raw POSITION 612~711 = 화면에서 입력한 PIN + space 96(hex 덤프 대응)",
-            raw51 == presenter.PinToFireSynchronously + new string(' ', 96));
+            raw51 == new string(presenter.PinToFireSynchronously) + new string(' ', 96));
         string raw50 = System.Text.Encoding.ASCII.GetString(rawBody, 611, 1);
         string raw52to53Start = System.Text.Encoding.ASCII.GetString(rawBody, 712, 12); // #52(712,12)
         Check("902614+PIN: raw #50(POSITION 611) 밀리지 않음", raw50 == "2");
@@ -481,7 +487,7 @@ internal static class PaymentFlowTestScenarios
         var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
         r1.EnqueueCardReadOutcome(SuccessOutcome());
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
-        presenter.PinToFireSynchronously = "5678";
+        presenter.PinToFireSynchronously = "5678".ToCharArray();
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
         Task<PosResponseTelegram> processTask = orchestrator.ProcessAsync(request);
@@ -508,7 +514,7 @@ internal static class PaymentFlowTestScenarios
         var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
 
         // 거래 A — 이 값들이 거래 B로 새면 안 된다.
-        const string pinA = "1357";
+        char[] pinA = "1357".ToCharArray();
         r1.EnqueueCardReadOutcome(SuccessOutcome(cardNumber: "1111222233334444"));
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
         presenter.PinToFireSynchronously = pinA;
@@ -519,7 +525,7 @@ internal static class PaymentFlowTestScenarios
 
         // 거래 B — 서로 다른 카드/PIN으로, 같은 orchestrator·리더기 인스턴스를 그대로 재사용한다
         // (실제 운영에서 앱을 껐다 켜지 않고 여러 거래를 처리하는 상황과 동일).
-        const string pinB = "2468";
+        char[] pinB = "2468".ToCharArray();
         r1.EnqueueCardReadOutcome(SuccessOutcome(cardNumber: "9999888877776666"));
         presenter.PinToFireSynchronously = pinB;
         var requestB = BuildRequest("902614", new Dictionary<int, string> { [29] = "2000" });
@@ -529,12 +535,12 @@ internal static class PaymentFlowTestScenarios
 
         string rawTextB = System.Text.Encoding.ASCII.GetString(rawBodyB);
         Check("연속거래: 거래 B의 VAN 요청 원문에 거래 A의 PIN이 어디에도 없음(raw 바이트 전수 검사)",
-            !rawTextB.Contains(pinA));
-        Check("연속거래: 거래 B의 #51은 거래 B 자신의 PIN(정확한 위치)", requestB.Read(51) == pinB);
+            !rawTextB.Contains(new string(pinA)));
+        Check("연속거래: 거래 B의 #51은 거래 B 자신의 PIN(정확한 위치)", requestB.Read(51) == new string(pinB));
 
         string rawTextA = System.Text.Encoding.ASCII.GetString(rawBodyA);
         Check("연속거래: 거래 A의 VAN 요청 원문에 거래 B의 PIN이 없음(순서 반대 방향도 확인 — sanity)",
-            !rawTextA.Contains(pinB));
+            !rawTextA.Contains(new string(pinB)));
 
         Check("연속거래: 두 거래의 알림창 History가 각자 독립적으로 IcCardRequest로 시작함(이전 거래 상태 잔존 없음)",
             presenter.History.Count(h => h == "Show:IcCardRequest") == 2);
@@ -616,7 +622,7 @@ internal static class PaymentFlowTestScenarios
             kioskId: ConfiguredKioskId);
         r1.EnqueueCardReadOutcome(SuccessOutcome());
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
-        presenter.PinToFireSynchronously = "1234";
+        presenter.PinToFireSynchronously = "1234".ToCharArray();
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000", [42] = ConfiguredKioskId });
         PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
@@ -673,5 +679,64 @@ internal static class PaymentFlowTestScenarios
 
         Check("902614(설정값 정상 + 수신값 빈 값): E06 거부(개선권장 4 loophole 수정 확인)", response.Telegram.Read(7) == "E06");
         Check("902614(설정값 정상 + 수신값 빈 값): 카드 리딩을 시도하지 않음", r1.CardReadCallCount == 0);
+    }
+
+    /// <summary>Phase 25 P25-9 CP3 Opus 리뷰 개선권장 F2(2026-09-03) — memory-clear-test는 SecureClear
+    /// 원시 함수 자체가 지운다는 것만 증명하고, PaymentOrchestrator가 그 클리어를 실제로 호출한다는
+    /// 것은 증명하지 못한다는 사각지대가 지적됐다(재현: PaymentOrchestrator.RunCardTransactionAsync의
+    /// `roundResult?.CardData?.Dispose();` 호출을 통째로 지워도 memory-clear-test와 이 하네스의
+    /// 기존 시나리오 전부가 그대로 통과했다). 이 시나리오는 그 사각지대를 메운다 — SuccessOutcome()
+    /// 헬퍼를 거치지 않고 CardReadData를 직접 만들어 참조를 들고 있다가, 거래가 끝난 뒤 **그 인스턴스
+    /// 자체**(fake 경계 안에서 실제로 오케스트레이터에 전달된 것과 동일한 참조)의 19개 필드가 전부
+    /// NUL인지 확인한다. fake 경계 안쪽만 검사 가능하다는 기존 한계는 여전하지만(fake는 참조를 그대로
+    /// 돌려주므로 이 검사가 가능하다), 최소한 "오케스트레이터가 Dispose()를 실제로 호출하는가"는
+    /// 이 시나리오가 담당한다.</summary>
+    private static async Task Scenario19_CardApprovalDisposesCardDataAfterTransaction()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+
+        var cardData = new CardReadData(
+            transactionType: "A".ToCharArray(), keyVersion: "01".ToCharArray(), tc: "TC0001".ToCharArray(),
+            moduleId: "MODULE0001".ToCharArray(), fallbackCode: "0".ToCharArray(),
+            amount: "000000000001000".ToCharArray(), cardNumber: "9412345678901234".ToCharArray(),
+            encryptionMarker: "ENC".ToCharArray(), wcc: "I".ToCharArray(), encryptedData: "ENCRYPTEDDATA0001".ToCharArray(),
+            encryptedDataLengthText: "017".ToCharArray(), emvEncodingMethod: "B".ToCharArray(),
+            emvEncodedData: "EMV0001".ToCharArray(), readerAuthId: "READERAUTH000001".ToCharArray(),
+            readerSerialEncryptionMarker: "NOE".ToCharArray(), readerSerial: "SERIAL0001".ToCharArray(),
+            readerEncryptionInfo: "READERENCRYPTINFO001".ToCharArray(), tc3: "TC30001".ToCharArray(),
+            payOnCertifyCode: "PAYONCERT00000000000000000001".ToCharArray());
+
+        char[][] allFields =
+        {
+            cardData.TransactionType, cardData.KeyVersion, cardData.Tc, cardData.ModuleId, cardData.FallbackCode,
+            cardData.Amount, cardData.CardNumber, cardData.EncryptionMarker, cardData.Wcc, cardData.EncryptedData,
+            cardData.EncryptedDataLengthText, cardData.EmvEncodingMethod, cardData.EmvEncodedData,
+            cardData.ReaderAuthId, cardData.ReaderSerialEncryptionMarker, cardData.ReaderSerial,
+            cardData.ReaderEncryptionInfo, cardData.Tc3, cardData.PayOnCertifyCode,
+        };
+
+        r1.EnqueueCardReadOutcome(CardReadCommandOutcome.Success("00", cardData));
+        presenter.FirePinEnteredSynchronouslyOnChangeState = true;
+        presenter.PinToFireSynchronously = "1234".ToCharArray();
+
+        var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
+        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+
+        Check("Scenario19: 거래 자체는 정상 성공(#7=000, 전제 확인)", response.Telegram.Read(7) == "000");
+
+        bool allCleared = true;
+        foreach (char[] field in allFields)
+        {
+            foreach (char c in field)
+            {
+                if (c != '\0')
+                {
+                    allCleared = false;
+                    break;
+                }
+            }
+        }
+
+        Check("Scenario19: 거래 종료 후 PaymentOrchestrator가 CardReadData.Dispose()를 실제로 호출함(19개 필드 전부 NUL)", allCleared);
     }
 }

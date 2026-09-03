@@ -8,13 +8,16 @@ namespace KFTCOneCAP.Wpf.Services.Payment;
 /// WPF 타입은 참조하지 않는다(Services 계층 규칙, <see cref="PaymentNoticeState"/> 상단 주석 참고).
 ///
 /// ★ 이 값을 로그로 남기지 않는다(P18-3/P18-5에서 확정될 규칙 — Phase 18 "확정된 설계 결정" #6).
+///
+/// <b>타입(Phase 25 P25-4, PRD.md §4.3.2)</b>: <c>char[]</c>다 — <c>string</c>은 불변이라 인증 시험
+/// 기준이 요구하는 "사용 완료 후 덮어쓰기"를 할 수 없다.
 /// </summary>
 public sealed class PinEnteredEventArgs : EventArgs
 {
-    public PinEnteredEventArgs(string pin)
+    public PinEnteredEventArgs(char[] pin)
     {
         Pin = pin;
     }
 
-    public string Pin { get; }
+    public char[] Pin { get; }
 }

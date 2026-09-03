@@ -146,8 +146,28 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         internal async Task<CardReadCommandOutcome> SendCardReadCommandAsync(TransactionInfoRequest request, TimeSpan timeout)
         {
             byte[] data = TransactionInfoRequestBuilder.Build(request);
-            var raw = await SendAndAwaitAsync(ReaderCommandCodes.TRANSACTION_INFO_REQUEST, ReaderCommandCodes.CARD_READ_RESPONSE, data, data.Length, timeout).ConfigureAwait(false);
-            return MapCardReadOutcome(raw);
+            RawReaderCommandResult raw;
+            try
+            {
+                // Phase 25 P25-5(PRD.md §4.2 #2) — 0x2B 요청 원본 배열. DLL 호출 직후 지운다
+                // (키다운로드 요청 3종과 동일 패턴).
+                raw = await SendAndAwaitAsync(ReaderCommandCodes.TRANSACTION_INFO_REQUEST, ReaderCommandCodes.CARD_READ_RESPONSE, data, data.Length, timeout).ConfigureAwait(false);
+            }
+            finally
+            {
+                SecureClear.Clear(data);
+            }
+
+            CardReadCommandOutcome outcome = MapCardReadOutcome(raw);
+            if (raw.Kind == RawReaderCommandKind.Response)
+            {
+                // Phase 25 P25-5(PRD.md §4.2 #1) — 0x3B 응답 원본 배열(카드번호·암호화데이터 등
+                // 포함). CardReadResponseParser.Parse가 필요한 필드를 CardReadData(char[])로
+                // 전부 복사해낸 뒤이므로 여기서 지운다(키다운로드 [74] 응답과 동일 패턴).
+                SecureClear.Clear(raw.Data);
+            }
+
+            return outcome;
         }
 
         // ===================== 공개 명령 3종 — 키다운로드(P24-2, PRD §3.4) =====================
@@ -524,9 +544,29 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             // 없지만, 나중에 누가 EventReceived를 구독하면 CompletePendingIfMatches 쪽이 먼저 지운
             // (이미 SecureClear로 채워진) 데이터를 볼 위험이 있다. 구독자를 추가할 때는 배열을
             // 공유하지 말고 각자 복사본을 갖도록 바꿔야 한다.
-            CompletePendingIfMatches(eventType, commandCode, copy);
+            bool handedOff = CompletePendingIfMatches(eventType, commandCode, copy);
 
             EventReceived?.Invoke(this, new ReaderEventArgs(readerId, eventType, commandCode, copy));
+
+            // Phase 25 최종 전체 리뷰(2026-09-03) — **아무도 인수하지 않은 CALLBACK 데이터의 클리어**.
+            // PRD.md §4.2 #1은 이 `copy`가 지워진다고 적고 있지만, 실제로 지우는 주체는
+            // SendCardReadCommandAsync(카드리딩)/SendKeyDownload*(키다운로드)처럼 **대기 중인 라운드가
+            // 이 배열을 결과로 받아간 경우**뿐이다. 다음 경로에서는 `copy`가 어디에도 전달되지 않고
+            // 그대로 버려져 3회 덮어쓰기를 거치지 않은 채 힙에 남았다:
+            //   - 로컬 타임아웃으로 라운드를 이미 회수한 뒤 실제 0x3B가 뒤늦게 도착(PRD.md §8.4,
+            //     P25-10 실장비 검증에서 실제로 통과시킨 타임아웃 경로가 여기에 해당) → `_pending`이
+            //     null이라 CompletePendingIfMatches가 즉시 return
+            //   - 같은 라운드에 대한 중복 CALLBACK(PRD.md §8.2) → CAS 실패로 조용히 폐기
+            //   - 이 대기와 무관한 UNSOLICITED 이벤트(0x76 카드 감지 등) → default에서 return
+            // 어느 쪽이든 카드리딩 응답(0x3B, 카드번호·암호화 데이터 포함)일 수 있으므로 여기서 지운다.
+            // `handedOff`가 true면 인수한 쪽(Send*Async)이 자기 시점에 지우므로 여기서는 손대지 않는다
+            // — 지우면 그쪽이 파싱하기 전에 0으로 덮여 카드리딩이 통째로 깨진다.
+            // EventReceived 호출 **뒤**에 지운다: 위 I-4 주석이 말하는 구독자가 생기더라도 이 클리어
+            // 때문에 빈 데이터를 보는 일은 없도록(구독자는 이미 값을 받은 뒤다).
+            if (!handedOff)
+            {
+                SecureClear.Clear(copy);
+            }
         }
 
         /// <summary>
@@ -537,11 +577,15 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         /// 실제 "이 CALLBACK이 이 라운드를 완료시킬 자격이 있는가"는 맨 마지막의
         /// Interlocked.CompareExchange 한 줄로만 결정된다(PendingReaderCommand.cs 클래스 주석).
         /// </summary>
-        private void CompletePendingIfMatches(int eventType, byte commandCode, byte[] data)
+        /// <returns>이 CALLBACK의 <paramref name="data"/> 배열을 대기 중이던 라운드가 결과로
+        /// **인수했으면** true(그 라운드의 <c>Send*Async</c>가 자기 시점에 <c>SecureClear</c>로 지운다).
+        /// false면 이 배열은 어디에도 전달되지 않고 버려지므로 호출자가 지워야 한다(Phase 25 최종
+        /// 전체 리뷰, <see cref="OnReaderCallback"/> 주석 참고).</returns>
+        private bool CompletePendingIfMatches(int eventType, byte commandCode, byte[] data)
         {
             var pending = Volatile.Read(ref _pending);
             if (pending == null)
-                return;
+                return false;
 
             RawReaderCommandResult? result = null;
             switch ((ReaderEventType)eventType)
@@ -562,17 +606,22 @@ namespace KFTCOneCAP.Wpf.Services.Reader
 
                 default:
                     // 이 대기와 무관한 이벤트(예: 카드 감지 0x76 UNSOLICITED) — 무시.
-                    return;
+                    return false;
             }
 
             // CAS: "현재 필드 값이 여전히 이 pending 인스턴스인 경우에만" null로 바꾸면서 완료
             // 자격을 획득한다. 실패하면(=이미 다른 경로가 이 라운드를 먼저 끝냈거나, 새 라운드로
             // 넘어갔음) 이 이벤트는 조용히 버린다 — 이것이 중복 CALLBACK 방지(PRD §8.2)와 이전
             // 라운드 뒤늦은 응답 무시(PRD §8.4)를 동시에 만족시키는 지점이다.
-            if (Interlocked.CompareExchange(ref _pending, null, pending) == pending)
-            {
-                pending.Tcs.TrySetResult(result!);
-            }
+            if (Interlocked.CompareExchange(ref _pending, null, pending) != pending)
+                return false;
+
+            pending.Tcs.TrySetResult(result!);
+
+            // data를 실제로 들고 나가는 것은 Response 결과뿐이다(Timeout/CommunicationError는
+            // Array.Empty<byte>()를 담는다 — RawReaderCommandResult 참고). 그 외에는 이 배열이
+            // 버려지므로 호출자가 지우도록 false를 돌려준다.
+            return result!.Kind == RawReaderCommandKind.Response;
         }
     }
 }

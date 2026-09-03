@@ -84,6 +84,20 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 // 결과를 기다리지 않는다(참조 구현과 동일 — Fire-and-forget이지만 로그는 남긴다).
                 int invalidateResult = participants[i].SendInvalidationInit();
                 FileLogger.Info(LogCategory.Reader, $"[카드 리딩 페일오버 전송] 리더기[{i}]({participants[i].ComPortDisplay}): 다른 리더기 응답 채택으로 초기화 요청(0x60) 전송해 무효화 -> result={invalidateResult}", code: null, txId);
+
+                // Phase 25 P25-6 CP2 Opus 리뷰 개선권장 3(2026-09-03) — 0x60 무효화는 새 명령을
+                // 얹을 뿐 진행 중이던 tasks[i](SendCardReadCommandAsync)는 계속 살아 있다가 나중에
+                // 자체적으로 완료된다. 그 결과가 응답코드 "00"으로 CardData(19개 char[] 필드)를
+                // 담고 있으면, 아무도 참조하지 않아 SecureClear 없이 GC로만 회수됐다(확정 사항 3 —
+                // 카드정보는 필드별 판단 없이 전부 대상). 패자 결과가 도착하는 대로 지운다 — 이미
+                // 도착한 winner를 기다리게 하지 않도록 fire-and-forget으로 붙인다.
+                _ = tasks[i].ContinueWith(
+                    loserTask =>
+                    {
+                        if (loserTask.Status == TaskStatus.RanToCompletion)
+                            loserTask.Result.CardData?.Dispose();
+                    },
+                    TaskScheduler.Default);
             }
 
             return CardReadBroadcastResult.Of(winner, winnerOutcome);
