@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
 using KFTCOneCAP.Wpf.Protocol.Reader;
@@ -55,6 +56,9 @@ internal static class PaymentFlowTestScenarios
             await Scenario17_KioskIdEmptyConfiguredRejects().ConfigureAwait(false);
             await Scenario18_KioskIdReceivedAllSpacesRejectedEvenIfConfiguredValid().ConfigureAwait(false);
             await Scenario19_CardApprovalDisposesCardDataAfterTransaction().ConfigureAwait(false);
+            await Scenario20_ResponseCardReadingFieldsAreCleared().ConfigureAwait(false);
+            Scenario21_LastTransactionResponseStoreRoundTrip();
+            await Scenario22_OrchestratorPersistsResponseToLastTransactionStore().ConfigureAwait(false);
 
             FileLogger.Info($"[payment-flow-test] 완료 — 통과 {_passCount}건, 실패 {_failCount}건");
         }
@@ -91,7 +95,12 @@ internal static class PaymentFlowTestScenarios
     private static PaymentOrchestrator BuildOrchestrator(
         out FakeReaderEndpoint reader1, out FakeReaderEndpoint reader2,
         out FakePaymentNoticePresenter presenter, out FakeSetupScreenGate gate,
-        out CapturingVanRelayService vanRelay, string port1 = "COM 05", string port2 = "미사용",
+        out CapturingVanRelayService vanRelay,
+        // P26-2 — IntegrityCheckStore/ObservedIdentityStore와 같은 임시 dbPath를 공유하는
+        // LastTransactionResponseStore도 함께 내보낸다. 새 시나리오가 TryLoad()로 저장 결과를 직접
+        // 확인할 수 있어야 하기 때문이다(체크포인트 1 F1 — "검증 불가능" 지적 해소).
+        out LastTransactionResponseStore lastTransactionResponseStore,
+        string port1 = "COM 05", string port2 = "미사용",
         // 개선권장 5(CP2) — 기본값을 설정값과 일치하는 "정상 운영 상태"로 바꿨다(위 주석 참고). 이
         // 검증을 신경 쓰지 않는 기존 시나리오(3, 5~13)는 BuildRequest의 자동 채움과 짝을 이뤄 그대로
         // 통과한다.
@@ -106,11 +115,13 @@ internal static class PaymentFlowTestScenarios
         var integrityStore = new IntegrityCheckStore(dbPath);
         // P22-7 — 같은 파일을 가리키게 한다(프로덕션과 동일한 전제, App.xaml.cs 참고).
         var observedIdentityStore = new ObservedIdentityStore(dbPath);
+        lastTransactionResponseStore = new LastTransactionResponseStore(dbPath);
 
         return new PaymentOrchestrator(
             new IReaderEndpoint[] { reader1, reader2 },
             integrityStore,
             observedIdentityStore,
+            lastTransactionResponseStore,
             presenter,
             gate,
             vanRelay,
@@ -188,7 +199,7 @@ internal static class PaymentFlowTestScenarios
     /// 한다(P17-5 완료 조건).</summary>
     private static async Task Scenario1_NoticeInquiryRelaysWithoutReader()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay,
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore,
             port1: "미사용", port2: "미사용");
 
         var request = BuildRequest("501008", new Dictionary<int, string>());
@@ -202,7 +213,7 @@ internal static class PaymentFlowTestScenarios
     /// <summary>800000 — 카드리딩 성공 후 BIN(카드번호 앞 8자리)만 채워지는지.</summary>
     private static async Task Scenario2_CardInfoInquiryFillsBin()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
         r1.EnqueueCardReadOutcome(SuccessOutcome(cardNumber: "9412345678901234"));
 
         var request = BuildRequest("800000", new Dictionary<int, string> { [15] = "1000" });
@@ -218,7 +229,7 @@ internal static class PaymentFlowTestScenarios
     /// 단계를 빠르게 통과시킨다(이 시나리오의 관심사는 필드 채움이지 PIN 자체가 아니므로).</summary>
     private static async Task Scenario3_CardApprovalFillsSevenFields()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
         r1.EnqueueCardReadOutcome(SuccessOutcome(wcc: "I"));
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
         presenter.PinToFireSynchronously = "1234".ToCharArray();
@@ -269,7 +280,7 @@ internal static class PaymentFlowTestScenarios
     {
         foreach (string txType in new[] { "501008", "800000", "902614" })
         {
-            var orchestrator = BuildOrchestrator(out _, out _, out _, out var gate, out _);
+            var orchestrator = BuildOrchestrator(out _, out _, out _, out var gate, out _, out var lastTransactionResponseStore);
             gate.IsOpen = true;
 
             var fields = txType == "800000" ? new Dictionary<int, string> { [15] = "1000" }
@@ -279,6 +290,9 @@ internal static class PaymentFlowTestScenarios
             PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
             Check($"{txType}: 설정화면 열림 중 E03 거부", response.Telegram.Read(7) == "E03");
+            // P26-2(체크포인트 1 F1) — 설정 화면 게이트로 거부된 요청은 "거래"가 성립하지 않으므로
+            // §7 저장소에 아무 것도 남기지 않아야 한다.
+            Check($"{txType}: 설정화면 거부 시 §7 저장소에 기록 없음", lastTransactionResponseStore.TryLoad() == null);
         }
     }
 
@@ -287,7 +301,7 @@ internal static class PaymentFlowTestScenarios
     /// InternalError 폴백은 P17-4 하네스에서 이미 검증됨).</summary>
     private static async Task Scenario5_UnknownWccSurfacesAsInternalError()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
         r1.EnqueueCardReadOutcome(SuccessOutcome(wcc: "R")); // RF — 이 Flow가 다루지 않는 값
         // Phase 18(P18-4)부터 902614는 필드 채움 전에 PIN 단계를 먼저 거친다 — 이 시나리오의 관심사는
         // WCC 예외이지 PIN이 아니므로 즉시발화로 빠르게 통과시킨다.
@@ -312,7 +326,7 @@ internal static class PaymentFlowTestScenarios
     /// 확인용 최소 회귀).</summary>
     private static async Task Scenario6_UserCancelDuringCardApproval()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
         // 응답을 일부러 늦춰(500ms) 그사이 취소가 라운드 "진행 중"(PendingParticipants가 채워진 뒤)에
         // 도착하게 한다 — Show() 시점에 곧바로 취소하면 아직 카드리딩 라운드가 시작 전이라 무효화할
         // 리더기 자체가 없다(정상 동작, 이 시나리오가 검증하려는 "대기 중 취소"가 아니다).
@@ -347,7 +361,7 @@ internal static class PaymentFlowTestScenarios
     /// </summary>
     private static async Task Scenario7_VanCommunicationFailureResetsReader()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
         r1.EnqueueCardReadOutcome(SuccessOutcome());
         vanRelay.SetNextOutcome(VanRelayOutcome.CommunicationFailure(VanFailureKind.CommunicationFailure, "테스트용 통신 실패"));
         // Phase 18(P18-4)부터 902614는 VAN 진입 전에 PIN 단계를 먼저 거친다 — 이 시나리오의 관심사는
@@ -374,7 +388,7 @@ internal static class PaymentFlowTestScenarios
     /// <summary>902614 정상 흐름: IC -> PIN -> 통신중 순서, 거래 종료 후 구독 누수 없음.</summary>
     private static async Task Scenario8_CardApprovalCollectsPinAndOrdersHistory()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
         r1.EnqueueCardReadOutcome(SuccessOutcome());
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
         presenter.PinToFireSynchronously = "1234".ToCharArray();
@@ -417,7 +431,7 @@ internal static class PaymentFlowTestScenarios
     /// 켜 둬도(사용자 실수를 가정) History에 PinEntry가 등장하지 않아야 한다.</summary>
     private static async Task Scenario9_CardInfoInquirySkipsPinStep()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
         r1.EnqueueCardReadOutcome(SuccessOutcome());
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
 
@@ -432,7 +446,7 @@ internal static class PaymentFlowTestScenarios
     /// <summary>PIN 대기 중 취소 -> E01 정확히 1건 확정 + 리더기 초기화 호출 확인.</summary>
     private static async Task Scenario10_CancelDuringPinEntryYieldsE01()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
         r1.EnqueueCardReadOutcome(SuccessOutcome());
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
@@ -458,7 +472,7 @@ internal static class PaymentFlowTestScenarios
     /// </summary>
     private static async Task Scenario11_TimeoutDuringPinEntryYieldsE02()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
         r1.EnqueueCardReadOutcome(SuccessOutcome());
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
@@ -484,7 +498,7 @@ internal static class PaymentFlowTestScenarios
     /// 완료되는 것으로 순서가 올바름을 확인한다.</summary>
     private static async Task Scenario12_PinEnteredBeforeSubscriptionIsNotLost()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
         r1.EnqueueCardReadOutcome(SuccessOutcome());
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
         presenter.PinToFireSynchronously = "5678".ToCharArray();
@@ -511,7 +525,7 @@ internal static class PaymentFlowTestScenarios
     /// 놓칠 수 있어 raw 바이트 전체를 훑는다(P18-5 raw 검사 패턴 계승).</summary>
     private static async Task Scenario13_ConsecutiveTransactionsDoNotLeakCardOrPinData()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
 
         // 거래 A — 이 값들이 거래 B로 새면 안 된다.
         char[] pinA = "1357".ToCharArray();
@@ -618,7 +632,7 @@ internal static class PaymentFlowTestScenarios
     /// 한다. 값이 있는 경우의 "정상 통과"를 확인한다.</summary>
     private static async Task Scenario15_KioskIdMatchAllowsCardApproval()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay,
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore,
             kioskId: ConfiguredKioskId);
         r1.EnqueueCardReadOutcome(SuccessOutcome());
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
@@ -635,7 +649,7 @@ internal static class PaymentFlowTestScenarios
     /// 거부돼야 한다(사용자가 카드를 대는 헛수고를 막는다).</summary>
     private static async Task Scenario16_KioskIdMismatchRejectsBeforeCardReading()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay,
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore,
             kioskId: ConfiguredKioskId);
         r1.EnqueueCardReadOutcome(SuccessOutcome()); // 도달하면 안 되므로 호출되면 큐만 남는다(검증은 CallCount로).
 
@@ -653,7 +667,7 @@ internal static class PaymentFlowTestScenarios
     /// 분기가 잘못 들어간 것이다.</summary>
     private static async Task Scenario17_KioskIdEmptyConfiguredRejects()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay,
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore,
             kioskId: ""); // 설정값 미입력(§2.3 기본값)
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000", [42] = "SOMEKIOSKID00000001" });
@@ -669,7 +683,7 @@ internal static class PaymentFlowTestScenarios
     /// 먼저 걸려 E06으로 거부되어야 한다.</summary>
     private static async Task Scenario18_KioskIdReceivedAllSpacesRejectedEvenIfConfiguredValid()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay,
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore,
             kioskId: ConfiguredKioskId);
 
         // autoFillKioskId: false — #42를 의도적으로 채우지 않는다(전체 space 패딩 -> Read가 빈
@@ -693,7 +707,7 @@ internal static class PaymentFlowTestScenarios
     /// 이 시나리오가 담당한다.</summary>
     private static async Task Scenario19_CardApprovalDisposesCardDataAfterTransaction()
     {
-        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay);
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
 
         var cardData = new CardReadData(
             transactionType: "A".ToCharArray(), keyVersion: "01".ToCharArray(), tc: "TC0001".ToCharArray(),
@@ -738,5 +752,347 @@ internal static class PaymentFlowTestScenarios
         }
 
         Check("Scenario19: 거래 종료 후 PaymentOrchestrator가 CardReadData.Dispose()를 실제로 호출함(19개 필드 전부 NUL)", allCleared);
+    }
+
+    /// <summary>
+    /// Phase 26 P26-1(PRD.md §3.4/§4.13/§7.1) — 응답 전문에서 카드리딩·PIN 필드(#45/#46/#51/#53)가
+    /// 지워지는지를 검증한다. <see cref="PosResponseTelegram.Relay"/>와 <see
+    /// cref="PosResponseTelegram.BuildFailure"/> 양쪽 경로 모두 확인한다.
+    ///
+    /// ★ 착수 전 사전 조사에서 발견한 유출 — 이 시나리오의 "실패 경로" 부분은 <c>ClearCardReadingFields</c>
+    /// 를 <c>BuildFailure</c>에 넣기 전에는 통과하지 못했을 것이다. 옛 코드는 <c>#51</c>만 지웠으므로
+    /// <c>#45</c>(복호화 정보)/<c>#46</c>(암호화된 카드정보)/<c>#53</c>(EMV DATA)이 카드 리딩까지 마친
+    /// 뒤 VAN 통신 실패로 응답을 합성하는 경로에서 그대로 POS로 되돌아갔다 — 이 시나리오가 그 유출의
+    /// 재현·차단을 검증한다.
+    /// </summary>
+    private static async Task Scenario20_ResponseCardReadingFieldsAreCleared()
+    {
+        if (!PosSchemaRegistry.TryResolve("902614", out PosTelegramSchema? schema902614) || schema902614 is null)
+        {
+            Check("P26-1: 902614 스키마 해석(전제조건)", false);
+            return;
+        }
+
+        int[] cardReadingFields = { 45, 46, 51, 53 };
+
+        // --- 1) relay 성공 경로 ---
+        var orchestratorSuccess = BuildOrchestrator(out var r1s, out var r2s, out var presenterS, out var gateS, out var vanRelayS, out var lastTransactionResponseStoreS);
+        r1s.EnqueueCardReadOutcome(SuccessOutcome(wcc: "I"));
+        presenterS.FirePinEnteredSynchronouslyOnChangeState = true;
+        presenterS.PinToFireSynchronously = "9999".ToCharArray();
+
+        var requestSuccess = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
+        PosResponseTelegram responseSuccess = await orchestratorSuccess.ProcessAsync(requestSuccess).ConfigureAwait(false);
+
+        Check("P26-1(성공): 응답 성공(#7=000, 전제조건)", responseSuccess.Telegram.Read(7) == "000");
+        foreach (int fieldNumber in cardReadingFields)
+        {
+            Check($"P26-1(성공): 응답 #{fieldNumber} 값이 빈 문자열", responseSuccess.Telegram.Read(fieldNumber) == "");
+        }
+
+        // 바이트 단위 확인 — 필드 구간이 전부 0x20(space)인지. POSITION/길이는 하드코딩하지 않고
+        // 스키마에서 직접 읽는다.
+        byte[] rawSuccessBody = responseSuccess.Telegram.ToBody();
+        foreach (int fieldNumber in cardReadingFields)
+        {
+            PosField field = schema902614[fieldNumber];
+            bool allSpace = true;
+            bool hasNul = false;
+            for (int i = field.Position; i < field.EndPosition; i++)
+            {
+                if (rawSuccessBody[i] != (byte)' ') allSpace = false;
+                if (rawSuccessBody[i] == 0x00) hasNul = true;
+            }
+            Check($"P26-1(성공): 응답 #{fieldNumber} 원문 바이트({field.Length}바이트)가 전부 0x20", allSpace);
+            Check($"P26-1(성공): 응답 #{fieldNumber} 원문 바이트에 0x00 없음", !hasNul);
+        }
+
+        // 다른 필드(#43/#44/#48/#50)는 그대로 남아 있어야 한다 — 요청 쪽에 실제로 채워진 값과 비교한다
+        // (스텁이 요청을 clone하므로 값이 같아야 한다).
+        Check("P26-1(성공): 응답 #43 불변(요청과 동일)", responseSuccess.Telegram.Read(43) == requestSuccess.Telegram.Read(43));
+        Check("P26-1(성공): 응답 #44 불변(요청과 동일)", responseSuccess.Telegram.Read(44) == requestSuccess.Telegram.Read(44));
+        Check("P26-1(성공): 응답 #48 불변(요청과 동일)", responseSuccess.Telegram.Read(48) == requestSuccess.Telegram.Read(48));
+        Check("P26-1(성공): 응답 #50 불변(요청과 동일)", responseSuccess.Telegram.Read(50) == requestSuccess.Telegram.Read(50));
+
+        // 길이/구조 불변. #0(전문 길이)은 본문 밖 헤더라 스키마에 없다(PosCommonHeader 참고) — 대신
+        // 본문에 실제로 있는 #1(업무 구분, 고정값 "IGN")로 헤더 앞부분이 어긋나지 않았는지 확인한다.
+        Check("P26-1(성공): 응답 전체 길이 1500 불변", rawSuccessBody.Length == schema902614.TotalLength);
+        Check("P26-1(성공): 응답 #1 불변(요청과 동일, 고정값 \"IGN\")", responseSuccess.Telegram.Read(1) == requestSuccess.Telegram.Read(1));
+
+        // --- 2) 실패 경로(VAN 통신 실패, Scenario7과 같은 방식) — 카드 리딩+PIN 입력까지 끝낸 뒤 실패.
+        var orchestratorFailure = BuildOrchestrator(out var r1f, out var r2f, out var presenterF, out var gateF, out var vanRelayF, out var lastTransactionResponseStoreF);
+        r1f.EnqueueCardReadOutcome(SuccessOutcome(wcc: "I"));
+        presenterF.FirePinEnteredSynchronouslyOnChangeState = true;
+        presenterF.PinToFireSynchronously = "8888".ToCharArray();
+        vanRelayF.SetNextOutcome(VanRelayOutcome.CommunicationFailure(VanFailureKind.CommunicationFailure, "P26-1 테스트용 통신 실패"));
+
+        var requestFailure = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
+        PosResponseTelegram responseFailure = await orchestratorFailure.ProcessAsync(requestFailure).ConfigureAwait(false);
+
+        Check("P26-1(실패): VAN 통신 실패 시 D02(전제조건)", responseFailure.Telegram.Read(7) == "D02");
+        // 카드리딩+PIN이 실제로 채워진 뒤 실패했다는 전제 — vanRelayF에 도달한 요청(clone 대상)에
+        // #46/#51이 채워져 있었는지 먼저 확인한다.
+        Check("P26-1(실패): 실패 전 요청에 #46(카드정보)이 실제로 채워져 있었음(전제조건)",
+            requestFailure.Telegram.Read(46) != "");
+        Check("P26-1(실패): 실패 전 요청에 #51(PIN)이 실제로 채워져 있었음(전제조건)",
+            requestFailure.Telegram.Read(51) == new string(presenterF.PinToFireSynchronously));
+
+        foreach (int fieldNumber in cardReadingFields)
+        {
+            Check($"P26-1(실패): 실패 응답 #{fieldNumber} 값이 빈 문자열(이 시나리오가 유출 재현·차단을 검증)",
+                responseFailure.Telegram.Read(fieldNumber) == "");
+        }
+
+        // --- 3) 800000 — 카드리딩 필드 4개 중 어느 것도 스키마에 없음(P17 스키마 검증으로 보장, 500바이트
+        // 전문이라 43번대 필드 자체가 없다). 여기는 지시문 가정대로다.
+        if (!PosSchemaRegistry.TryResolve("800000", out PosTelegramSchema? schema800000) || schema800000 is null)
+        {
+            Check("P26-1: 800000 스키마 해석(전제조건)", false);
+        }
+        else
+        {
+            Check("P26-1: 800000에는 #45/#46/#51/#53 필드 자체가 없음(P17 스키마 검증으로 이미 보장)",
+                cardReadingFields.All(n => !schema800000.Fields.Any(f => f.Number == n)));
+        }
+
+        // --- 4) 501008 — 회귀 방지(2026-09-04, Task A 검증 중 발견 즉시 수정됨). 지시문 원안의
+        // "501008/800000에는 필드 자체가 없다"는 전제가 800000에는 맞지만 501008에는 틀렸다 — 501008
+        // 스키마에도 #45/#46/#51/#53 번호가 존재한다(카드리딩과 전혀 무관한 DigitalBudget 소유 업무
+        // 필드: #45 납부 금액 수정 허용 유무, #46 연대 납부 대상 유무, #51 기 납부 금액, #53 분야(기능)
+        // 코드 — NoticeInquirySchema.cs 참고). 필드 "번호"만 보고 지우면 501008의 정상 응답 데이터를
+        // 침범하므로, <see cref="PosResponseTelegram.ClearCardReadingFields"/>는 이제 거래구분이
+        // 902614일 때만 동작하도록 가드가 추가됐다(<c>CardReadingFieldsTransactionTypeCode</c>) — 이
+        // 검사는 그 가드가 실제로 501008의 값을 보존하는지 확인하는 회귀 방지 테스트다.
+        // PaymentOrchestrator 경로(오케스트레이터가 아직 이 필드들을 채우지 않음)로는 재현되지 않아
+        // <see cref="PosResponseTelegram.Relay"/>를 직접 호출해 "VAN이 이미 채워 보낸 501008 응답"을
+        // 흉내낸다(Scenario14가 TelegramLogRedactor를 직접 호출하는 것과 같은 패턴).
+        if (!PosSchemaRegistry.TryResolve("501008", out PosTelegramSchema? schema501008) || schema501008 is null)
+        {
+            Check("P26-1: 501008 스키마 해석(전제조건)", false);
+        }
+        else
+        {
+            var noticeTelegram = PosTelegram.CreateEmpty(schema501008);
+            noticeTelegram.Write(1, "IGN");
+            noticeTelegram.Write(3, "0210");
+            noticeTelegram.Write(4, "501008");
+            noticeTelegram.Write(6, "C");
+            noticeTelegram.Write(7, "000");
+            // 카드리딩과 무관한 501008 고유 업무 데이터로 채운다(VAN/DigitalBudget이 실제로 채우는 값).
+            noticeTelegram.Write(45, "Y"); // 납부 금액 수정 허용 유무
+            noticeTelegram.Write(46, "N"); // 연대 납부 대상 유무
+            noticeTelegram.Write(51, "5000"); // 기 납부 금액(N 15, 우측정렬 0패딩)
+            noticeTelegram.Write(53, "010"); // 분야(기능) 코드
+            byte[] noticeBody = noticeTelegram.ToBody();
+
+            PosResponseTelegram relayedNotice = PosResponseTelegram.Relay(schema501008, noticeBody);
+
+            Check("P26-1(회귀 방지, 902614 전용 가드): 501008 응답 #45(납부금액 수정 허용 유무, 카드리딩과 무관)가 " +
+                  "지워지지 않고 그대로 남음", relayedNotice.Telegram.Read(45) == "Y");
+            Check("P26-1(회귀 방지, 902614 전용 가드): 501008 응답 #46(연대 납부 대상 유무, 카드리딩과 무관)이 " +
+                  "지워지지 않고 그대로 남음", relayedNotice.Telegram.Read(46) == "N");
+            // #51은 N 타입(15)이라 Read()가 좌측 '0' 패딩을 보존한다(H-1 원칙, Scenario3 참고) —
+            // "5000"이 아니라 "000000000005000"이 정답이다.
+            Check("P26-1(회귀 방지, 902614 전용 가드): 501008 응답 #51(기 납부 금액, 카드리딩과 무관)이 " +
+                  "지워지지 않고 그대로 남음", relayedNotice.Telegram.Read(51) == "000000000005000");
+            Check("P26-1(회귀 방지, 902614 전용 가드): 501008 응답 #53(분야(기능) 코드, 카드리딩과 무관)이 " +
+                  "지워지지 않고 그대로 남음", relayedNotice.Telegram.Read(53) == "010");
+        }
+    }
+
+    /// <summary>
+    /// Phase 26 P26-2(development_plan.md "완료 조건") — <see cref="LastTransactionResponseStore"/>를
+    /// 오케스트레이터 배선 없이 단독으로 검증한다(이 Task의 범위 — 호출 지점 배선은 다음 체크포인트
+    /// 이후). 다음을 확인한다:
+    /// <list type="number">
+    /// <item>저장 후 조회하면 저장한 값과 정확히 일치한다(문자열 필드 + BLOB 바이트 단위 + 시각).</item>
+    /// <item>같은(고정) 키로 두 번 저장하면 행이 1개만 남고 최신값으로 갱신된다.</item>
+    /// <item>DB 파일을 읽기 전용으로 만든 상태에서 저장을 시도하면 예외 없이 <c>false</c>를
+    /// 반환한다(직전에 저장된 값은 그대로 남아 있어야 한다 — 실패한 쓰기가 기존 값을 깨지 않음).</item>
+    /// <item>새 <see cref="LastTransactionResponseStore"/> 인스턴스(별도 커넥션)로 다시 열어도 값이
+    /// 남아 있다 — 메모리 캐시가 아니라 디스크에 실제로 저장됐음을 확인한다(development_plan.md
+    /// "앱을 껐다 켜도 행이 남아 있다"를 프로세스 재시작 없이 새 인스턴스로 흉내낸다).</item>
+    /// </list>
+    /// <see cref="LastTransactionResponseStore.Save"/>가 저장용 복사본을 <c>SecureClear.Clear</c>로
+    /// 지운다는 것은 이 하네스로는 직접 관측할 수 없다(호출자가 넘긴 원본 배열은 그대로 둬야 하므로
+    /// 복사본 쪽을 지우는데, 그 복사본은 메서드 내부 지역변수라 테스트가 참조를 들고 있을 수 없다) —
+    /// development_plan.md 완료 조건이 명시한 대로 코드 리뷰로 확인한다(LastTransactionResponseStore.cs
+    /// 클래스 요약 및 <c>Save</c>의 <c>finally</c> 블록 참고).
+    /// </summary>
+    private static void Scenario21_LastTransactionResponseStoreRoundTrip()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), $"p26-2-test-{Guid.NewGuid():N}.db");
+        try
+        {
+            var store = new LastTransactionResponseStore(dbPath);
+
+            byte[] bodyA = System.Text.Encoding.ASCII.GetBytes(new string('A', 1500));
+            DateTime respondedAtA = new DateTime(2026, 9, 4, 10, 0, 0);
+            bool savedA = store.Save("0EC0P26T0001", "902614", bodyA, respondedAtA);
+            Check("P26-2: 첫 저장이 성공(true)을 반환", savedA);
+
+            LastTransactionResponseRecord? loadedA = store.TryLoad();
+            Check("P26-2: 저장 직후 조회 결과가 null이 아님", loadedA != null);
+            if (loadedA != null)
+            {
+                Check("P26-2: 조회된 #9(관리번호)가 저장한 값과 일치", loadedA.ManagementNumber == "0EC0P26T0001");
+                Check("P26-2: 조회된 거래구분 코드가 저장한 값과 일치", loadedA.TransactionTypeCode == "902614");
+                Check("P26-2: 조회된 응답 원문(BLOB)이 저장한 바이트와 정확히 일치", loadedA.ResponseBody.SequenceEqual(bodyA));
+                Check("P26-2: 조회된 응답 시각이 저장한 값과 일치", loadedA.RespondedAt == respondedAtA);
+            }
+
+            // 같은(고정) 키로 두 번째 저장 — 행이 늘지 않고 최신값으로 덮어써져야 한다.
+            byte[] bodyB = System.Text.Encoding.ASCII.GetBytes(new string('B', 1500));
+            DateTime respondedAtB = new DateTime(2026, 9, 4, 10, 5, 0);
+            bool savedB = store.Save("0EC0P26T0002", "902614", bodyB, respondedAtB);
+            Check("P26-2: 두 번째 저장도 성공(true)을 반환", savedB);
+
+            int rowCountAfterSecondSave = CountRows(dbPath);
+            Check("P26-2: 두 번째 저장 후에도 행이 정확히 1개(이력을 쌓지 않음)", rowCountAfterSecondSave == 1);
+
+            LastTransactionResponseRecord? loadedB = store.TryLoad();
+            Check("P26-2: 두 번째 저장 후 조회 결과가 null이 아님", loadedB != null);
+            if (loadedB != null)
+            {
+                Check("P26-2: 두 번째 저장 후 조회된 #9가 최신값(0EC0P26T0002)", loadedB.ManagementNumber == "0EC0P26T0002");
+                Check("P26-2: 두 번째 저장 후 조회된 BLOB이 최신값(B로 채운 1500바이트)와 일치", loadedB.ResponseBody.SequenceEqual(bodyB));
+                Check("P26-2: 두 번째 저장 후 조회된 응답 시각이 최신값과 일치", loadedB.RespondedAt == respondedAtB);
+            }
+
+            // 새 인스턴스(별도 커넥션)로 다시 열어도 값이 남아 있음 — 디스크 영속 확인(앱 재시작 흉내).
+            var reopenedStore = new LastTransactionResponseStore(dbPath);
+            LastTransactionResponseRecord? loadedAfterReopen = reopenedStore.TryLoad();
+            Check("P26-2: 새 인스턴스로 다시 열어도 값이 남아 있음(디스크 영속, 앱 재시작 흉내)",
+                loadedAfterReopen != null && loadedAfterReopen.ManagementNumber == "0EC0P26T0002"
+                    && loadedAfterReopen.ResponseBody.SequenceEqual(bodyB));
+
+            // DB 파일을 읽기 전용으로 만든 뒤 저장을 시도한다 — 예외 없이 false를 반환해야 하고, 직전에
+            // 저장된 값(bodyB)이 그대로 남아 있어야 한다(실패한 쓰기가 기존 값을 깨지 않음).
+            // Microsoft.Data.Sqlite는 기본적으로 커넥션 풀링을 쓴다 — 앞의 Save 호출들이 이미 같은
+            // 연결 문자열로 쓰기 가능한 네이티브 핸들을 풀에 남겨 두므로, 파일 속성만 바꾸면 풀에
+            // 캐시된 핸들이 그대로 재사용돼 읽기 전용 속성이 무시된다(실측으로 확인됨) — 반드시
+            // ClearAllPools()로 캐시된 핸들을 먼저 버려야 다음 열기가 실제 디스크 상태(읽기 전용)를
+            // 마주친다.
+            SqliteConnection.ClearAllPools();
+            var readOnlyFileInfo = new FileInfo(dbPath) { IsReadOnly = true };
+            try
+            {
+                bool savedWhileReadOnly = store.Save("0EC0P26T0003", "902614", System.Text.Encoding.ASCII.GetBytes(new string('C', 1500)), DateTime.Now);
+                Check("P26-2: DB 파일이 읽기 전용이면 저장이 예외 없이 false를 반환", !savedWhileReadOnly);
+            }
+            finally
+            {
+                readOnlyFileInfo.IsReadOnly = false; // 임시 파일 정리(finally에서 삭제)가 가능하도록 원복.
+                SqliteConnection.ClearAllPools(); // 다음 조회가 새 파일 상태(쓰기 가능)를 보도록 캐시도 정리.
+            }
+
+            LastTransactionResponseRecord? loadedAfterFailedSave = store.TryLoad();
+            Check("P26-2: 읽기 전용 상태에서 저장 실패 후에도 직전 값(0EC0P26T0002)이 그대로 남아 있음",
+                loadedAfterFailedSave != null && loadedAfterFailedSave.ManagementNumber == "0EC0P26T0002"
+                    && loadedAfterFailedSave.ResponseBody.SequenceEqual(bodyB));
+        }
+        catch (Exception ex)
+        {
+            Check($"P26-2: 시나리오 실행 중 예상치 못한 예외 없음({ex.GetType().Name}: {ex.Message})", false);
+        }
+        finally
+        {
+            TryDeleteFile(dbPath);
+        }
+    }
+
+    /// <summary>
+    /// Phase 26 체크포인트 1 결함 F1(Task A) — <see cref="LastTransactionResponseStore"/>가
+    /// <see cref="PaymentOrchestrator"/>에 실제로 배선돼 거래 1건마다 기록되는지 확인한다(Scenario21은
+    /// 저장소 단독 검증이라 오케스트레이터 호출 지점 자체는 검증하지 못했다 — 체크포인트 1이 "검증
+    /// 불가능"이라고 지적한 지점).
+    ///
+    /// 3전문 모두(501008/800000/902614) 저장되는지 확인한다(PRD §3.4 — "조회 대상은 #9로 식별되므로
+    /// 원거래 종류와 무관"). 각 하위 검증은 <b>같은 orchestrator/store 인스턴스</b>를 이어 쓴다 — 고정
+    /// 키 upsert이므로 다음 거래가 이전 값을 덮어쓰는 것도 함께 확인된다.
+    /// </summary>
+    private static async Task Scenario22_OrchestratorPersistsResponseToLastTransactionStore()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
+
+        // --- 1) 501008 — 카드리딩 없는 순수 중계. ---
+        var noticeRequest = BuildRequest("501008", new Dictionary<int, string>());
+        PosResponseTelegram noticeResponse = await orchestrator.ProcessAsync(noticeRequest).ConfigureAwait(false);
+        Check("P26-2(배선): 501008 응답 성공(전제조건)", noticeResponse.Telegram.Read(7) == "000");
+
+        LastTransactionResponseRecord? noticeRecord = lastTransactionResponseStore.TryLoad();
+        Check("P26-2(배선): 501008 처리 후 §7 저장소에 기록됨", noticeRecord != null);
+        if (noticeRecord != null)
+        {
+            Check("P26-2(배선): 501008 저장된 #9가 요청과 일치", noticeRecord.ManagementNumber == noticeRequest.Read(9));
+            Check("P26-2(배선): 501008 저장된 거래구분이 \"501008\"", noticeRecord.TransactionTypeCode == "501008");
+            Check("P26-2(배선): 501008 저장된 응답 원문이 실제 응답과 바이트 단위로 일치",
+                noticeRecord.ResponseBody.SequenceEqual(noticeResponse.Telegram.ToBody()));
+        }
+
+        // --- 2) 800000 — 카드리딩(BIN만) 후 중계. 이전 501008 기록을 덮어써야 한다(고정 키 upsert). ---
+        r1.EnqueueCardReadOutcome(SuccessOutcome(cardNumber: "9412345678901234"));
+        var cardInfoRequest = BuildRequest("800000", new Dictionary<int, string> { [15] = "1000" });
+        PosResponseTelegram cardInfoResponse = await orchestrator.ProcessAsync(cardInfoRequest).ConfigureAwait(false);
+        Check("P26-2(배선): 800000 응답 성공(전제조건)", cardInfoResponse.Telegram.Read(7) == "000");
+
+        LastTransactionResponseRecord? cardInfoRecord = lastTransactionResponseStore.TryLoad();
+        Check("P26-2(배선): 800000 처리 후 §7 저장소가 최신값으로 갱신됨", cardInfoRecord != null);
+        if (cardInfoRecord != null)
+        {
+            Check("P26-2(배선): 800000 저장된 #9가 요청과 일치(이전 501008 기록을 덮어씀)",
+                cardInfoRecord.ManagementNumber == cardInfoRequest.Read(9));
+            Check("P26-2(배선): 800000 저장된 거래구분이 \"800000\"", cardInfoRecord.TransactionTypeCode == "800000");
+            Check("P26-2(배선): 800000 저장된 응답 원문이 실제 응답과 바이트 단위로 일치",
+                cardInfoRecord.ResponseBody.SequenceEqual(cardInfoResponse.Telegram.ToBody()));
+        }
+
+        // --- 3) 902614 — 카드리딩+PIN 후 중계(P26-1이 이미 카드필드를 지운 뒤의 바이트가 저장돼야 함). ---
+        r1.EnqueueCardReadOutcome(SuccessOutcome(wcc: "I"));
+        presenter.FirePinEnteredSynchronouslyOnChangeState = true;
+        presenter.PinToFireSynchronously = "1234".ToCharArray();
+        var approvalRequest = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
+        PosResponseTelegram approvalResponse = await orchestrator.ProcessAsync(approvalRequest).ConfigureAwait(false);
+        Check("P26-2(배선): 902614 응답 성공(전제조건)", approvalResponse.Telegram.Read(7) == "000");
+
+        LastTransactionResponseRecord? approvalRecord = lastTransactionResponseStore.TryLoad();
+        Check("P26-2(배선): 902614 처리 후 §7 저장소가 최신값으로 갱신됨", approvalRecord != null);
+        if (approvalRecord != null)
+        {
+            Check("P26-2(배선): 902614 저장된 #9가 요청과 일치", approvalRecord.ManagementNumber == approvalRequest.Read(9));
+            Check("P26-2(배선): 902614 저장된 거래구분이 \"902614\"", approvalRecord.TransactionTypeCode == "902614");
+            // P26-1이 이미 지운 뒤의 바이트(카드필드 공백)가 그대로 저장돼야 한다 — 응답 객체와 저장된
+            // 값이 정확히 같은 바이트인지 비교하는 것으로 이 전제도 함께 확인된다.
+            Check("P26-2(배선): 902614 저장된 응답 원문이 실제 응답(카드필드 클리어 후)과 바이트 단위로 일치",
+                approvalRecord.ResponseBody.SequenceEqual(approvalResponse.Telegram.ToBody()));
+        }
+    }
+
+    /// <summary>테스트 전용 — 저장소 공개 API를 우회해 실제 행 개수를 직접 확인한다(이력이 쌓이지
+    /// 않는다는 것을 저장소 자신의 <c>TryLoad</c>만으로는 확인할 수 없다 — <c>TryLoad</c>는 항상 1건
+    /// 형태로만 돌려주므로 "행이 여러 개인데 그중 하나만 보여주는 것"과 구분되지 않는다).</summary>
+    private static int CountRows(string databasePath)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM last_transaction_response;";
+        return Convert.ToInt32(command.ExecuteScalar());
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                new FileInfo(path).IsReadOnly = false;
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // 테스트 정리 실패는 무시한다(임시 파일이라 다음 실행에 영향 없음).
+        }
     }
 }

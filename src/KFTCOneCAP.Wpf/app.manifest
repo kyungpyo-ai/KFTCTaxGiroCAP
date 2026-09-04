@@ -144,6 +144,19 @@
   requireAdministrator로 되돌렸다. 이 라운드에서 ReaderService의 CALLBACK 데이터 미클리어 경로
   (로컬 타임아웃 후 뒤늦게 도착한 0x3B, 중복 CALLBACK, UNSOLICITED 이벤트)를 발견해 수정했다
   (PRD.md §4.2 #1 보강).
+
+  [원복 완료, 2026-09-04] Phase 26 체크포인트 1 결함 F1/F4 수정(LastTransactionResponseStore를
+  PaymentOrchestrator/App.xaml.cs에 실제 배선 + StubVanRelayService의 중복 #51 클리어 제거) 검증을
+  위해 payment-flow-test 하네스를 재실행해야 해서 한시적으로 asInvoker로 낮췄다. 신규 Scenario22
+  (501008/800000/902614 3전문 모두 §7 저장소에 실제로 기록되고 응답과 바이트 단위로 일치함을 확인,
+  고정 키 upsert로 이전 기록을 덮어씀도 함께 확인) 포함 137/137(10:52:05)을 로그로 확인한 즉시
+  requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-04] 위 배선 코드가 저장 목적으로 새로 뜬 ToBody() 복사본(PaymentOrchestrator.
+  ProcessAsync)을 지우지 않고 있어(PosSocketServer.SendResponse의 responseBodyForLog와 같은
+  패턴이어야 하는데 빠져 있었음) 직접 try/finally + SecureClear.Clear로 고친 뒤 재검증하려고
+  한시적으로 asInvoker로 낮췄다. payment-flow-test 137/137(10:57:58)을 로그로 확인한 즉시
+  requireAdministrator로 되돌렸다.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

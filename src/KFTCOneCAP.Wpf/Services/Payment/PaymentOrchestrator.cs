@@ -77,6 +77,7 @@ internal sealed class PaymentOrchestrator
     private readonly Func<ReaderSettings> _loadSettings;
     private readonly IntegrityCheckStore _integrityStore;
     private readonly ObservedIdentityStore _observedIdentityStore;
+    private readonly LastTransactionResponseStore _lastTransactionResponseStore;
     private readonly IPaymentNoticePresenter _presenter;
     private readonly ISetupScreenGate _setupScreenGate;
     private readonly IVanRelayService _vanRelay;
@@ -104,6 +105,7 @@ internal sealed class PaymentOrchestrator
         IReadOnlyList<IReaderEndpoint> readerEndpoints,
         IntegrityCheckStore integrityStore,
         ObservedIdentityStore observedIdentityStore,
+        LastTransactionResponseStore lastTransactionResponseStore,
         IPaymentNoticePresenter presenter,
         ISetupScreenGate setupScreenGate,
         IVanRelayService vanRelay,
@@ -115,6 +117,7 @@ internal sealed class PaymentOrchestrator
         _loadSettings = loadSettings ?? new ReaderSettingsService().Load;
         _integrityStore = integrityStore;
         _observedIdentityStore = observedIdentityStore;
+        _lastTransactionResponseStore = lastTransactionResponseStore;
         _presenter = presenter;
         _setupScreenGate = setupScreenGate;
         _vanRelay = vanRelay;
@@ -150,6 +153,32 @@ internal sealed class PaymentOrchestrator
                 _ => throw new InvalidOperationException(
                     $"txId={txId} PosSchemaRegistry가 인식하는 전문만 여기 도달해야 함(라우팅은 P17-3 PosRequestTelegram.Parse가 이미 끝냄): '{request.TransactionTypeCode}'"),
             };
+
+            // P26-2(PRD.md §3.4.6/§7.1) — "거래 확정" 로그보다 먼저 §7 저장소에 원거래 응답을 기록한다.
+            // 전문 종류와 무관하게(501008/800000/902614 모두) 여기 도달한 시점엔 거래가 성립한 것이므로
+            // 항상 저장한다. 저장 실패는 거래를 실패시키지 않는다(Save가 이미 예외를 삼키고 bool만
+            // 돌려준다 — 반환값은 로그 한 줄로만 남긴다).
+            //
+            // ToBody()는 이 저장 목적 하나만을 위한 별도 복사본이다(PosSocketServer가 송신/로깅용으로
+            // 뜨는 복사본과는 다른 배열) — LastTransactionResponseStore.Save는 자신이 받은 배열을
+            // 지우지 않는 계약이므로(호출자가 계속 써야 하는 값일 수 있다는 전제), 여기서는 그 전제가
+            // 성립하지 않아(이 복사본은 저장 말고 다른 용도가 없다) 직접 try/finally로 지운다
+            // (PosSocketServer.SendResponse의 responseBodyForLog와 동일한 패턴, Phase 25 P25-5).
+            string managementNumber = request.Read(TelegramManagementNumberFieldNumber);
+            byte[] responseBodyForStorage = response.Telegram.ToBody();
+            try
+            {
+                bool saved = _lastTransactionResponseStore.Save(
+                    managementNumber, request.TransactionTypeCode, responseBodyForStorage, DateTime.Now);
+                if (!saved)
+                {
+                    FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 직전 거래 응답 저장 실패(§7 저장소) — 거래 처리는 계속 진행", code: null, txId);
+                }
+            }
+            finally
+            {
+                SecureClear.Clear(responseBodyForStorage);
+            }
 
             // P22-6(PRD.md §1.5 경계 표 "거래 수명" — 거래 확정). 모든 분기(정상 relay/자체 실패)가
             // PosResponseTelegram 한 개로 수렴하는 이 지점에서 한 번만 남긴다 — 분기마다 흩어 찍지 않는다

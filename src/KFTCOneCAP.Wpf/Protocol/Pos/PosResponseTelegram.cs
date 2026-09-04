@@ -17,7 +17,8 @@ namespace KFTCOneCAP.Wpf.Protocol.Pos;
 /// VAN이 채우므로 OneCAP이 요청만으로 만들어낼 수 있는 값이 아니다.
 /// <list type="bullet">
 /// <item><see cref="Relay"/> — VAN까지 도달해 실제 응답을 받은 성공 경로. VAN이 준 바이트를 그대로
-///   감싸고 어떤 필드도 재작성하지 않는다.</item>
+///   감싸되, <see cref="ClearCardReadingFields"/>로 원캡이 채워 보냈던 카드리딩·PIN 필드(§4.13)만
+///   되돌리고 그 외 필드는 재작성하지 않는다.</item>
 /// <item><see cref="Failure(PosRequestTelegram, string)"/> / <see cref="Failure(PosTelegramSchema, string)"/>
 ///   — OneCAP이 VAN에 도달하기 전 자체 실패(취소/Timeout/리더기 실패/전문 오류)한 경로. VAN 응답이
 ///   없으므로 합성한다. 요청 텔레그램(Clone) 또는 스키마(요청이 무효했던 경우 CreateEmpty)를 바탕으로
@@ -42,9 +43,17 @@ public sealed class PosResponseTelegram
     /// 전문관리번호 <c>#9</c> 등, <see cref="PosRequestTelegram.Read"/>와 동일한 목적).</summary>
     public string Read(int fieldNumber) => Telegram.Read(fieldNumber);
 
-    /// <summary>VAN이 돌려준 응답 바이트를 그대로 감싼다 — 어떤 필드도 다시 쓰지 않는다(relay 경로).</summary>
-    public static PosResponseTelegram Relay(PosTelegramSchema schema, byte[] vanResponseBody) =>
-        new(PosTelegram.FromBytes(schema, vanResponseBody));
+    /// <summary>
+    /// VAN이 돌려준 응답 바이트를 감싼다. 승인/거절 판단 등 값의 <b>해석</b>은 여전히 하지 않지만(§4.10
+    /// relay 원칙), <see cref="ClearCardReadingFields"/>만은 예외로 적용한다 — 원캡이 요청 방향으로 써
+    /// 넣었던 자리를 되돌리는 것뿐이라 relay 원칙과 상충하지 않는다(PRD.md §4.13, 2026-09-04 확정).
+    /// </summary>
+    public static PosResponseTelegram Relay(PosTelegramSchema schema, byte[] vanResponseBody)
+    {
+        PosTelegram telegram = PosTelegram.FromBytes(schema, vanResponseBody);
+        ClearCardReadingFields(telegram);
+        return new PosResponseTelegram(telegram);
+    }
 
     /// <summary>
     /// 유효했던 요청을 clone해 실패 응답을 합성한다(실패 경로, 요청 자체는 정상 파싱됨 — 취소/Timeout/
@@ -60,15 +69,56 @@ public sealed class PosResponseTelegram
         BuildFailure(PosTelegram.CreateEmpty(schema), resultCode);
 
     /// <summary>
-    /// <c>#51</c> 암호화된 비밀번호 정보 — 실패 응답에서 반드시 지워야 하는 필드(902614 전용).
-    /// (2026-08-27 Phase 18 최종 검증 H-1) 실패 응답은 요청을 <see cref="PosTelegram.Clone"/>해서
-    /// 만드는데, PIN을 채운 뒤 실패하는 경로(VAN 통신 실패 <c>D0x</c>, 필드 채움 중 예외 <c>E99</c>)에서는
-    /// clone 시점에 <c>#51</c>이 이미 채워져 있어 <b>사용자 비밀번호가 그대로 POS로 되돌아갔다</b>.
-    /// <c>#51</c>은 kiosk가 원래 갖지 못하는 유일한 필드이고(그래서 원캡이 화면에서 직접 입력받는다 —
-    /// PRD §4.12), SEED 암호화 확정 전인 현재는 평문이라 그대로 프로세스 경계를 넘는다. 요청 방향으로
-    /// VAN에 보내는 것만이 이 값의 유일한 용도이므로 응답에서는 무조건 지운다.
+    /// 원캡이 요청 방향으로 채워 보냈던 카드리딩·PIN 필드(PRD.md §4.13, 2026-09-04 확정, Phase 26
+    /// P26-1) — <c>902614</c> 응답에서만 등장한다(501008/800000에는 필드 자체가 없다).
+    ///
+    /// <list type="bullet">
+    /// <item><c>#45</c> 복호화 정보</item>
+    /// <item><c>#46</c> 암호화된 카드정보</item>
+    /// <item><c>#51</c> 암호화된 비밀번호 정보 — 2026-08-27 Phase 18 최종 검증 H-1에서 이미 지우고
+    ///   있던 필드. 이번에 나머지 3개와 같은 처리로 일반화했다(개별 상수·개별 분기를 두지 않는다).</item>
+    /// <item><c>#53</c> EMV DATA — 원캡·인터넷지로 공유 필드(<c>PosFieldOwner.InternetGiro | OneCap</c>)
+    ///   이지만, §7.1 저장이 이 값을 디스크에 남긴다는 이유로 포함한다(Phase 25가 메모리에서 지우는
+    ///   데이터를 디스크에 남기지 않는다 — PRD.md §4.13 참고). 인터넷지로가 응답 방향으로 값을 실어
+    ///   보내는지는 미확인 — 열린 항목(ROADMAP.md Phase 26 "남은 미확정 사항" 6번).</item>
+    /// </list>
+    ///
+    /// <c>#43</c>(보안단말기 인증번호)/<c>#44</c>(FALLBACK CODE)/<c>#48</c>(거래 입력 유형)/<c>#50</c>
+    /// (승인 인증방식)은 카드 데이터가 아닌 제어값이라 대상에서 뺐다(2026-09-04 사용자 확정).
+    /// <c>800000</c>의 <c>#14</c> BIN도 대상이 아니다 — BIN을 돌려주는 것이 그 전문의 목적 자체다.
     /// </summary>
-    private const int EncryptedPinFieldNumber = 51;
+    private static readonly int[] CardReadingFieldNumbers = { 45, 46, 51, 53 };
+
+    /// <summary>
+    /// 카드리딩 필드 삭제 대상 전문. <c>501008</c>도 스키마에 #45/#46/#51/#53 번호를 갖지만
+    /// DigitalBudget 소유의 전혀 다른 업무 필드라(납부 금액 수정 허용 유무 등) 번호만 보고 지우면
+    /// 정상 응답 데이터를 침범한다(P26-1 검증 중 발견, Scenario20 케이스 4) — 반드시 전문 종류로도
+    /// 걸러야 한다.
+    /// </summary>
+    private const string CardReadingFieldsTransactionTypeCode = "902614";
+
+    /// <summary>
+    /// <paramref name="telegram"/>이 <see cref="CardReadingFieldsTransactionTypeCode"/> 전문이고 그
+    /// 스키마에 <see cref="CardReadingFieldNumbers"/>가 있으면 space로 지운다(길이 유지, <c>0x00</c>
+    /// 금지 — 유효한 전문은 space/<c>'0'</c>로만 패딩된다는 원칙과 <c>VanService</c>의 H-1 NUL 검사를
+    /// 깨뜨리지 않기 위함). 빈 문자열을 쓰면 <see cref="PosField.Pad"/>가 타입과 무관하게 전체 space로
+    /// 채우는 기존 동작(P17 체크포인트1 M-1)을 그대로 쓴다.
+    /// </summary>
+    private static void ClearCardReadingFields(PosTelegram telegram)
+    {
+        if (telegram.Schema.TransactionTypeCode != CardReadingFieldsTransactionTypeCode)
+        {
+            return;
+        }
+
+        foreach (int fieldNumber in CardReadingFieldNumbers)
+        {
+            if (telegram.Schema.Fields.Any(f => f.Number == fieldNumber))
+            {
+                telegram.Write(fieldNumber, string.Empty);
+            }
+        }
+    }
 
     private static PosResponseTelegram BuildFailure(PosTelegram telegram, string resultCode)
     {
@@ -77,12 +127,7 @@ public sealed class PosResponseTelegram
         telegram.Write(7, resultCode);
         telegram.Write(8, DateTime.Now.ToString("yyMMddHHmmss", CultureInfo.InvariantCulture));
 
-        // 902614에만 있는 필드라 스키마에 있을 때만 지운다(501008/800000에는 #51 자체가 없다).
-        // 빈 문자열을 쓰면 PosField.Pad가 타입과 무관하게 전체 space로 채운다(P17 체크포인트1 M-1).
-        if (telegram.Schema.Fields.Any(f => f.Number == EncryptedPinFieldNumber))
-        {
-            telegram.Write(EncryptedPinFieldNumber, string.Empty);
-        }
+        ClearCardReadingFields(telegram);
 
         return new PosResponseTelegram(telegram);
     }
