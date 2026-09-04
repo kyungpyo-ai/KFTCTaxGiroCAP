@@ -457,7 +457,7 @@ namespace KFTCOneCAP.KioskSim.Protocol
         }
 
         // ------------------------------------------------------------------
-        // 마. 거래 상태 조회 전문 (999900, Phase 26 신규) — SPEC 원문에는 없는 전문이다. POS↔원캡
+        // 마. 거래 상태 조회 전문 (999999, Phase 26 신규) — SPEC 원문에는 없는 전문이다. POS↔원캡
         // 구간 전용이며(VAN/인터넷지로/디지털예산으로 나가지 않는다), 응답을 받지 못한 원거래
         // (501008/800000/902614)의 결과를 원캡이 직접 보관했다가 되돌려주는 봉투 역할만 한다.
         // 근거: docs/payment_relay/PRD.md §3.4(단일 정본, SPEC PDF에는 없음).
@@ -482,7 +482,7 @@ namespace KFTCOneCAP.KioskSim.Protocol
         /// <c>TransactionStatusInquirySchema.FixedTransactionType</c>과 반드시 같은 값이어야 실제
         /// 소켓 통신이 성립한다(PRD §3.4.8, 확정되면 이 상수만 교체).
         /// </summary>
-        public const string StatusInquiryTransactionType = "999900";
+        public const string StatusInquiryTransactionType = "999999";
 
         /// <summary>응답 개별부 1번 — 원거래 거래구분 코드(N6, POSITION 70). 결과 없으면 "000000".</summary>
         public const int StatusInquiryOriginalTypeFieldNumber = 14;
@@ -524,7 +524,7 @@ namespace KFTCOneCAP.KioskSim.Protocol
             };
         }
 
-        /// <summary>거래 상태 조회 요청 전문(999900, Phase 26 신규). 총 길이 70바이트, 개별부 없음.</summary>
+        /// <summary>거래 상태 조회 요청 전문(999999, Phase 26 신규). 총 길이 70바이트, 개별부 없음.</summary>
         public static readonly TelegramSchema StatusInquiryRequest =
             new TelegramSchema(StatusInquiryTransactionType, 70, BuildStatusInquiryCommonFields());
 
@@ -541,7 +541,7 @@ namespace KFTCOneCAP.KioskSim.Protocol
         }
 
         /// <summary>
-        /// 거래 상태 조회 응답 고정부(999900, Phase 26 신규). 총 길이 80바이트 — 뒤따르는 원거래
+        /// 거래 상태 조회 응답 고정부(999999, Phase 26 신규). 총 길이 80바이트 — 뒤따르는 원거래
         /// 응답 원문(가변)은 이 스키마 밖에서(호출부가 직접 바이트를 슬라이스해) 다룬다.
         /// </summary>
         public static readonly TelegramSchema StatusInquiryResponseFixedPart =

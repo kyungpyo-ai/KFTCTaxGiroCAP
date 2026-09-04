@@ -178,6 +178,12 @@
   한시적으로 asInvoker로 낮췄다. 검증이 모두 통과한 즉시 requireAdministrator로 되돌렸다. 소스 코드는
   KFTCOneCAP.KioskSim만 수정했다(TelegramSchemas.cs 999900 전문 스키마 추가, Forms/MainForm.cs "직전
   거래 상태 조회" 버튼, Net/ErrorInjectionClient.cs 시나리오9) — KFTCOneCAP.Wpf 소스는 건드리지 않았다.
+
+  [원복 완료, 2026-09-04] `#4` 임시 코드값을 사용자 요청으로 "999900"→"999999"(다른 어디서도 쓸 일이
+  적은 값)로 전면 교체한 뒤(본체 TransactionStatusInquirySchema.cs, KFTCOneCAP.KioskSim
+  TelegramSchemas.cs/MainForm.cs/ErrorInjectionClient.cs, 문서 2건) payment-flow-test 하네스를
+  재실행해야 해서 한시적으로 asInvoker로 낮췄다. 169/169(14:10:33)를 로그로 확인한 즉시
+  requireAdministrator로 되돌렸다.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

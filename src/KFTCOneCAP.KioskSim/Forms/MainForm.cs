@@ -48,7 +48,7 @@ namespace KFTCOneCAP.KioskSim.Forms
         private readonly Button _btnSelect800000;
         private readonly Button _btnSelect902614;
 
-        /// <summary>"직전 거래 상태 조회"(999900, Phase 26 P26-5) 버튼 — <see cref="_lastRequestBody"/>의
+        /// <summary>"직전 거래 상태 조회"(999999, Phase 26 P26-5) 버튼 — <see cref="_lastRequestBody"/>의
         /// #9를 재사용해 조회 전문을 보낸다.</summary>
         private readonly Button _btnStatusInquiry;
 
@@ -63,7 +63,7 @@ namespace KFTCOneCAP.KioskSim.Forms
         private readonly Label _lblResponseCode;
         private readonly Label _lblField51Warning;
 
-        /// <summary>"직전 거래 상태 조회"(999900) 응답의 봉투 정보(#7/#14/#15/꼬리 길이)를 보여주는
+        /// <summary>"직전 거래 상태 조회"(999999) 응답의 봉투 정보(#7/#14/#15/꼬리 길이)를 보여주는
         /// 라벨. 원거래 필드 분해는 기존 _responseGrid/_lblResponseCode/_responseTextBox를 그대로
         /// 재사용한다(PRD §3.4.5 "기존 파서를 재사용" 검증).</summary>
         private readonly Label _lblStatusInquiryEnvelope;
@@ -135,7 +135,7 @@ namespace KFTCOneCAP.KioskSim.Forms
             _btnSelect501008 = new Button { Text = "501008\n국고 상세 고지내역 조회", Width = 220, Height = 40, Left = 8, Top = 8 };
             _btnSelect800000 = new Button { Text = "800000\n카드 정보 조회", Width = 220, Height = 40, Left = 236, Top = 8 };
             _btnSelect902614 = new Button { Text = "902614\n국고 신용카드 승인요청", Width = 220, Height = 40, Left = 464, Top = 8 };
-            _btnStatusInquiry = new Button { Text = "직전 거래\n상태 조회(999900)", Width = 150, Height = 40, Left = 692, Top = 8 };
+            _btnStatusInquiry = new Button { Text = "직전 거래\n상태 조회(999999)", Width = 150, Height = 40, Left = 692, Top = 8 };
             _lblSelectedSchema = new Label
             {
                 Text = "선택된 전문: 없음",
@@ -414,8 +414,8 @@ namespace KFTCOneCAP.KioskSim.Forms
                 "넘게 계속 보낸다. 기대: 서버가 버퍼 상한을 넘기면 연결을 닫는다.",
                 () => ErrorInjectionClient.Scenario8_BufferOverflowAttempt());
 
-            AddErrorScenarioRow(scenarioPanel, 8, 9, "9. 조회 응답 유실 → 재연결 복구(999900, Phase 26)",
-                "정상 501008을 보내 성공(#9 확보) → 같은 #9로 조회(999900) 요청을 보내고 응답을 한 바이트도\n" +
+            AddErrorScenarioRow(scenarioPanel, 8, 9, "9. 조회 응답 유실 → 재연결 복구(999999, Phase 26)",
+                "정상 501008을 보내 성공(#9 확보) → 같은 #9로 조회(999999) 요청을 보내고 응답을 한 바이트도\n" +
                 "읽지 않고 즉시 연결을 끊는다 → 재연결해 같은 조회를 다시 보낸다. 기대: #7=\"000\", #14=\"501008\",\n" +
                 "꼬리가 ①의 501008 응답 원문과 바이트 단위로 일치(이 Phase의 존재 이유 재현).",
                 () => ErrorInjectionClient.Scenario9_InquiryResponseLossRecovery());
@@ -899,7 +899,7 @@ namespace KFTCOneCAP.KioskSim.Forms
         }
 
         /// <summary>
-        /// "직전 거래 상태 조회"(999900, Phase 26 P26-5) 버튼 핸들러. <see cref="_lastRequestBody"/>가
+        /// "직전 거래 상태 조회"(999999, Phase 26 P26-5) 버튼 핸들러. <see cref="_lastRequestBody"/>가
         /// 없으면(아직 501008/800000/902614 중 하나도 보내지 않았으면) 안내만 하고 끝낸다. 있으면
         /// 그 요청의 #9(요청기관 전문 관리 번호)를 재사용해 조회 전문(70바이트)을 조립해 보낸다
         /// (PRD §3.4.3 — #9 외 나머지는 기존 3전문 요청과 동일한 고정값/공백).
@@ -942,7 +942,7 @@ namespace KFTCOneCAP.KioskSim.Forms
             ClearResponseDisplay();
 
             SetSendingState(true, TelegramSchemas.StatusInquiryTransactionType);
-            _lblStatus.Text = $"직전 거래 상태 조회(999900, #9=\"{managementNumber}\") 전송 중… (0.0초)";
+            _lblStatus.Text = $"직전 거래 상태 조회(999999, #9=\"{managementNumber}\") 전송 중… (0.0초)";
             try
             {
                 Action<TimeSpan> onElapsed = elapsed =>

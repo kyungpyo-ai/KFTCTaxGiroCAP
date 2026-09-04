@@ -209,7 +209,7 @@ internal sealed class PaymentOrchestrator
     }
 
     /// <summary>
-    /// 999900(가칭, 거래 상태 조회) — PRD.md §3.4.4/§3.4.6/§3.4.7. 카드 리딩·VAN 호출·알림창·무결성
+    /// 999999(가칭, 거래 상태 조회) — PRD.md §3.4.4/§3.4.6/§3.4.7. 카드 리딩·VAN 호출·알림창·무결성
     /// 체크·키오스크 고유번호 검사를 전혀 거치지 않는다(<see cref="ProcessAsync"/>가 이 메서드를 3전문
     /// switch/§7 저장소 갱신 이전에 별도로 호출·반환하므로, 이 메서드 자신은 그 코드를 지나칠 방법이
     /// 없다 — "부작용 완전 차단"을 구조로 보장). <see cref="_lastTransactionResponseStore"/>를 갱신하지

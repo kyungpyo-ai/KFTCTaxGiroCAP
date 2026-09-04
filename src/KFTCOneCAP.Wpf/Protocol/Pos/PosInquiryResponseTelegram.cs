@@ -121,7 +121,7 @@ public sealed class PosInquiryResponseTelegram : IPosOutboundResponse
         }
     }
 
-    /// <summary>이 응답 고유의 거래 구분 코드("999900" 가칭)를 그대로 쓴다 — <c>TelegramLogRedactor</c>는
+    /// <summary>이 응답 고유의 거래 구분 코드("999999" 가칭)를 그대로 쓴다 — <c>TelegramLogRedactor</c>는
     /// 이 코드를 <c>PosSchemaRegistry</c>에서 찾지 못해(요청 스키마만 등록돼 있고 그나마도 총 길이가
     /// 다름) 위치 기반 마스킹 없이 원문 그대로 로그에 남기지만, 꼬리는 이미 P26-1이 카드리딩·PIN
     /// 필드를 지운 뒤의 바이트라 안전하다.</summary>

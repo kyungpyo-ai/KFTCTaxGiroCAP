@@ -177,7 +177,7 @@ internal static class PaymentFlowTestScenarios
     /// name="managementNumberToReuse"/>는 §3.4.4의 예외(원거래 <c>#9</c> 재사용)를 그대로 흉내낸다 —
     /// <see cref="BuildRequest"/>가 자동으로 채우는 새 일련번호를 이 값으로 덮어쓴다. 902614 전용
     /// 키오스크 고유번호 자동 채움 로직은 이 전문과 무관하므로 <c>autoFillKioskId</c>는 그대로
-    /// 기본값을 써도 무해하다(거래구분이 "999900"이라 그 조건에 걸리지 않는다).</summary>
+    /// 기본값을 써도 무해하다(거래구분이 "999999"이라 그 조건에 걸리지 않는다).</summary>
     private static PosRequestTelegram BuildInquiryRequest(string managementNumberToReuse) =>
         BuildRequest(TransactionStatusInquiryTransactionType, new Dictionary<int, string> { [9] = managementNumberToReuse });
 

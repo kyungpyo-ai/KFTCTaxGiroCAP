@@ -27,7 +27,7 @@ internal static class TransactionStatusInquirySchema
     /// <see cref="PosSchemaRegistry"/> 등록 시 딕셔너리 키 충돌로 즉시 드러난다(같은 값을 두 번
     /// 등록할 수 없으므로 기동 자체가 실패한다).
     /// </summary>
-    internal const string FixedTransactionType = "999900";
+    internal const string FixedTransactionType = "999999";
 
     /// <summary>SPEC #14(신설) — 응답 개별부 1번, 원거래 거래구분 코드(N6). 결과 없으면 "000000".</summary>
     internal const int OriginalTransactionTypeFieldNumber = 14;

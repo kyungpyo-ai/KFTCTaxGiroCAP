@@ -73,7 +73,7 @@ namespace KFTCOneCAP.KioskSim.Net
         }
 
         /// <summary>
-        /// 거래 상태 조회(999900, Phase 26) 요청 프레임을 만든다. #9(요청기관 전문 관리 번호)만
+        /// 거래 상태 조회(999999, Phase 26) 요청 프레임을 만든다. #9(요청기관 전문 관리 번호)만
         /// 인자로 받고 나머지는 PRD §3.4.3의 고정값/공백을 그대로 채운다 — Forms/MainForm.cs의
         /// "직전 거래 상태 조회" 버튼과 값은 같지만, 정상 경로 코드를 오류 주입 탭에서 재사용하지
         /// 않는다는 원칙(클래스 주석)에 따라 이 파일 안에서 독립적으로 다시 만든다.
@@ -577,7 +577,7 @@ namespace KFTCOneCAP.KioskSim.Net
         /// <summary>
         /// 9) 이 Phase(응답 유실 → 재연결 → 조회로 복구) 전체의 존재 이유를 재현한다:
         /// ① 정상 501008을 보내 성공 응답(과 그때 쓴 #9)을 확보한다.
-        /// ② 같은 #9로 조회(999900) 전문을 만들어 보내되, 응답을 한 바이트도 읽지 않고 연결을
+        /// ② 같은 #9로 조회(999999) 전문을 만들어 보내되, 응답을 한 바이트도 읽지 않고 연결을
         ///    즉시 끊는다(시나리오5 <see cref="Scenario5_AbortBeforeResponse"/>와 같은 패턴 —
         ///    "응답을 일부러 못 받는" 상황 재현).
         /// ③ 재연결해서 같은 조회를 다시 보내(정상 경로 <see cref="OneCapClient.SendAsync"/>) ①의
@@ -610,7 +610,7 @@ namespace KFTCOneCAP.KioskSim.Net
             string originalCode7 = ReadResponseCodeRaw(originalResult.ResponseBody);
             byte[] originalResponseBody = originalResult.ResponseBody;
 
-            // ② 조회(999900) 요청을 보내고, 응답을 한 바이트도 읽지 않고 즉시 연결을 끊는다.
+            // ② 조회(999999) 요청을 보내고, 응답을 한 바이트도 읽지 않고 즉시 연결을 끊는다.
             byte[] inquiryFrame = BuildStatusInquiryFrame(managementNumber);
             var abortStopwatch = Stopwatch.StartNew();
             try
