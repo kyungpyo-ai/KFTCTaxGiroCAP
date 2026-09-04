@@ -455,5 +455,96 @@ namespace KFTCOneCAP.KioskSim.Protocol
                     throw new KeyNotFoundException($"알 수 없는 거래 구분 코드: \"{txType}\". 501008/800000/902614만 지원한다.");
             }
         }
+
+        // ------------------------------------------------------------------
+        // 마. 거래 상태 조회 전문 (999900, Phase 26 신규) — SPEC 원문에는 없는 전문이다. POS↔원캡
+        // 구간 전용이며(VAN/인터넷지로/디지털예산으로 나가지 않는다), 응답을 받지 못한 원거래
+        // (501008/800000/902614)의 결과를 원캡이 직접 보관했다가 되돌려주는 봉투 역할만 한다.
+        // 근거: docs/payment_relay/PRD.md §3.4(단일 정본, SPEC PDF에는 없음).
+        //
+        // 본체 앱(KFTCOneCAP.Wpf)의 Protocol/Pos/Schemas/TransactionStatusInquirySchema.cs가 같은
+        // 계약을 담고 있지만, 이 프로젝트는 본체 소스를 참조하지 않는다는 원칙(P19-2)에 따라 값만
+        // 그대로 옮겨 적었다 — 상수를 공유하지 않으므로 <see cref="StatusInquiryTransactionType"/>이
+        // 바뀌면(발주처 채번 확정 시) 양쪽 파일을 함께 고쳐야 실제 소켓 통신이 유지된다.
+        //
+        // 요청은 공통부(#1~#13)만으로 70바이트, 개별부 없음 — 조회 대상은 #9(요청기관 전문 관리
+        // 번호)에 원거래 값을 그대로 재사용해 식별한다(별도 조회 키 필드가 필요 없다). 응답
+        // 고정부는 공통부 70 + #14(원거래 거래구분 코드, N6) + #15(원거래 응답 전문 길이, N4) =
+        // 80바이트다. 그 뒤에 이어 붙는 원거래 응답 원문(가변, 결과 있음일 때만)은 이 프로젝트의
+        // TelegramSchema가 고정 길이 전제라 표현할 수 없으므로 스키마 밖에서(호출부가 직접
+        // 바이트를 슬라이스해) 다룬다 — 잘라낸 뒤에는 원거래 거래구분 코드(#14 값)로
+        // <see cref="ByTxType"/>을 다시 호출해 기존 3종 스키마로 그대로 파싱한다(PRD §3.4.5 "POS는
+        // 기존 파서를 재사용하면 된다").
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// #4 거래 구분 코드 — 상태 조회 전용 신규 코드, <b>발주처 미채번(임시값)</b>. 본체 앱의
+        /// <c>TransactionStatusInquirySchema.FixedTransactionType</c>과 반드시 같은 값이어야 실제
+        /// 소켓 통신이 성립한다(PRD §3.4.8, 확정되면 이 상수만 교체).
+        /// </summary>
+        public const string StatusInquiryTransactionType = "999900";
+
+        /// <summary>응답 개별부 1번 — 원거래 거래구분 코드(N6, POSITION 70). 결과 없으면 "000000".</summary>
+        public const int StatusInquiryOriginalTypeFieldNumber = 14;
+
+        /// <summary>응답 개별부 2번 — 원거래 응답 전문 길이(N4, POSITION 76). 결과 없으면 "0000".</summary>
+        public const int StatusInquiryOriginalLengthFieldNumber = 15;
+
+        private static List<TelegramField> BuildStatusInquiryCommonFields()
+        {
+            return new List<TelegramField>
+            {
+                new TelegramField(1, "업무 구분", TelegramRepresentation.A, 3, 0, TelegramSetLocation.Kiosk,
+                    "고정값 \"IGN\"."),
+                new TelegramField(2, "요청기관 코드", TelegramRepresentation.N, 3, 3, TelegramSetLocation.Kiosk,
+                    "고정값 \"095\"."),
+                new TelegramField(3, "전문 종별 코드", TelegramRepresentation.N, 4, 6, TelegramSetLocation.Kiosk,
+                    "요청 시 \"0200\", 응답 시 \"0210\"(PRD §3.4.5)."),
+                new TelegramField(4, "거래 구분 코드", TelegramRepresentation.N, 6, 10, TelegramSetLocation.Kiosk,
+                    $"상태 조회 전용 신규 코드, 발주처 미채번 — 임시값 \"{StatusInquiryTransactionType}\"."),
+                new TelegramField(5, "상태 코드", TelegramRepresentation.N, 3, 16, TelegramSetLocation.Kiosk,
+                    "기존 3전문과 동일하게 요청 시 채우지 않아도 된다 — 공백으로 보낸다.", alwaysBlank: true),
+                new TelegramField(6, "송·수신 FLAG", TelegramRepresentation.AN, 1, 19, TelegramSetLocation.Kiosk,
+                    "고정값 \"G\"."),
+                new TelegramField(7, "응답 코드", TelegramRepresentation.AN, 3, 20, TelegramSetLocation.OneCap,
+                    "요청 시 SPACE. 원캡이 응답에서 조회 결과 코드로 채운다(정상 relay 시 원거래 응답의 #7과 " +
+                    "같은 값, 불일치/기록없음이면 E07 — PRD §3.4.5/§3.4.6)."),
+                new TelegramField(8, "전송 일시", TelegramRepresentation.N, 12, 23, TelegramSetLocation.Kiosk,
+                    "YYMMDDhhmmss. 이 조회 전문 자신의 전송 시각(원거래 시각이 아니다)."),
+                new TelegramField(9, "요청기관 전문 관리 번호", TelegramRepresentation.AN, 12, 35, TelegramSetLocation.Kiosk,
+                    "원거래(501008/800000/902614)에 실제로 보냈던 값을 그대로 재사용한다 — 원캡이 이 값으로 " +
+                    "원거래를 찾는다(PRD §3.4.3/§3.4.4). 새로 채번하지 않는다."),
+                new TelegramField(10, "이용기관/센터 전문 관리 번호", TelegramRepresentation.AN, 12, 47, TelegramSetLocation.Kiosk,
+                    "기존 3전문 요청과 동일하게 공백으로 보낸다.", alwaysBlank: true),
+                new TelegramField(11, "지로 이용기관 분류코드", TelegramRepresentation.N, 2, 59, TelegramSetLocation.Kiosk,
+                    "고정값 \"01\"."),
+                new TelegramField(12, "지로 이용기관 지로번호", TelegramRepresentation.N, 7, 61, TelegramSetLocation.Kiosk),
+                new TelegramField(13, "FILLER", TelegramRepresentation.N, 2, 68, TelegramSetLocation.Kiosk,
+                    "요청 시 kiosk가 space로 채운다.", alwaysBlank: true),
+            };
+        }
+
+        /// <summary>거래 상태 조회 요청 전문(999900, Phase 26 신규). 총 길이 70바이트, 개별부 없음.</summary>
+        public static readonly TelegramSchema StatusInquiryRequest =
+            new TelegramSchema(StatusInquiryTransactionType, 70, BuildStatusInquiryCommonFields());
+
+        private static List<TelegramField> BuildStatusInquiryResponseFixedFields()
+        {
+            var fields = BuildStatusInquiryCommonFields();
+            fields.Add(new TelegramField(StatusInquiryOriginalTypeFieldNumber, "원거래 거래구분 코드",
+                TelegramRepresentation.N, 6, 70, TelegramSetLocation.OneCap,
+                "결과 없음(기록 없음/#9 불일치)이면 \"000000\"."));
+            fields.Add(new TelegramField(StatusInquiryOriginalLengthFieldNumber, "원거래 응답 전문 길이",
+                TelegramRepresentation.N, 4, 76, TelegramSetLocation.OneCap,
+                "결과 없음이면 \"0000\". 이 값만큼 이 고정부(80바이트) 뒤에 원거래 응답 원문이 그대로 이어 붙는다."));
+            return fields;
+        }
+
+        /// <summary>
+        /// 거래 상태 조회 응답 고정부(999900, Phase 26 신규). 총 길이 80바이트 — 뒤따르는 원거래
+        /// 응답 원문(가변)은 이 스키마 밖에서(호출부가 직접 바이트를 슬라이스해) 다룬다.
+        /// </summary>
+        public static readonly TelegramSchema StatusInquiryResponseFixedPart =
+            new TelegramSchema(StatusInquiryTransactionType, 80, BuildStatusInquiryResponseFixedFields());
     }
 }

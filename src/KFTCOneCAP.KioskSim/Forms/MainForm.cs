@@ -47,6 +47,11 @@ namespace KFTCOneCAP.KioskSim.Forms
         private readonly Button _btnSelect501008;
         private readonly Button _btnSelect800000;
         private readonly Button _btnSelect902614;
+
+        /// <summary>"직전 거래 상태 조회"(999900, Phase 26 P26-5) 버튼 — <see cref="_lastRequestBody"/>의
+        /// #9를 재사용해 조회 전문을 보낸다.</summary>
+        private readonly Button _btnStatusInquiry;
+
         private readonly Label _lblSelectedSchema;
 
         private readonly DataGridView _grid;
@@ -57,6 +62,12 @@ namespace KFTCOneCAP.KioskSim.Forms
         private readonly Label _lblStatus;
         private readonly Label _lblResponseCode;
         private readonly Label _lblField51Warning;
+
+        /// <summary>"직전 거래 상태 조회"(999900) 응답의 봉투 정보(#7/#14/#15/꼬리 길이)를 보여주는
+        /// 라벨. 원거래 필드 분해는 기존 _responseGrid/_lblResponseCode/_responseTextBox를 그대로
+        /// 재사용한다(PRD §3.4.5 "기존 파서를 재사용" 검증).</summary>
+        private readonly Label _lblStatusInquiryEnvelope;
+
         private readonly DataGridView _responseGrid;
         private readonly TextBox _responseTextBox;
 
@@ -124,10 +135,11 @@ namespace KFTCOneCAP.KioskSim.Forms
             _btnSelect501008 = new Button { Text = "501008\n국고 상세 고지내역 조회", Width = 220, Height = 40, Left = 8, Top = 8 };
             _btnSelect800000 = new Button { Text = "800000\n카드 정보 조회", Width = 220, Height = 40, Left = 236, Top = 8 };
             _btnSelect902614 = new Button { Text = "902614\n국고 신용카드 승인요청", Width = 220, Height = 40, Left = 464, Top = 8 };
+            _btnStatusInquiry = new Button { Text = "직전 거래\n상태 조회(999900)", Width = 150, Height = 40, Left = 692, Top = 8 };
             _lblSelectedSchema = new Label
             {
                 Text = "선택된 전문: 없음",
-                Left = 700,
+                Left = 852,
                 Top = 18,
                 Width = 400,
                 Font = new Font("맑은 고딕", 10F, FontStyle.Bold),
@@ -135,6 +147,7 @@ namespace KFTCOneCAP.KioskSim.Forms
             topPanel.Controls.Add(_btnSelect501008);
             topPanel.Controls.Add(_btnSelect800000);
             topPanel.Controls.Add(_btnSelect902614);
+            topPanel.Controls.Add(_btnStatusInquiry);
             topPanel.Controls.Add(_lblSelectedSchema);
 
             var bottomPanel = new Panel { Dock = DockStyle.Bottom, Height = 560, Padding = new Padding(8) };
@@ -177,6 +190,15 @@ namespace KFTCOneCAP.KioskSim.Forms
                 Dock = DockStyle.Top,
                 Height = 20,
                 ForeColor = Color.DarkGreen,
+                Font = new Font("맑은 고딕", 9F, FontStyle.Bold),
+            };
+
+            _lblStatusInquiryEnvelope = new Label
+            {
+                Text = string.Empty,
+                Dock = DockStyle.Top,
+                Height = 20,
+                ForeColor = Color.DarkSlateBlue,
                 Font = new Font("맑은 고딕", 9F, FontStyle.Bold),
             };
 
@@ -243,6 +265,7 @@ namespace KFTCOneCAP.KioskSim.Forms
             bottomPanel.Controls.Add(responseSplit);
             bottomPanel.Controls.Add(_lblField51Warning);
             bottomPanel.Controls.Add(_lblResponseCode);
+            bottomPanel.Controls.Add(_lblStatusInquiryEnvelope);
             bottomPanel.Controls.Add(responseLabel);
             bottomPanel.Controls.Add(_lblStatus);
             bottomPanel.Controls.Add(buttonRow);
@@ -304,6 +327,7 @@ namespace KFTCOneCAP.KioskSim.Forms
             _btnRefreshPreview.Click += (s, e) => UpdatePreview();
             _btnSavePreset.Click += (s, e) => SavePreset();
             _btnSend.Click += async (s, e) => await OnSendClickAsync();
+            _btnStatusInquiry.Click += async (s, e) => await OnStatusInquiryClickAsync();
             _grid.CellValueChanged += Grid_CellValueChanged;
             _grid.CurrentCellDirtyStateChanged += (s, e) =>
             {
@@ -339,14 +363,14 @@ namespace KFTCOneCAP.KioskSim.Forms
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 3,
-                RowCount = 8,
+                RowCount = 9,
                 AutoScroll = true,
                 Padding = new Padding(8),
             };
             scenarioPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
             scenarioPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 480));
             scenarioPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < 9; i++)
                 scenarioPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
 
             AddErrorScenarioRow(scenarioPanel, 0, 1, "1. 선언 길이 ≠ 실제 본문 길이",
@@ -389,6 +413,12 @@ namespace KFTCOneCAP.KioskSim.Forms
                 "길이 헤더에 \"9999\"를 선언하고 그 뒤로 완성되지 않는 쓰레기 바이트를 64KB(65536바이트)\n" +
                 "넘게 계속 보낸다. 기대: 서버가 버퍼 상한을 넘기면 연결을 닫는다.",
                 () => ErrorInjectionClient.Scenario8_BufferOverflowAttempt());
+
+            AddErrorScenarioRow(scenarioPanel, 8, 9, "9. 조회 응답 유실 → 재연결 복구(999900, Phase 26)",
+                "정상 501008을 보내 성공(#9 확보) → 같은 #9로 조회(999900) 요청을 보내고 응답을 한 바이트도\n" +
+                "읽지 않고 즉시 연결을 끊는다 → 재연결해 같은 조회를 다시 보낸다. 기대: #7=\"000\", #14=\"501008\",\n" +
+                "꼬리가 ①의 501008 응답 원문과 바이트 단위로 일치(이 Phase의 존재 이유 재현).",
+                () => ErrorInjectionClient.Scenario9_InquiryResponseLossRecovery());
 
             _errorInjectionTab.Controls.Add(scenarioPanel);
         }
@@ -485,7 +515,7 @@ namespace KFTCOneCAP.KioskSim.Forms
             ClearResponseDisplay(); // 전문을 바꾸면 이전 전문의 응답 분해 결과가 화면에 남아 있으면 안 된다.
         }
 
-        /// <summary>응답 관련 표시(필드 분해 그리드/코드 해설/#51 경고/raw ASCII)를 전부 비운다.</summary>
+        /// <summary>응답 관련 표시(필드 분해 그리드/코드 해설/#51 경고/raw ASCII/조회 봉투)를 전부 비운다.</summary>
         private void ClearResponseDisplay()
         {
             _responseGrid.Rows.Clear();
@@ -493,6 +523,7 @@ namespace KFTCOneCAP.KioskSim.Forms
             _lblResponseCode.ForeColor = Color.Black;
             _lblField51Warning.Text = string.Empty;
             _responseTextBox.Text = string.Empty;
+            _lblStatusInquiryEnvelope.Text = string.Empty;
         }
 
         /// <summary>스키마의 필드 전체를 SPEC 순서(번호 오름차순)로 그리드에 나열한다.</summary>
@@ -718,6 +749,7 @@ namespace KFTCOneCAP.KioskSim.Forms
             _btnSelect501008.Enabled = !sending;
             _btnSelect800000.Enabled = !sending;
             _btnSelect902614.Enabled = !sending;
+            _btnStatusInquiry.Enabled = !sending;
             if (sending)
             {
                 _lblStatus.ForeColor = Color.DarkBlue;
@@ -864,6 +896,167 @@ namespace KFTCOneCAP.KioskSim.Forms
             {
                 _lblField51Warning.Text = string.Empty;
             }
+        }
+
+        /// <summary>
+        /// "직전 거래 상태 조회"(999900, Phase 26 P26-5) 버튼 핸들러. <see cref="_lastRequestBody"/>가
+        /// 없으면(아직 501008/800000/902614 중 하나도 보내지 않았으면) 안내만 하고 끝낸다. 있으면
+        /// 그 요청의 #9(요청기관 전문 관리 번호)를 재사용해 조회 전문(70바이트)을 조립해 보낸다
+        /// (PRD §3.4.3 — #9 외 나머지는 기존 3전문 요청과 동일한 고정값/공백).
+        /// </summary>
+        private async System.Threading.Tasks.Task OnStatusInquiryClickAsync()
+        {
+            if (_lastRequestBody == null || _lastRequestSchema == null)
+            {
+                MessageBox.Show(this,
+                    "먼저 501008/800000/902614 중 하나를 보낸 뒤에 조회할 수 있다.",
+                    "직전 거래 없음", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string managementNumber;
+            try
+            {
+                var lastBuffer = new TelegramBuffer(_lastRequestSchema, _lastRequestBody);
+                managementNumber = lastBuffer.Read(9);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"직전 요청에서 #9(요청기관 전문 관리 번호)를 읽는 데 실패했다: {ex.Message}",
+                    "조회 전문 생성 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var buffer = new TelegramBuffer(TelegramSchemas.StatusInquiryRequest);
+            buffer.Write(1, "IGN");
+            buffer.Write(2, "095");
+            buffer.Write(3, "0200");
+            buffer.Write(4, TelegramSchemas.StatusInquiryTransactionType);
+            buffer.Write(6, "G");
+            buffer.Write(8, DateTime.Now.ToString("yyMMddHHmmss"));
+            buffer.Write(9, managementNumber);
+            buffer.Write(11, "01");
+            buffer.Write(12, "1234567");
+
+            byte[] frame = TelegramCodec.Encode(buffer.ToBytes());
+            ClearResponseDisplay();
+
+            SetSendingState(true, TelegramSchemas.StatusInquiryTransactionType);
+            _lblStatus.Text = $"직전 거래 상태 조회(999900, #9=\"{managementNumber}\") 전송 중… (0.0초)";
+            try
+            {
+                Action<TimeSpan> onElapsed = elapsed =>
+                {
+                    if (IsDisposed || !IsHandleCreated)
+                        return;
+                    try
+                    {
+                        BeginInvoke(new Action(() =>
+                        {
+                            if (!IsDisposed)
+                                _lblStatus.Text = $"직전 거래 상태 조회 응답 대기 중… ({elapsed.TotalSeconds:F1}초)";
+                        }));
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // 폼 종료 경합 — 무시.
+                    }
+                };
+
+                OneCapClientResult result = await OneCapClient.SendAsync(frame, onElapsed);
+
+                _lblStatus.Text = $"[결과: {result.Kind}] {result.Message}" +
+                    (result.Error != null ? $" / 예외: {result.Error.GetType().Name}: {result.Error.Message}" : string.Empty);
+                _lblStatus.ForeColor = result.Kind == OneCapClientResultKind.Success ? Color.DarkGreen : Color.DarkRed;
+
+                if (result.Kind != OneCapClientResultKind.Success || result.ResponseBody == null)
+                {
+                    _lblStatusInquiryEnvelope.Text = "조회 응답 없음 — 위 상태 메시지 참고.";
+                    _lblStatusInquiryEnvelope.ForeColor = Color.DarkRed;
+                    return;
+                }
+
+                ShowStatusInquiryResult(result.ResponseBody);
+            }
+            finally
+            {
+                SetSendingState(false, TelegramSchemas.StatusInquiryTransactionType);
+            }
+        }
+
+        /// <summary>
+        /// 조회 응답(고정부 80바이트 + 가변 꼬리)을 분해해 보여준다. 고정부는 #7/#14/#15만 봉투
+        /// 라벨(<see cref="_lblStatusInquiryEnvelope"/>)로 보여주고, 꼬리(원거래 응답 원문)가 있으면
+        /// #14 값으로 원거래 스키마를 찾아 <see cref="ShowFieldDecomposition"/>을 그대로 재사용해
+        /// 기존 필드 분해 그리드/코드 해설/#51 마스킹을 그대로 활용한다(PRD §3.4.5 검증).
+        /// </summary>
+        private void ShowStatusInquiryResult(byte[] responseBody)
+        {
+            if (responseBody.Length < 80)
+            {
+                _lblStatusInquiryEnvelope.Text =
+                    $"조회 응답 고정부(80바이트) 미달 — 실제 {responseBody.Length}바이트.";
+                _lblStatusInquiryEnvelope.ForeColor = Color.DarkRed;
+                return;
+            }
+
+            var fixedBytes = new byte[80];
+            Array.Copy(responseBody, fixedBytes, 80);
+            var fixedBuffer = new TelegramBuffer(TelegramSchemas.StatusInquiryResponseFixedPart, fixedBytes);
+
+            string code7 = fixedBuffer.Read(7).TrimEnd(' ');
+            string originalType = fixedBuffer.Read(TelegramSchemas.StatusInquiryOriginalTypeFieldNumber);
+            string originalLengthRaw = fixedBuffer.Read(TelegramSchemas.StatusInquiryOriginalLengthFieldNumber);
+            int.TryParse(originalLengthRaw, out int originalLength);
+            int tailLength = responseBody.Length - 80;
+
+            _lblStatusInquiryEnvelope.Text =
+                $"[조회 응답 고정부] #7 응답 코드=\"{code7}\" — {ResponseCodeCatalog.Describe(code7)} / " +
+                $"#14 원거래 거래구분=\"{originalType}\" / #15 원거래 응답 전문 길이=\"{originalLengthRaw}\"({originalLength}) / " +
+                $"실제 꼬리 길이={tailLength}바이트";
+            _lblStatusInquiryEnvelope.ForeColor = code7 == "000" ? Color.DarkGreen : Color.DarkRed;
+
+            if (tailLength <= 0)
+            {
+                // 결과 없음(E07 등) — 원거래 원문이 없으므로 그 아래 필드 분해는 생략한다.
+                return;
+            }
+
+            var tail = new byte[tailLength];
+            Array.Copy(responseBody, 80, tail, 0, tailLength);
+
+            TelegramSchema originalSchema;
+            try
+            {
+                originalSchema = TelegramSchemas.ByTxType(originalType);
+            }
+            catch (Exception ex)
+            {
+                _responseTextBox.Text = Cp949.GetString(tail);
+                _lblResponseCode.Text = $"#14 원거래 거래구분(\"{originalType}\")으로 스키마를 찾지 못함 — {ex.Message}";
+                _lblResponseCode.ForeColor = Color.DarkRed;
+                return;
+            }
+
+            if (tail.Length != originalSchema.TotalLength)
+            {
+                _responseTextBox.Text = Cp949.GetString(tail);
+                _lblResponseCode.Text = $"꼬리 길이({tailLength}바이트)가 {originalSchema.TxType} 스키마 총 길이" +
+                    $"({originalSchema.TotalLength}바이트)와 다르다 — 필드 분해 불가.";
+                _lblResponseCode.ForeColor = Color.DarkRed;
+                return;
+            }
+
+            // PRD §3.4.5 "POS는 기존 파서를 재사용하면 된다" 검증 — 원거래와 같은 스키마이면 직전에
+            // 실제로 보냈던 요청 본문(_lastRequestBody)을 나란히 놓고 기존 ShowFieldDecomposition을
+            // 그대로 재사용한다(파서를 새로 만들지 않는다).
+            byte[] requestForDiff = _lastRequestSchema != null
+                && _lastRequestSchema.TxType == originalSchema.TxType
+                && _lastRequestBody != null
+                    ? _lastRequestBody
+                    : new TelegramBuffer(originalSchema).ToBytes(); // 스키마가 다른 이례적인 경우엔 빈 요청으로만 비교.
+
+            ShowFieldDecomposition(originalSchema, requestForDiff, tail);
         }
     }
 }

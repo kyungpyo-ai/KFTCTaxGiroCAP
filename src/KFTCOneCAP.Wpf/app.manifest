@@ -170,6 +170,14 @@
   하네스를 검증자가 직접 재실행해 구현자의 보고를 재현하려고 한시적으로 asInvoker로 낮췄다. 로그
   (C:\KFTC_PosAgent\KFTCTaxLog\2026-09-04.log, 11:45:56) "완료 통과 169건, 실패 0건"과 Scenario23~25의
   개별 Check 32줄을 직접 확인한 즉시 requireAdministrator로 되돌렸다. 소스 코드는 수정하지 않았다.
+
+  [원복 완료, 2026-09-04] P26-6 검증: KFTCOneCAP.KioskSim을 실제로 띄워 본체 앱과 8002 포트로 소켓
+  통신하는 통합 검증(정상 거래 후 조회 원문 바이트 일치, 오류 주입 시나리오9 응답 유실→재연결 복구,
+  다른 #9 조회 시 E07, 앱 재시작 후에도 SQLite 저장으로 조회 성공 4가지 모두 확인)과 회귀
+  재확인(payment-flow-test 169/169, memory-clear-test 8/8)을 자동화(비대화형)로 반복 실행하려고
+  한시적으로 asInvoker로 낮췄다. 검증이 모두 통과한 즉시 requireAdministrator로 되돌렸다. 소스 코드는
+  KFTCOneCAP.KioskSim만 수정했다(TelegramSchemas.cs 999900 전문 스키마 추가, Forms/MainForm.cs "직전
+  거래 상태 조회" 버튼, Net/ErrorInjectionClient.cs 시나리오9) — KFTCOneCAP.Wpf 소스는 건드리지 않았다.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

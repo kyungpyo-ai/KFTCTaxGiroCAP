@@ -52,6 +52,61 @@ namespace KFTCOneCAP.KioskSim.Net
         /// <summary>정상 프레임(길이 헤더 4바이트 + 706바이트 본문, 총 710바이트)을 만든다.</summary>
         private static byte[] BuildValid501008Frame() => TelegramCodec.Encode(BuildMinimal501008Body());
 
+        private static readonly Random StatusInquiryScenarioRandom = new Random();
+
+        /// <summary>
+        /// <see cref="Scenario9_InquiryResponseLossRecovery"/> 전용 — #9(요청기관 전문 관리 번호)에
+        /// 실제 운영과 같은 형식("0EC0"+8자리 난수, Preset/PresetStore.cs GetCodeDefault와 같은
+        /// 패턴)의 값을 채운 501008 프레임을 만든다. <see cref="BuildMinimal501008Body"/>(다른
+        /// 시나리오들이 쓰는 것)는 #4만 채우고 #9는 비워 두므로(그 시나리오들은 #9를 보지 않아
+        /// 상관없다), 이 시나리오는 #9로 원거래를 식별하는 조회를 검증하는 것이 목적이라 실제
+        /// 관리 번호 형식을 갖춘 값이 필요하다 — 빈 #9로도 기계적으로는 통과하지만, 그러면
+        /// "관리 번호로 원거래를 찾는다"는 이 Phase의 핵심을 실제로 검증한 것이 아니다.
+        /// </summary>
+        private static byte[] BuildValid501008FrameWithManagementNumber(out string managementNumber)
+        {
+            managementNumber = "0EC0" + StatusInquiryScenarioRandom.Next(10_000_000, 99_999_999);
+            var buffer = new TelegramBuffer(TelegramSchemas.Notice501008);
+            buffer.Write(4, "501008");
+            buffer.Write(9, managementNumber);
+            return TelegramCodec.Encode(buffer.ToBytes());
+        }
+
+        /// <summary>
+        /// 거래 상태 조회(999900, Phase 26) 요청 프레임을 만든다. #9(요청기관 전문 관리 번호)만
+        /// 인자로 받고 나머지는 PRD §3.4.3의 고정값/공백을 그대로 채운다 — Forms/MainForm.cs의
+        /// "직전 거래 상태 조회" 버튼과 값은 같지만, 정상 경로 코드를 오류 주입 탭에서 재사용하지
+        /// 않는다는 원칙(클래스 주석)에 따라 이 파일 안에서 독립적으로 다시 만든다.
+        /// </summary>
+        private static byte[] BuildStatusInquiryFrame(string managementNumber)
+        {
+            var buffer = new TelegramBuffer(TelegramSchemas.StatusInquiryRequest);
+            buffer.Write(1, "IGN");
+            buffer.Write(2, "095");
+            buffer.Write(3, "0200");
+            buffer.Write(4, TelegramSchemas.StatusInquiryTransactionType);
+            buffer.Write(6, "G");
+            buffer.Write(8, DateTime.Now.ToString("yyMMddHHmmss"));
+            buffer.Write(9, managementNumber);
+            buffer.Write(11, "01");
+            buffer.Write(12, "1234567");
+            return TelegramCodec.Encode(buffer.ToBytes());
+        }
+
+        /// <summary>바이트 배열 두 개가 길이·내용 모두 같은지 직접 비교한다(Span/LINQ 확장 없이 —
+        /// 이 파일의 다른 헬퍼들과 같은 스타일로 최소 의존).</summary>
+        private static bool BytesEqual(byte[] a, byte[] b)
+        {
+            if (a.Length != b.Length)
+                return false;
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (a[i] != b[i])
+                    return false;
+            }
+            return true;
+        }
+
         /// <summary>
         /// 응답 본문의 <c>#7 응답 코드</c>(공통부 POSITION=20, 길이=3 — 3전문 공통, 501008/800000/902614
         /// 스키마 모두 동일한 위치다, <see cref="TelegramSchemas"/> 참고)를 스키마 객체 없이 직접
@@ -517,6 +572,119 @@ namespace KFTCOneCAP.KioskSim.Net
             {
                 client?.Dispose();
             }
+        }
+
+        /// <summary>
+        /// 9) 이 Phase(응답 유실 → 재연결 → 조회로 복구) 전체의 존재 이유를 재현한다:
+        /// ① 정상 501008을 보내 성공 응답(과 그때 쓴 #9)을 확보한다.
+        /// ② 같은 #9로 조회(999900) 전문을 만들어 보내되, 응답을 한 바이트도 읽지 않고 연결을
+        ///    즉시 끊는다(시나리오5 <see cref="Scenario5_AbortBeforeResponse"/>와 같은 패턴 —
+        ///    "응답을 일부러 못 받는" 상황 재현).
+        /// ③ 재연결해서 같은 조회를 다시 보내(정상 경로 <see cref="OneCapClient.SendAsync"/>) ①의
+        ///    501008 응답이 원문 그대로(바이트 단위로 동일) relay되는지 확인한다.
+        ///
+        /// 카드리딩이 필요 없는 501008로 단순화했다(development_plan.md P26-5 지시 — 핵심은
+        /// 카드리딩이 아니라 "정상 거래 → 그 #9로 조회 → 응답 유실 → 재조회 → 복구"이기 때문).
+        /// </summary>
+        public static string Scenario9_InquiryResponseLossRecovery()
+        {
+            // ① 정상 501008(#9에 실제 운영과 같은 형식의 관리 번호를 채워 보낸다 — 위 헬퍼 주석 참고).
+            byte[] originalFrame = BuildValid501008FrameWithManagementNumber(out string managementNumber);
+            OneCapClientResult originalResult;
+            try
+            {
+                originalResult = OneCapClient.SendAsync(originalFrame).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                return $"[결과] 원거래(501008) 전송 중 예외 — {ex.GetType().Name}: {ex.Message}. 이후 단계를 " +
+                       "진행하지 않음.";
+            }
+
+            if (originalResult.Kind != OneCapClientResultKind.Success || originalResult.ResponseBody == null)
+            {
+                return $"[결과] 원거래(501008)가 실패함(Kind={originalResult.Kind}, {originalResult.Message}) — " +
+                       "조회 시나리오를 진행할 수 없다. 확인 필요.";
+            }
+
+            string originalCode7 = ReadResponseCodeRaw(originalResult.ResponseBody);
+            byte[] originalResponseBody = originalResult.ResponseBody;
+
+            // ② 조회(999900) 요청을 보내고, 응답을 한 바이트도 읽지 않고 즉시 연결을 끊는다.
+            byte[] inquiryFrame = BuildStatusInquiryFrame(managementNumber);
+            var abortStopwatch = Stopwatch.StartNew();
+            try
+            {
+                using (var client = new TcpClient())
+                {
+                    client.Connect(OneCapClient.Host, OneCapClient.Port);
+                    using (var stream = client.GetStream())
+                    {
+                        stream.Write(inquiryFrame, 0, inquiryFrame.Length);
+                    }
+                    // using 블록을 나가며 Dispose() → 응답을 전혀 읽지 않고 바로 닫힘.
+                }
+            }
+            catch (Exception ex)
+            {
+                return $"[결과] 원거래(501008)는 성공(#7=\"{originalCode7}\", #9=\"{managementNumber}\")했으나, " +
+                       $"조회 요청 전송/즉시 종료 단계에서 예외 — {ex.GetType().Name}: {ex.Message}. 후속 재조회를 " +
+                       "진행하지 않음.";
+            }
+            double abortSeconds = abortStopwatch.Elapsed.TotalSeconds;
+
+            // ③ 재연결해서 같은 조회를 다시 보낸다(정상 경로, OneCapClient).
+            OneCapClientResult retryResult;
+            try
+            {
+                retryResult = OneCapClient.SendAsync(inquiryFrame).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                return $"[결과] 원거래 성공(#9=\"{managementNumber}\") 후 조회 응답을 {abortSeconds:F2}초 만에 강제로 " +
+                       $"끊음. 재조회 중 예외 — {ex.GetType().Name}: {ex.Message}. 기대(재조회로 복구)와 불일치 — " +
+                       "확인 필요.";
+            }
+
+            if (retryResult.Kind != OneCapClientResultKind.Success || retryResult.ResponseBody == null)
+            {
+                return $"[결과] 원거래 성공(#9=\"{managementNumber}\") 후 조회 응답을 {abortSeconds:F2}초 만에 강제로 " +
+                       $"끊음. 재조회가 실패함(Kind={retryResult.Kind}, {retryResult.Message}) — 기대(재조회로 복구)와 " +
+                       "불일치! 확인 필요.";
+            }
+
+            byte[] retryBody = retryResult.ResponseBody;
+            if (retryBody.Length < 80)
+            {
+                return $"[결과] 재조회 응답이 고정부(80바이트) 미달({retryBody.Length}바이트) — 확인 필요.";
+            }
+
+            var fixedBytes = new byte[80];
+            Array.Copy(retryBody, fixedBytes, 80);
+            var fixedBuffer = new TelegramBuffer(TelegramSchemas.StatusInquiryResponseFixedPart, fixedBytes);
+            string inquiryCode7 = fixedBuffer.Read(7).TrimEnd(' ');
+            string originalType = fixedBuffer.Read(TelegramSchemas.StatusInquiryOriginalTypeFieldNumber);
+            int tailLength = retryBody.Length - 80;
+            var tail = new byte[Math.Max(tailLength, 0)];
+            if (tailLength > 0)
+                Array.Copy(retryBody, 80, tail, 0, tailLength);
+
+            bool typeMatches = originalType == "501008";
+            bool tailMatchesOriginal = tailLength == originalResponseBody.Length && BytesEqual(tail, originalResponseBody);
+
+            if (inquiryCode7 == "000" && typeMatches && tailMatchesOriginal)
+            {
+                return $"[결과] 원거래(501008, #9=\"{managementNumber}\") 성공(#7=\"{originalCode7}\") → 조회 응답을 " +
+                       $"{abortSeconds:F2}초 만에 강제 종료 → 재연결·재조회 {retryResult.Elapsed.TotalSeconds:F2}초 만에 " +
+                       $"성공(#7=\"{inquiryCode7}\", #14=\"{originalType}\") → 꼬리 {tailLength}바이트가 원거래 응답 " +
+                       "원문과 바이트 단위로 일치 — 이 Phase의 존재 이유(응답 유실 → 재연결 → 조회로 복구)가 " +
+                       "재현됨, 기대와 일치.";
+            }
+
+            return $"[결과] 원거래(501008, #9=\"{managementNumber}\") 성공(#7=\"{originalCode7}\") 후 조회 응답을 " +
+                   $"{abortSeconds:F2}초 만에 강제 종료 → 재조회(#7=\"{inquiryCode7}\", #14=\"{originalType}\", 꼬리 " +
+                   $"{tailLength}바이트, 원문과 일치={tailMatchesOriginal}) — 기대(원문 그대로 복구)와 불일치! " +
+                   "확인 필요.";
         }
 
         private static bool IsTimeout(IOException ex)
