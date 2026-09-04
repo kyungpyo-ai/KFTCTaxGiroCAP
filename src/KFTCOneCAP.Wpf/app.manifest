@@ -157,6 +157,19 @@
   패턴이어야 하는데 빠져 있었음) 직접 try/finally + SecureClear.Clear로 고친 뒤 재검증하려고
   한시적으로 asInvoker로 낮췄다. payment-flow-test 137/137(10:57:58)을 로그로 확인한 즉시
   requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-04] Phase 26 P26-3/P26-4(거래 상태 조회 전문) 구현 후 payment-flow-test(인자는
+  이 주석에는 XML 파싱 버그 재발 방지를 위해 하이픈 없이 적는다) 신규 시나리오 23~25 포함 재검증을
+  위해 한시적으로 asInvoker로 낮췄다. 구현 중 정적 필드 선언 순서 결함(TransactionStatusInquirySchema.
+  HeaderOwners가 이를 참조하는 ResponseFixedPartSchema보다 뒤에 선언돼 있어 기동 시
+  TypeInitializationException 발생 — HeaderOwners를 먼저 선언하도록 수정)을 이 재검증 과정에서
+  발견·수정했다. 169/169(11:38:25, 기존 137건 + 신규 32건)를 로그로 확인한 즉시
+  requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-04] Phase 26 체크포인트 2(P26-3/P26-4) 독립 검증(Opus 리뷰) 중, payment-flow-test
+  하네스를 검증자가 직접 재실행해 구현자의 보고를 재현하려고 한시적으로 asInvoker로 낮췄다. 로그
+  (C:\KFTC_PosAgent\KFTCTaxLog\2026-09-04.log, 11:45:56) "완료 통과 169건, 실패 0건"과 Scenario23~25의
+  개별 Check 32줄을 직접 확인한 즉시 requireAdministrator로 되돌렸다. 소스 코드는 수정하지 않았다.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

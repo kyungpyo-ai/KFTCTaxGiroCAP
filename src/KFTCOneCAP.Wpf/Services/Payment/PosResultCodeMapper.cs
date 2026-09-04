@@ -37,6 +37,10 @@ internal static class PosResultCodeMapper
         PosPaymentResultCode.NoReaderConfigured => "E04",
         PosPaymentResultCode.IntegrityCheckFailure => "E05",
         PosPaymentResultCode.KioskIdMismatch => "E06",
+        // Phase 26(PRD.md §3.4.5/§3.4.6, P26-4) — 거래 상태 조회 결과 없음(#9 불일치 또는 기록 없음).
+        // "E07" 리터럴은 이 매핑 한 곳에만 둔다(P15-3/P17-4 완료 조건 계승 — Services/Payment/ 다른
+        // 파일에는 이 문자열이 등장하지 않아야 한다).
+        PosPaymentResultCode.InquiryNoMatchingTransaction => "E07",
         PosPaymentResultCode.InternalError => "E99",
 
         PosPaymentResultCode.Approved =>

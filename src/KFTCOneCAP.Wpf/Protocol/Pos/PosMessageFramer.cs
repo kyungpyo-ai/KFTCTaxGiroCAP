@@ -80,6 +80,26 @@ internal sealed class PosMessageFramer
         return frames;
     }
 
+    /// <summary>
+    /// <c>[길이 4자리(ASCII)][본문]</c> 송신 프레임을 만든다(P26-3 리팩터링 — 순수 추출, 동작 불변).
+    /// 원래 <see cref="PosResponseTelegram.ToFrame"/> 안에만 있던 로직을 여기로 옮겨
+    /// <see cref="PosInquiryResponseTelegram"/>과 공유한다. 이 클래스가 수신 프레이밍(<see
+    /// cref="Append"/>)과 송신 프레이밍을 모두 갖게 되지만, 형식 상수(<see cref="LengthFieldSize"/>/
+    /// <see cref="MaxFrameBodyBytes"/>)를 두 방향이 공유해야 어긋나지 않으므로 한 클래스에 둔다.
+    /// </summary>
+    internal static byte[] BuildFrame(byte[] bodyBytes)
+    {
+        if (bodyBytes.Length > MaxFrameBodyBytes)
+            throw new PosProtocolException($"본문이 길이 필드({LengthFieldSize}자리) 범위를 초과함: {bodyBytes.Length}바이트");
+
+        byte[] lengthBytes = PosMessageEncoding.Value.GetBytes(bodyBytes.Length.ToString("D4", CultureInfo.InvariantCulture));
+
+        byte[] frame = new byte[lengthBytes.Length + bodyBytes.Length];
+        Buffer.BlockCopy(lengthBytes, 0, frame, 0, lengthBytes.Length);
+        Buffer.BlockCopy(bodyBytes, 0, frame, lengthBytes.Length, bodyBytes.Length);
+        return frame;
+    }
+
     private bool TryExtractFrame(out byte[]? frame)
     {
         frame = null;

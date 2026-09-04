@@ -27,7 +27,7 @@ namespace KFTCOneCAP.Wpf.Protocol.Pos;
 ///   필드는 kiosk 열에 표시가 없다는 전제가 성립하기 때문).</item>
 /// </list>
 /// </summary>
-public sealed class PosResponseTelegram
+public sealed class PosResponseTelegram : IPosOutboundResponse
 {
     private const string ResponseTransactionTypeSuffix = "0210";
     private const string SendFlagFromOneCap = "G";
@@ -42,6 +42,18 @@ public sealed class PosResponseTelegram
     /// <summary>해당 필드를 CP949로 디코딩하고 패딩을 제거해 읽는다(P22-6 로깅용 — 결과코드 <c>#7</c>/
     /// 전문관리번호 <c>#9</c> 등, <see cref="PosRequestTelegram.Read"/>와 동일한 목적).</summary>
     public string Read(int fieldNumber) => Telegram.Read(fieldNumber);
+
+    /// <summary><see cref="IPosOutboundResponse.BodyForLog"/> 구현 — 기존 <c>PosSocketServer</c>가
+    /// 직접 <c>Telegram.ToBody()</c>를 부르던 것을 인터페이스 뒤로 옮긴 것뿐(P26-4, 동작 불변).</summary>
+    public byte[] BodyForLog() => Telegram.ToBody();
+
+    /// <summary><see cref="IPosOutboundResponse.RedactionTransactionTypeCode"/> 구현 — 이 응답은 고정
+    /// 스키마 하나뿐이라 <c>Telegram.Schema.TransactionTypeCode</c>가 곧 그 값이다.</summary>
+    public string RedactionTransactionTypeCode => Telegram.Schema.TransactionTypeCode;
+
+    /// <summary><see cref="IPosOutboundResponse.ClearBody"/> 구현 — 기존 <c>Telegram.ClearBody()</c>
+    /// 직접 호출을 인터페이스 뒤로 옮긴 것뿐(P26-4, 동작 불변).</summary>
+    public void ClearBody() => Telegram.ClearBody();
 
     /// <summary>
     /// VAN이 돌려준 응답 바이트를 감싼다. 승인/거절 판단 등 값의 <b>해석</b>은 여전히 하지 않지만(§4.10
@@ -141,15 +153,9 @@ public sealed class PosResponseTelegram
         byte[] bodyBytes = Telegram.ToBody();
         try
         {
-            if (bodyBytes.Length > 9999)
-                throw new PosProtocolException($"응답 본문이 길이 필드(4자리) 범위를 초과함: {bodyBytes.Length}바이트");
-
-            byte[] lengthBytes = PosMessageEncoding.Value.GetBytes(bodyBytes.Length.ToString("D4", CultureInfo.InvariantCulture));
-
-            byte[] frame = new byte[lengthBytes.Length + bodyBytes.Length];
-            Buffer.BlockCopy(lengthBytes, 0, frame, 0, lengthBytes.Length);
-            Buffer.BlockCopy(bodyBytes, 0, frame, lengthBytes.Length, bodyBytes.Length);
-            return frame;
+            // P26-3 — 프레이밍 형식 자체(길이 4자리 + 본문)는 PosMessageFramer.BuildFrame으로
+            // 옮겼다(PosInquiryResponseTelegram과 공유하는 순수 리팩터링, 동작 불변).
+            return PosMessageFramer.BuildFrame(bodyBytes);
         }
         finally
         {

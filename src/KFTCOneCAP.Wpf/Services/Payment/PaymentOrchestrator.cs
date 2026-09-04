@@ -128,7 +128,7 @@ internal sealed class PaymentOrchestrator
 
     /// <summary><see cref="TransactionQueue"/>의 워커 스레드에서 호출된다. 전문 종별로 분기한다
     /// (P17-5) — 공통 게이트(설정화면)만 여기서 처리하고, 나머지는 각 Handle*Async가 맡는다.</summary>
-    internal async Task<PosResponseTelegram> ProcessAsync(PosRequestTelegram request)
+    internal async Task<IPosOutboundResponse> ProcessAsync(PosRequestTelegram request)
     {
         string txId = LogTxId(request);
 
@@ -141,6 +141,17 @@ internal sealed class PaymentOrchestrator
             string gateRejectCode = PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.SetupScreenInProgress);
             FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 거래 확정 — 설정 화면 점유로 거부", gateRejectCode, txId);
             return PosResponseTelegram.Failure(request, gateRejectCode);
+        }
+
+        // ===== P26-4(PRD.md §3.4.6/§3.4.7) — 거래 상태 조회는 완전히 독립된 경로 =====
+        // 위 설정화면 게이트는 통과하지만(모든 전문 공통), 그 뒤로는 카드 리딩·VAN 호출·알림창·무결성
+        // 체크·키오스크 고유번호 검사를 전혀 거치지 않는다 — 아래 3전문 switch/§7 저장소 갱신 코드에도
+        // 들어가지 않도록 여기서 별도로 처리하고 곧바로 반환한다("처리 중" 상태를 정의하지 않아도 되는
+        // 이유는 같은 단일 Queue를 타기 때문 — 이 메서드 자체가 그 Queue의 처리 위임이므로, 이 분기가
+        // 어디에 있든 이미 그 전제를 만족한다).
+        if (request.TransactionTypeCode == TransactionStatusInquirySchema.FixedTransactionType)
+        {
+            return HandleStatusInquiry(request, txId);
         }
 
         try
@@ -194,6 +205,57 @@ internal sealed class PaymentOrchestrator
             // 로그 한 줄만 남긴 뒤 그대로 다시 던진다.
             FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 거래 확정 — 내부 오류(InternalError)", code: null, txId);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// 999900(가칭, 거래 상태 조회) — PRD.md §3.4.4/§3.4.6/§3.4.7. 카드 리딩·VAN 호출·알림창·무결성
+    /// 체크·키오스크 고유번호 검사를 전혀 거치지 않는다(<see cref="ProcessAsync"/>가 이 메서드를 3전문
+    /// switch/§7 저장소 갱신 이전에 별도로 호출·반환하므로, 이 메서드 자신은 그 코드를 지나칠 방법이
+    /// 없다 — "부작용 완전 차단"을 구조로 보장). <see cref="_lastTransactionResponseStore"/>를 갱신하지
+    /// 않는다(조회 자신이 직전 거래를 덮어쓰면 원본이 사라진다, §7.1).
+    /// </summary>
+    private PosInquiryResponseTelegram HandleStatusInquiry(PosRequestTelegram request, string txId)
+    {
+        PosTelegramSchema fixedSchema = TransactionStatusInquirySchema.ResponseFixedPartSchema;
+        string managementNumber = request.Read(TelegramManagementNumberFieldNumber);
+
+        try
+        {
+            LastTransactionResponseRecord? record = _lastTransactionResponseStore.TryLoad();
+
+            // §3.4.6 — 저장된 직전 거래의 #9와 조회 요청의 #9가 일치할 때만 원거래 응답을 돌려준다.
+            if (record == null || !string.Equals(record.ManagementNumber, managementNumber, StringComparison.Ordinal))
+            {
+                string noMatchCode = PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.InquiryNoMatchingTransaction);
+                FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 거래 상태 조회 — 일치하는 원거래 없음", noMatchCode, txId);
+                return PosInquiryResponseTelegram.Build(request, fixedSchema, noMatchCode, originalTransactionTypeCode: null, originalResponseBody: null);
+            }
+
+            // #7 relay는 하드코딩하지 않는다 — 저장된 거래구분으로 원거래 스키마를 다시 찾아 그
+            // 스키마로 원문의 #7을 읽는다(원거래 종류마다 #7 POSITION은 공통부라 같지만, 스키마
+            // 자체를 통해서만 안전하게 읽는다는 원칙을 지킨다).
+            if (!PosSchemaRegistry.TryResolve(record.TransactionTypeCode, out PosTelegramSchema? originalSchema) || originalSchema is null)
+            {
+                // 저장 시점에 이미 검증됐어야 하는 방어적 상황(이론상 도달 불가) — 결과를 신뢰할 수
+                // 없으므로 "없음"과 동일하게 처리한다.
+                string defensiveNoMatchCode = PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.InquiryNoMatchingTransaction);
+                FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] 거래 상태 조회 — 저장된 거래구분 스키마를 인식할 수 없음(방어적 경로): '{record.TransactionTypeCode}'", defensiveNoMatchCode, txId);
+                return PosInquiryResponseTelegram.Build(request, fixedSchema, defensiveNoMatchCode, originalTransactionTypeCode: null, originalResponseBody: null);
+            }
+
+            string relayedResultCode = PosTelegram.FromBytes(originalSchema, record.ResponseBody).Read(ResultCodeFieldNumber);
+            FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 거래 상태 조회 — 일치하는 원거래 발견, 원문 relay", relayedResultCode, txId);
+            return PosInquiryResponseTelegram.Build(request, fixedSchema, relayedResultCode, record.TransactionTypeCode, record.ResponseBody);
+        }
+        catch (Exception ex)
+        {
+            // PRD §3.4가 정의하는 결과는 "있음"/"없음(E07)" 2가지뿐이라(§3.4.6), 예기치 못한 예외도
+            // 새 오류 코드를 만들지 않고 "없음"으로 수렴시킨다(설계 판단 — 이 조회 전문 자체가 발주처
+            // 협의 대기 중인 신규 전문이라 SPEC에 별도 오류 코드가 없다).
+            string exceptionFallbackCode = PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.InquiryNoMatchingTransaction);
+            FileLogger.Error(LogCategory.Payment, $"[PaymentOrchestrator] 거래 상태 조회 처리 중 예외 — 없음(E07)으로 응답: {ex.GetType().Name} - {ex.Message}", exceptionFallbackCode, txId);
+            return PosInquiryResponseTelegram.Build(request, fixedSchema, exceptionFallbackCode, originalTransactionTypeCode: null, originalResponseBody: null);
         }
     }
 

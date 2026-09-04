@@ -59,6 +59,9 @@ internal static class PaymentFlowTestScenarios
             await Scenario20_ResponseCardReadingFieldsAreCleared().ConfigureAwait(false);
             Scenario21_LastTransactionResponseStoreRoundTrip();
             await Scenario22_OrchestratorPersistsResponseToLastTransactionStore().ConfigureAwait(false);
+            await Scenario23_StatusInquiryMatchReturnsStoredResponseVerbatim().ConfigureAwait(false);
+            await Scenario24_StatusInquiryNoMatchYieldsE07().ConfigureAwait(false);
+            Scenario25_NoE07LiteralOutsidePosResultCodeMapper();
 
             FileLogger.Info($"[payment-flow-test] 완료 — 통과 {_passCount}건, 실패 {_failCount}건");
         }
@@ -170,6 +173,19 @@ internal static class PaymentFlowTestScenarios
         return outcome.Telegram!;
     }
 
+    /// <summary>P26-3/P26-4 — 거래 상태 조회 요청(70바이트, 개별부 없음)을 만든다. <paramref
+    /// name="managementNumberToReuse"/>는 §3.4.4의 예외(원거래 <c>#9</c> 재사용)를 그대로 흉내낸다 —
+    /// <see cref="BuildRequest"/>가 자동으로 채우는 새 일련번호를 이 값으로 덮어쓴다. 902614 전용
+    /// 키오스크 고유번호 자동 채움 로직은 이 전문과 무관하므로 <c>autoFillKioskId</c>는 그대로
+    /// 기본값을 써도 무해하다(거래구분이 "999900"이라 그 조건에 걸리지 않는다).</summary>
+    private static PosRequestTelegram BuildInquiryRequest(string managementNumberToReuse) =>
+        BuildRequest(TransactionStatusInquiryTransactionType, new Dictionary<int, string> { [9] = managementNumberToReuse });
+
+    /// <summary>P26-3(PRD.md §3.4.8) — <c>TransactionStatusInquirySchema.FixedTransactionType</c>은
+    /// <c>internal</c>이라 이 <c>Services/Diagnostics/</c> 하네스에서도 접근 가능하지만, 값 자체가
+    /// "미채번" 임시값이라는 사실을 이 파일에서도 드러내기 위해 별도 상수로 한 번 더 참조한다.</summary>
+    private const string TransactionStatusInquiryTransactionType = TransactionStatusInquirySchema.FixedTransactionType;
+
     private static CardReadCommandOutcome SuccessOutcome(string cardNumber = "9412345678901234", string wcc = "I")
     {
         // #46 검증용(2026-09-01, PaymentOrchestrator.FillCardApprovalFields 참고) — 실제 파서는 리더기가
@@ -203,7 +219,7 @@ internal static class PaymentFlowTestScenarios
             port1: "미사용", port2: "미사용");
 
         var request = BuildRequest("501008", new Dictionary<int, string>());
-        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
         Check("501008: 리더기 미설정에도 성공(카드리딩 없음)", response.Telegram.Read(7) == "000");
         Check("501008: 카드리딩 호출 0회(리더기를 전혀 안 씀)", r1.CardReadCallCount == 0 && r2.CardReadCallCount == 0);
@@ -217,7 +233,7 @@ internal static class PaymentFlowTestScenarios
         r1.EnqueueCardReadOutcome(SuccessOutcome(cardNumber: "9412345678901234"));
 
         var request = BuildRequest("800000", new Dictionary<int, string> { [15] = "1000" });
-        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
         Check("800000: 응답 성공(#7=000)", response.Telegram.Read(7) == "000");
         Check("800000: VAN 요청에 실린 BIN이 카드번호 앞 8자리", vanRelay.LastRequest?.Read(14) == "94123456");
@@ -235,7 +251,7 @@ internal static class PaymentFlowTestScenarios
         presenter.PinToFireSynchronously = "1234".ToCharArray();
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
         Check("902614: 응답 성공(#7=000)", response.Telegram.Read(7) == "000");
         string sentTelegram43 = vanRelay.LastRequest!.Read(43);
@@ -287,7 +303,7 @@ internal static class PaymentFlowTestScenarios
                 : txType == "902614" ? new Dictionary<int, string> { [29] = "1000" }
                 : new Dictionary<int, string>();
             var request = BuildRequest(txType, fields);
-            PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+            PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
             Check($"{txType}: 설정화면 열림 중 E03 거부", response.Telegram.Read(7) == "E03");
             // P26-2(체크포인트 1 F1) — 설정 화면 게이트로 거부된 요청은 "거래"가 성립하지 않으므로
@@ -333,7 +349,7 @@ internal static class PaymentFlowTestScenarios
         r1.EnqueueCardReadOutcome(SuccessOutcome(), delay: TimeSpan.FromMilliseconds(500));
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        Task<PosResponseTelegram> processTask = orchestrator.ProcessAsync(request);
+        Task<IPosOutboundResponse> processTask = orchestrator.ProcessAsync(request);
 
         // 라운드가 실제로 리더기에 요청을 보낸 뒤(CardReadCallCount>0) 취소한다.
         for (int i = 0; i < 40 && r1.CardReadCallCount == 0; i++)
@@ -341,7 +357,7 @@ internal static class PaymentFlowTestScenarios
         Check("902614: 취소 전 카드리딩 라운드가 실제로 시작됨(전제 조건)", r1.CardReadCallCount > 0);
         presenter.FireCanceled();
 
-        PosResponseTelegram response = await processTask.ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await processTask.ConfigureAwait(false);
 
         Check("902614: 취소 시 E01", response.Telegram.Read(7) == "E01");
 
@@ -370,7 +386,7 @@ internal static class PaymentFlowTestScenarios
 
         int invalidationsBefore = r1.InvalidationCount;
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
         Check("902614: VAN 통신 실패 시 D02", response.Telegram.Read(7) == "D02");
         Check("902614: VAN 통신 실패 시 채택 리더기 초기화(PRD §4.10, H-3 회귀 방지)",
@@ -394,7 +410,7 @@ internal static class PaymentFlowTestScenarios
         presenter.PinToFireSynchronously = "1234".ToCharArray();
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
         FileLogger.Info($"[payment-flow-test] 902614+PIN 알림창 호출 이력: {string.Join(" -> ", presenter.History)}");
         Check("902614+PIN: 응답 성공(#7=000)", response.Telegram.Read(7) == "000");
@@ -436,7 +452,7 @@ internal static class PaymentFlowTestScenarios
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
 
         var request = BuildRequest("800000", new Dictionary<int, string> { [15] = "1000" });
-        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
         Check("800000: 응답 성공(#7=000)", response.Telegram.Read(7) == "000");
         Check("800000: History에 PinEntry 없음(PIN 단계 미진입)",
@@ -450,7 +466,7 @@ internal static class PaymentFlowTestScenarios
         r1.EnqueueCardReadOutcome(SuccessOutcome());
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        Task<PosResponseTelegram> processTask = orchestrator.ProcessAsync(request);
+        Task<IPosOutboundResponse> processTask = orchestrator.ProcessAsync(request);
 
         for (int i = 0; i < 40 && !presenter.History.Contains($"ChangeState:{PaymentNoticeState.PinEntry}"); i++)
             await Task.Delay(25).ConfigureAwait(false);
@@ -458,7 +474,7 @@ internal static class PaymentFlowTestScenarios
 
         presenter.FireCanceled();
 
-        PosResponseTelegram response = await processTask.ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await processTask.ConfigureAwait(false);
         Check("902614: PIN 대기 중 취소 시 E01(정확히 1건 확정)", response.Telegram.Read(7) == "E01");
 
         for (int i = 0; i < 20 && r1.InvalidationCount < 1; i++)
@@ -476,14 +492,14 @@ internal static class PaymentFlowTestScenarios
         r1.EnqueueCardReadOutcome(SuccessOutcome());
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        Task<PosResponseTelegram> processTask = orchestrator.ProcessAsync(request);
+        Task<IPosOutboundResponse> processTask = orchestrator.ProcessAsync(request);
 
         for (int i = 0; i < 40 && !presenter.History.Contains($"ChangeState:{PaymentNoticeState.PinEntry}"); i++)
             await Task.Delay(25).ConfigureAwait(false);
         Check("902614(Timeout): PIN 화면 진입 확인(전제조건)", presenter.History.Contains($"ChangeState:{PaymentNoticeState.PinEntry}"));
 
         // PIN을 끝까지 입력하지 않고 데드라인(원래 5초 + PIN 진입 시 +30초 연장) 만료를 기다린다.
-        PosResponseTelegram response = await processTask.ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await processTask.ConfigureAwait(false);
         Check("902614(Timeout): PIN 대기 중 Timeout 시 E02(정확히 1건 확정)", response.Telegram.Read(7) == "E02");
 
         for (int i = 0; i < 20 && r1.InvalidationCount < 1; i++)
@@ -504,7 +520,7 @@ internal static class PaymentFlowTestScenarios
         presenter.PinToFireSynchronously = "5678".ToCharArray();
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        Task<PosResponseTelegram> processTask = orchestrator.ProcessAsync(request);
+        Task<IPosOutboundResponse> processTask = orchestrator.ProcessAsync(request);
         Task completed = await Task.WhenAny(processTask, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
 
         Check("902614: PIN 즉시발화가 유실되지 않고 2초 안에 정상 완료(구독이 ChangeState보다 먼저 걸림)",
@@ -512,7 +528,7 @@ internal static class PaymentFlowTestScenarios
 
         if (completed == processTask)
         {
-            PosResponseTelegram response = await processTask.ConfigureAwait(false);
+            PosResponseTelegram response = (PosResponseTelegram)await processTask.ConfigureAwait(false);
             Check("902614: 즉시발화 순서 검증 — 응답 성공(#7=000)", response.Telegram.Read(7) == "000");
         }
     }
@@ -533,7 +549,7 @@ internal static class PaymentFlowTestScenarios
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
         presenter.PinToFireSynchronously = pinA;
         var requestA = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        PosResponseTelegram responseA = await orchestrator.ProcessAsync(requestA).ConfigureAwait(false);
+        PosResponseTelegram responseA = (PosResponseTelegram)await orchestrator.ProcessAsync(requestA).ConfigureAwait(false);
         Check("연속거래 A: 응답 성공(#7=000)", responseA.Telegram.Read(7) == "000");
         byte[] rawBodyA = vanRelay.LastRequest!.Telegram.ToBody();
 
@@ -543,7 +559,7 @@ internal static class PaymentFlowTestScenarios
         r1.EnqueueCardReadOutcome(SuccessOutcome(cardNumber: "9999888877776666"));
         presenter.PinToFireSynchronously = pinB;
         var requestB = BuildRequest("902614", new Dictionary<int, string> { [29] = "2000" });
-        PosResponseTelegram responseB = await orchestrator.ProcessAsync(requestB).ConfigureAwait(false);
+        PosResponseTelegram responseB = (PosResponseTelegram)await orchestrator.ProcessAsync(requestB).ConfigureAwait(false);
         Check("연속거래 B: 응답 성공(#7=000)", responseB.Telegram.Read(7) == "000");
         byte[] rawBodyB = vanRelay.LastRequest!.Telegram.ToBody();
 
@@ -639,7 +655,7 @@ internal static class PaymentFlowTestScenarios
         presenter.PinToFireSynchronously = "1234".ToCharArray();
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000", [42] = ConfiguredKioskId });
-        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
         Check("902614(#42 일치): 응답 성공(#7=000)", response.Telegram.Read(7) == "000");
         Check("902614(#42 일치): 카드리딩이 정상적으로 시도됨", r1.CardReadCallCount > 0);
@@ -654,7 +670,7 @@ internal static class PaymentFlowTestScenarios
         r1.EnqueueCardReadOutcome(SuccessOutcome()); // 도달하면 안 되므로 호출되면 큐만 남는다(검증은 CallCount로).
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000", [42] = "DIFFERENTKIOSK0001" });
-        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
         Check("902614(#42 불일치): E06 거부", response.Telegram.Read(7) == "E06");
         Check("902614(#42 불일치): 카드 리딩을 시도하지 않음", r1.CardReadCallCount == 0);
@@ -671,7 +687,7 @@ internal static class PaymentFlowTestScenarios
             kioskId: ""); // 설정값 미입력(§2.3 기본값)
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000", [42] = "SOMEKIOSKID00000001" });
-        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
         Check("902614(설정값 빈 값): E06 거부", response.Telegram.Read(7) == "E06");
         Check("902614(설정값 빈 값): 카드 리딩을 시도하지 않음", r1.CardReadCallCount == 0);
@@ -689,7 +705,7 @@ internal static class PaymentFlowTestScenarios
         // autoFillKioskId: false — #42를 의도적으로 채우지 않는다(전체 space 패딩 -> Read가 빈
         // 문자열을 돌려줌).
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" }, autoFillKioskId: false);
-        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
         Check("902614(설정값 정상 + 수신값 빈 값): E06 거부(개선권장 4 loophole 수정 확인)", response.Telegram.Read(7) == "E06");
         Check("902614(설정값 정상 + 수신값 빈 값): 카드 리딩을 시도하지 않음", r1.CardReadCallCount == 0);
@@ -734,7 +750,7 @@ internal static class PaymentFlowTestScenarios
         presenter.PinToFireSynchronously = "1234".ToCharArray();
 
         var request = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        PosResponseTelegram response = await orchestrator.ProcessAsync(request).ConfigureAwait(false);
+        PosResponseTelegram response = (PosResponseTelegram)await orchestrator.ProcessAsync(request).ConfigureAwait(false);
 
         Check("Scenario19: 거래 자체는 정상 성공(#7=000, 전제 확인)", response.Telegram.Read(7) == "000");
 
@@ -782,7 +798,7 @@ internal static class PaymentFlowTestScenarios
         presenterS.PinToFireSynchronously = "9999".ToCharArray();
 
         var requestSuccess = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        PosResponseTelegram responseSuccess = await orchestratorSuccess.ProcessAsync(requestSuccess).ConfigureAwait(false);
+        PosResponseTelegram responseSuccess = (PosResponseTelegram)await orchestratorSuccess.ProcessAsync(requestSuccess).ConfigureAwait(false);
 
         Check("P26-1(성공): 응답 성공(#7=000, 전제조건)", responseSuccess.Telegram.Read(7) == "000");
         foreach (int fieldNumber in cardReadingFields)
@@ -827,7 +843,7 @@ internal static class PaymentFlowTestScenarios
         vanRelayF.SetNextOutcome(VanRelayOutcome.CommunicationFailure(VanFailureKind.CommunicationFailure, "P26-1 테스트용 통신 실패"));
 
         var requestFailure = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        PosResponseTelegram responseFailure = await orchestratorFailure.ProcessAsync(requestFailure).ConfigureAwait(false);
+        PosResponseTelegram responseFailure = (PosResponseTelegram)await orchestratorFailure.ProcessAsync(requestFailure).ConfigureAwait(false);
 
         Check("P26-1(실패): VAN 통신 실패 시 D02(전제조건)", responseFailure.Telegram.Read(7) == "D02");
         // 카드리딩+PIN이 실제로 채워진 뒤 실패했다는 전제 — vanRelayF에 도달한 요청(clone 대상)에
@@ -1017,7 +1033,7 @@ internal static class PaymentFlowTestScenarios
 
         // --- 1) 501008 — 카드리딩 없는 순수 중계. ---
         var noticeRequest = BuildRequest("501008", new Dictionary<int, string>());
-        PosResponseTelegram noticeResponse = await orchestrator.ProcessAsync(noticeRequest).ConfigureAwait(false);
+        PosResponseTelegram noticeResponse = (PosResponseTelegram)await orchestrator.ProcessAsync(noticeRequest).ConfigureAwait(false);
         Check("P26-2(배선): 501008 응답 성공(전제조건)", noticeResponse.Telegram.Read(7) == "000");
 
         LastTransactionResponseRecord? noticeRecord = lastTransactionResponseStore.TryLoad();
@@ -1033,7 +1049,7 @@ internal static class PaymentFlowTestScenarios
         // --- 2) 800000 — 카드리딩(BIN만) 후 중계. 이전 501008 기록을 덮어써야 한다(고정 키 upsert). ---
         r1.EnqueueCardReadOutcome(SuccessOutcome(cardNumber: "9412345678901234"));
         var cardInfoRequest = BuildRequest("800000", new Dictionary<int, string> { [15] = "1000" });
-        PosResponseTelegram cardInfoResponse = await orchestrator.ProcessAsync(cardInfoRequest).ConfigureAwait(false);
+        PosResponseTelegram cardInfoResponse = (PosResponseTelegram)await orchestrator.ProcessAsync(cardInfoRequest).ConfigureAwait(false);
         Check("P26-2(배선): 800000 응답 성공(전제조건)", cardInfoResponse.Telegram.Read(7) == "000");
 
         LastTransactionResponseRecord? cardInfoRecord = lastTransactionResponseStore.TryLoad();
@@ -1052,7 +1068,7 @@ internal static class PaymentFlowTestScenarios
         presenter.FirePinEnteredSynchronouslyOnChangeState = true;
         presenter.PinToFireSynchronously = "1234".ToCharArray();
         var approvalRequest = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
-        PosResponseTelegram approvalResponse = await orchestrator.ProcessAsync(approvalRequest).ConfigureAwait(false);
+        PosResponseTelegram approvalResponse = (PosResponseTelegram)await orchestrator.ProcessAsync(approvalRequest).ConfigureAwait(false);
         Check("P26-2(배선): 902614 응답 성공(전제조건)", approvalResponse.Telegram.Read(7) == "000");
 
         LastTransactionResponseRecord? approvalRecord = lastTransactionResponseStore.TryLoad();
@@ -1093,6 +1109,151 @@ internal static class PaymentFlowTestScenarios
         catch
         {
             // 테스트 정리 실패는 무시한다(임시 파일이라 다음 실행에 영향 없음).
+        }
+    }
+
+    /// <summary>
+    /// P26-4(PRD.md §3.4.5/§3.4.6/§3.4.7) — 정상 거래(902614) 처리 후 같은 <c>#9</c>로 조회하면 저장된
+    /// 원문을 바이트 단위로 그대로 되돌려주는지, 그 과정에서 부작용(카드 리딩/VAN 호출/알림창)이 전혀
+    /// 없는지, 반복 조회해도 결과와 저장소가 그대로인지 확인한다.
+    /// </summary>
+    private static async Task Scenario23_StatusInquiryMatchReturnsStoredResponseVerbatim()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
+        r1.EnqueueCardReadOutcome(SuccessOutcome(wcc: "I"));
+        presenter.FirePinEnteredSynchronouslyOnChangeState = true;
+        presenter.PinToFireSynchronously = "1357".ToCharArray();
+
+        var approvalRequest = BuildRequest("902614", new Dictionary<int, string> { [29] = "1000" });
+        var approvalResponse = (PosResponseTelegram)await orchestrator.ProcessAsync(approvalRequest).ConfigureAwait(false);
+        Check("P26-4: 사전 902614 거래 성공(전제조건)", approvalResponse.Telegram.Read(7) == "000");
+
+        string managementNumber = approvalRequest.Read(9);
+        byte[] originalBody = approvalResponse.Telegram.ToBody();
+
+        int cardReadCallsBefore = r1.CardReadCallCount;
+        int vanCallsBefore = vanRelay.CallCount;
+        int presenterShowsBefore = presenter.History.Count(h => h.StartsWith("Show:", StringComparison.Ordinal));
+
+        var inquiryResponse = (PosInquiryResponseTelegram)await orchestrator.ProcessAsync(BuildInquiryRequest(managementNumber)).ConfigureAwait(false);
+
+        Check("P26-4: 조회 응답 #7 = 원거래 #7(000) relay", inquiryResponse.Read(7) == "000");
+        Check("P26-4: 조회 응답 #9 = 요청과 동일(echo)", inquiryResponse.Read(9) == managementNumber);
+        Check("P26-4: 조회 응답 개별부 #14(원거래구분) = 902614", inquiryResponse.Read(14) == "902614");
+        Check("P26-4: 조회 응답 개별부 #15(원거래 응답 길이) = 1500", inquiryResponse.Read(15) == "1500");
+        Check("P26-4: 조회 응답 꼬리가 원거래 응답과 바이트 단위로 완전히 동일",
+            inquiryResponse.Tail != null && inquiryResponse.Tail.SequenceEqual(originalBody));
+
+        byte[] frame = inquiryResponse.ToFrame();
+        string outerLengthHeader = System.Text.Encoding.ASCII.GetString(frame, 0, 4);
+        Check("P26-4: 바깥 프레임 길이 헤더 = 1580(80+1500)", outerLengthHeader == "1580");
+        Check("P26-4: 꼬리 길이(원거래 자신의 총 길이) 1500 — 바깥 길이(1580)와 서로 다름(§3.4.5 주의 문단)",
+            inquiryResponse.Tail != null && inquiryResponse.Tail.Length == 1500 && inquiryResponse.Tail.Length != 1580);
+        Check("P26-4: 프레임 전체 바이트 수 = 4(길이헤더)+1580(본문) = 1584", frame.Length == 1584);
+
+        Check("P26-4: 조회 처리 중 카드 리딩 호출 0회(부작용 없음)", r1.CardReadCallCount == cardReadCallsBefore);
+        Check("P26-4: 조회 처리 중 VAN 호출 0회(부작용 없음)", vanRelay.CallCount == vanCallsBefore);
+        Check("P26-4: 조회 처리 중 알림창 Show 0회(부작용 없음)",
+            presenter.History.Count(h => h.StartsWith("Show:", StringComparison.Ordinal)) == presenterShowsBefore);
+
+        LastTransactionResponseRecord? recordAfter = lastTransactionResponseStore.TryLoad();
+        Check("P26-4: 조회 후에도 저장소가 원거래(902614) 그대로 유지됨(조회가 덮어쓰지 않음)",
+            recordAfter != null && recordAfter.TransactionTypeCode == "902614" && recordAfter.ManagementNumber == managementNumber);
+
+        // 같은 조회를 반복해도(연속 3회 — 이번 1회 + 아래 2회) 매번 같은 결과가 나오고 저장소가
+        // 바뀌지 않아야 한다(PRD.md §3.4.7 "조회는 반복 가능", P26-4 완료 조건).
+        var inquiryResponse2 = (PosInquiryResponseTelegram)await orchestrator.ProcessAsync(BuildInquiryRequest(managementNumber)).ConfigureAwait(false);
+        Check("P26-4: 같은 조회를 2번째 반복해도 동일한 꼬리 바이트",
+            inquiryResponse2.Tail != null && inquiryResponse2.Tail.SequenceEqual(originalBody));
+
+        var inquiryResponse3 = (PosInquiryResponseTelegram)await orchestrator.ProcessAsync(BuildInquiryRequest(managementNumber)).ConfigureAwait(false);
+        Check("P26-4: 같은 조회를 3번째 반복해도 동일한 꼬리 바이트",
+            inquiryResponse3.Tail != null && inquiryResponse3.Tail.SequenceEqual(originalBody));
+
+        LastTransactionResponseRecord? recordAfterRepeats = lastTransactionResponseStore.TryLoad();
+        Check("P26-4: 반복 조회 후에도 저장소 값이 그대로(관리번호 동일, 조회가 덮어쓰지 않음)",
+            recordAfterRepeats != null && recordAfterRepeats.ManagementNumber == managementNumber);
+        Check("P26-4: 반복 조회 중에도 카드 리딩/VAN 호출이 늘지 않음",
+            r1.CardReadCallCount == cardReadCallsBefore && vanRelay.CallCount == vanCallsBefore);
+    }
+
+    /// <summary>
+    /// P26-4(PRD.md §3.4.5/§3.4.6) — 기록이 아예 없을 때와 <c>#9</c>가 불일치할 때 둘 다 <c>E07</c>로
+    /// 응답하고, 개별부가 <c>000000</c>/<c>0000</c>으로 채워지며 본문 어디에도 <c>0x00</c>이 없는지
+    /// 확인한다. 불일치 케이스에서는 저장소가 그 조회 때문에 바뀌지 않는지도 함께 확인한다.
+    /// </summary>
+    private static async Task Scenario24_StatusInquiryNoMatchYieldsE07()
+    {
+        var orchestrator = BuildOrchestrator(out var r1, out var r2, out var presenter, out var gate, out var vanRelay, out var lastTransactionResponseStore);
+
+        // --- Case A: 기록이 아예 없음(첫 실행 상태) ---
+        var noRecordResponse = (PosInquiryResponseTelegram)await orchestrator.ProcessAsync(BuildInquiryRequest("0EC0NORECORD")).ConfigureAwait(false);
+        Check("P26-4(기록 없음): #7 = E07", noRecordResponse.Read(7) == "E07");
+        Check("P26-4(기록 없음): 개별부 #14 = 000000", noRecordResponse.Read(14) == "000000");
+        Check("P26-4(기록 없음): 개별부 #15 = 0000", noRecordResponse.Read(15) == "0000");
+        Check("P26-4(기록 없음): 꼬리 없음(0바이트, 아예 붙이지 않음)", noRecordResponse.Tail == null);
+
+        byte[] noRecordBody = noRecordResponse.BodyForLog();
+        Check("P26-4(기록 없음): 본문 정확히 80바이트", noRecordBody.Length == 80);
+        Check("P26-4(기록 없음): 본문 어디에도 0x00 없음", Array.IndexOf(noRecordBody, (byte)0x00) < 0);
+
+        byte[] noRecordFrame = noRecordResponse.ToFrame();
+        Check("P26-4(기록 없음): 프레임(길이헤더 포함) 어디에도 0x00 없음", Array.IndexOf(noRecordFrame, (byte)0x00) < 0);
+        Check("P26-4(기록 없음): 프레임 길이 = 4+80 = 84", noRecordFrame.Length == 84);
+
+        // --- Case B: 기록은 있지만 #9가 불일치 ---
+        r1.EnqueueCardReadOutcome(SuccessOutcome(cardNumber: "9412345678901234"));
+        var cardInfoRequest = BuildRequest("800000", new Dictionary<int, string> { [15] = "1000" });
+        var cardInfoResponse = (PosResponseTelegram)await orchestrator.ProcessAsync(cardInfoRequest).ConfigureAwait(false);
+        Check("P26-4(불일치 전제조건): 800000 거래 성공", cardInfoResponse.Telegram.Read(7) == "000");
+
+        var mismatchResponse = (PosInquiryResponseTelegram)await orchestrator.ProcessAsync(BuildInquiryRequest("0ECMISMATCH1")).ConfigureAwait(false);
+        Check("P26-4(#9 불일치): #7 = E07", mismatchResponse.Read(7) == "E07");
+        Check("P26-4(#9 불일치): 개별부 000000/0000", mismatchResponse.Read(14) == "000000" && mismatchResponse.Read(15) == "0000");
+        Check("P26-4(#9 불일치): 꼬리 없음", mismatchResponse.Tail == null);
+        Check("P26-4(#9 불일치): 본문 어디에도 0x00 없음", Array.IndexOf(mismatchResponse.BodyForLog(), (byte)0x00) < 0);
+
+        LastTransactionResponseRecord? recordUnaffected = lastTransactionResponseStore.TryLoad();
+        Check("P26-4(#9 불일치): 저장소는 800000 거래 그대로(조회가 바꾸지 않음)",
+            recordUnaffected != null && recordUnaffected.TransactionTypeCode == "800000");
+    }
+
+    /// <summary>P26-4 완료 조건 — <c>Services/Payment/</c> 안에 "E07" 리터럴이
+    /// <c>PosResultCodeMapper</c> 한 곳에만 있는지 코드 자체를 스캔해 확인한다(develpment_plan.md
+    /// P15-3/P17-4가 이미 확립한 grep 검증을 시나리오로도 재현 — 사람이 매번 grep을 다시 돌리지
+    /// 않아도 회귀를 잡는다).</summary>
+    private static void Scenario25_NoE07LiteralOutsidePosResultCodeMapper()
+    {
+        try
+        {
+            string paymentServicesDir = Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "Services", "Payment");
+            paymentServicesDir = Path.GetFullPath(paymentServicesDir);
+
+            if (!Directory.Exists(paymentServicesDir))
+            {
+                // 배포/실행 환경에 따라 소스 트리가 없을 수 있다(빌드 산출물만 있는 실행 위치) — 이
+                // 경우 검증 자체를 건너뛴다(실패로 치지 않는다, 소스가 없으니 판단 불가).
+                FileLogger.Info("[payment-flow-test][SKIP] P26-4: \"E07\" 리터럴 검사 — 소스 디렉터리를 찾을 수 없어 건너뜀");
+                return;
+            }
+
+            var offendingFiles = new List<string>();
+            foreach (string file in Directory.GetFiles(paymentServicesDir, "*.cs", SearchOption.TopDirectoryOnly))
+            {
+                if (Path.GetFileName(file) == "PosResultCodeMapper.cs")
+                    continue;
+
+                if (File.ReadAllText(file).IndexOf("\"E07\"", StringComparison.Ordinal) >= 0)
+                    offendingFiles.Add(Path.GetFileName(file));
+            }
+
+            Check("P26-4: Services/Payment/의 PosResultCodeMapper.cs 외에는 \"E07\" 리터럴이 없음",
+                offendingFiles.Count == 0);
+        }
+        catch (Exception ex)
+        {
+            Check($"P26-4: \"E07\" 리터럴 검사 실행 중 예상치 못한 예외 없음({ex.GetType().Name}: {ex.Message})", false);
         }
     }
 }

@@ -27,9 +27,12 @@ internal static class PosCommonHeader
     /// </summary>
     internal static IEnumerable<PosField> Create(CommonHeaderNameVariant nameVariant, PosFieldOwner[] owners)
     {
-        string[] names = nameVariant == CommonHeaderNameVariant.NoticeInquiry501008
-            ? Names501008
-            : NamesShared800000And902614;
+        string[] names = nameVariant switch
+        {
+            CommonHeaderNameVariant.NoticeInquiry501008 => Names501008,
+            CommonHeaderNameVariant.TransactionStatusInquiry => NamesTransactionStatusInquiry,
+            _ => NamesShared800000And902614,
+        };
 
         var lengths = new (PosFieldType Type, int Length)[]
         {
@@ -75,10 +78,22 @@ internal static class PosCommonHeader
         "송·수신 FLAG", "응답 코드", "전송 일시", "은행/센터 전문 관리 번호", "이용기관/센터 전문 관리 번호",
         "이용기관 발행기관 분류코드", "이용기관 지로 번호", "FILLER(응답 코드 구분)",
     };
+
+    /// <summary>Phase 26(PRD.md §3.4) — 거래 상태 조회 전문 전용. SPEC 원문에 없는 신규 전문이라
+    /// 이름 표기는 기존 두 변형의 어투를 따라 새로 짓는다(<c>TransactionStatusInquirySchema</c> 참고).</summary>
+    private static readonly string[] NamesTransactionStatusInquiry =
+    {
+        "전문 길이", "업무 구분", "요청기관 코드", "전문 종별 코드", "거래 구분 코드", "상태 코드",
+        "송·수신 FLAG", "응답 코드", "전송 일시", "요청기관 전문 관리 번호", "이용기관/센터 전문 관리 번호",
+        "지로 이용기관 분류코드", "지로 이용기관 지로번호", "FILLER",
+    };
 }
 
 internal enum CommonHeaderNameVariant
 {
     NoticeInquiry501008,
     Shared800000And902614,
+
+    /// <summary>Phase 26(PRD.md §3.4) — 거래 상태 조회 전문(신규).</summary>
+    TransactionStatusInquiry,
 }

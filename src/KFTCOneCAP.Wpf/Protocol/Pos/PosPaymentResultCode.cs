@@ -56,4 +56,10 @@ internal enum PosPaymentResultCode
     /// <summary>그 외 처리 중 예외 — 워커 최상위 try/catch의 안전판(PRD §9, Phase 14 P14-3부터 있던
     /// 폴백과 같은 값).</summary>
     InternalError,
+
+    /// <summary>Phase 26(PRD.md §3.4.5/§3.4.6, P26-4) — 거래 상태 조회 결과가 없음: 저장된 직전 거래의
+    /// <c>#9</c>와 조회 요청의 <c>#9</c>가 불일치하거나, 저장된 기록 자체가 없다(원캡이 <c>FNAISCRDVAN</c>
+    /// 호출 도중 비정상 종료돼 결과를 저장하지 못한 경우 등). 두 경우를 같은 코드로 묶는다 — POS
+    /// 입장에서 둘 다 "모른다"로 동일하게 처리한다.</summary>
+    InquiryNoMatchingTransaction,
 }

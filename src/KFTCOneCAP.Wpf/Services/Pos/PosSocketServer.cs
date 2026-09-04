@@ -343,7 +343,7 @@ internal sealed class PosSocketServer
     /// 넘기면(H-1, 2026-08-24 Opus 검증 리뷰) 응답을 폐기하고 로그만 남긴다 — 예외를 워커 쪽으로
     /// 던지지 않는다.
     /// </summary>
-    private static void SendResponse(PosResponseTelegram response, NetworkStream stream, object writeLock, string remote)
+    private static void SendResponse(IPosOutboundResponse response, NetworkStream stream, object writeLock, string remote)
     {
         byte[] frame;
         try
@@ -355,7 +355,7 @@ internal sealed class PosSocketServer
             FileLogger.Error(LogCategory.Pos, $"[PosSocketServer] 응답 직렬화 실패: {ex}");
             // Phase 25 P25-6 — 직렬화 실패로 이 응답을 포기하는 경로도 거래 종료다. 여기서 반환하면
             // 아래 정상 경로의 ClearBody()를 지나치므로 이 조기 return 앞에서 지운다.
-            response.Telegram.ClearBody();
+            response.ClearBody();
             return;
         }
 
@@ -366,13 +366,14 @@ internal sealed class PosSocketServer
         string resultCode = response.Read(ResultCodeFieldNumber);
         // 사용자 요청(2026-09-01) — 요청 로그와 동일 원칙(TelegramLogRedactor).
         //
-        // Phase 25 P25-5(PRD.md §4.2 #9) — 위 요청 로그와 같은 이유로 ToBody() 복사본을 즉시 지운다.
-        // response.Telegram 자신의 원본 _body(#7)와는 다른 배열이다.
-        byte[] responseBodyForLog = response.Telegram.ToBody();
+        // Phase 25 P25-5(PRD.md §4.2 #9) — 위 요청 로그와 같은 이유로 BodyForLog() 복사본을 즉시
+        // 지운다. response 원본 버퍼(#7)와는 다른 배열이다(P26-4 — IPosOutboundResponse.BodyForLog로
+        // 일반화, PosResponseTelegram/PosInquiryResponseTelegram 둘 다 같은 계약).
+        byte[] responseBodyForLog = response.BodyForLog();
         string redactedResponseBody;
         try
         {
-            redactedResponseBody = TelegramLogRedactor.Redact(response.Telegram.Schema.TransactionTypeCode, responseBodyForLog);
+            redactedResponseBody = TelegramLogRedactor.Redact(response.RedactionTransactionTypeCode, responseBodyForLog);
         }
         finally
         {
@@ -388,16 +389,17 @@ internal sealed class PosSocketServer
         {
             // Phase 25 P25-5(PRD.md §4.2 #13) — 송신 frame(길이 헤더 + ToFrame()의 body 복사본).
             // WriteFrame은 동기 stream.Write 한 번으로 끝나므로, 반환 시점엔 이미 이 배열이 필요
-            // 없다. frame은 response.Telegram의 원본 _body(#7)와도 다른 배열(ToFrame 내부에서 새로
-            // 만듦)이라 여기서 지워도 아래 #7 클리어와 겹치지 않는다.
+            // 없다. frame은 response 원본 버퍼(#7)와도 다른 배열(ToFrame 내부에서 새로 만듦)이라
+            // 여기서 지워도 아래 클리어와 겹치지 않는다.
             SecureClear.Clear(frame);
         }
 
-        // Phase 25 P25-6(PRD.md §4.2 #7, 응답 쪽) — response.Telegram의 원본 _body는 위 ToBody()/
-        // ToFrame() 복사본들과 별개로 아직 살아 있다. 프레임을 실제로 쓴(성공/실패 무관, try/finally로
-        // 이미 처리됨) 뒤인 지금이 "송신이 끝난 뒤"(§4.3.3)다 — 이 이후로 이 응답 객체를 다시 읽는
-        // 코드는 없다(WriteFrame이 이 메서드의 마지막 소비 지점).
-        response.Telegram.ClearBody();
+        // Phase 25 P25-6(PRD.md §4.2 #7, 응답 쪽) — response 원본 버퍼는 위 BodyForLog()/ToFrame()
+        // 복사본들과 별개로 아직 살아 있다. 프레임을 실제로 쓴(성공/실패 무관, try/finally로 이미
+        // 처리됨) 뒤인 지금이 "송신이 끝난 뒤"(§4.3.3)다 — 이 이후로 이 응답 객체를 다시 읽는 코드는
+        // 없다(WriteFrame이 이 메서드의 마지막 소비 지점). P26-4 — IPosOutboundResponse.ClearBody()로
+        // 일반화(PosResponseTelegram.ClearBody()/PosInquiryResponseTelegram.ClearBody() 둘 다 위임).
+        response.ClearBody();
     }
 
     /// <summary>완성된 프레임(길이 헤더 포함)을 소켓에 쓰는 공통 지점 — 정상 응답과 P17-3의 프로토콜

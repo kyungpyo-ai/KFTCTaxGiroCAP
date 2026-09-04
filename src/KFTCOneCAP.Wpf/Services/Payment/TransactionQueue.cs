@@ -26,7 +26,7 @@ namespace KFTCOneCAP.Wpf.Services.Payment;
 internal sealed class TransactionQueue
 {
     private readonly BlockingCollection<TransactionWorkItem> _queue = new();
-    private readonly Func<PosRequestTelegram, Task<PosResponseTelegram>> _processor;
+    private readonly Func<PosRequestTelegram, Task<IPosOutboundResponse>> _processor;
     private readonly Thread _workerThread;
 
     /// <summary>지금 워커가 거래를 처리 중인가(Phase 16, P16-5) — <c>HomeWindow</c>가 "거래 진행 중
@@ -35,7 +35,7 @@ internal sealed class TransactionQueue
 
     private volatile bool _isProcessing;
 
-    internal TransactionQueue(Func<PosRequestTelegram, Task<PosResponseTelegram>> processor)
+    internal TransactionQueue(Func<PosRequestTelegram, Task<IPosOutboundResponse>> processor)
     {
         _processor = processor;
         _workerThread = new Thread(WorkerLoop) { IsBackground = true, Name = "PaymentTransactionWorker" };
@@ -46,7 +46,7 @@ internal sealed class TransactionQueue
     /// 요청을 큐에 넣는다. 처리 결과(정상/예외 둘 다)는 워커 스레드에서 <paramref name="onCompleted"/>로
     /// 통지된다 — 그 요청이 들어온 소켓 연결로 회신하는 책임은 호출자(<c>PosSocketServer</c>)에 있다.
     /// </summary>
-    internal void Enqueue(PosRequestTelegram request, Action<PosResponseTelegram> onCompleted)
+    internal void Enqueue(PosRequestTelegram request, Action<IPosOutboundResponse> onCompleted)
     {
         _queue.Add(new TransactionWorkItem(request, onCompleted));
     }
@@ -69,7 +69,7 @@ internal sealed class TransactionQueue
             {
                 FileLogger.Info($"[TransactionQueue] 처리 시작 전문={txType}");
                 // 이 앱에서 처리 Task를 동기적으로 기다리는 유일한 지점(P15-1) — 클래스 주석 참고.
-                PosResponseTelegram response = _processor(item.Request).GetAwaiter().GetResult();
+                IPosOutboundResponse response = _processor(item.Request).GetAwaiter().GetResult();
                 FileLogger.Info($"[TransactionQueue] 처리 종료 전문={txType}");
                 InvokeCompletedSafely(item, response);
             }
@@ -78,7 +78,7 @@ internal sealed class TransactionQueue
                 FileLogger.Error($"[TransactionQueue] 처리 중 예외 전문={txType}: {ex}");
                 // 결과코드 리터럴을 직접 쓰지 않고 PosResultCodeMapper를 거친다(P15-3/P17-4 — Flow/큐
                 // 어디에도 전문 코드 문자열이 등장하지 않아야 한다).
-                PosResponseTelegram fallback = PosResponseTelegram.Failure(
+                IPosOutboundResponse fallback = PosResponseTelegram.Failure(
                     item.Request, PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.InternalError));
                 InvokeCompletedSafely(item, fallback);
             }
@@ -103,7 +103,7 @@ internal sealed class TransactionQueue
     /// onCompleted(회신 콜백) 자체가 던지는 예외까지 워커 밖으로 새면 다음 큐 항목을 영영 못 받는다
     /// — 이 메서드가 그 마지막 안전판이다.
     /// </summary>
-    private static void InvokeCompletedSafely(TransactionWorkItem item, PosResponseTelegram response)
+    private static void InvokeCompletedSafely(TransactionWorkItem item, IPosOutboundResponse response)
     {
         try
         {
@@ -117,7 +117,7 @@ internal sealed class TransactionQueue
 
     private sealed class TransactionWorkItem
     {
-        internal TransactionWorkItem(PosRequestTelegram request, Action<PosResponseTelegram> onCompleted)
+        internal TransactionWorkItem(PosRequestTelegram request, Action<IPosOutboundResponse> onCompleted)
         {
             Request = request;
             OnCompleted = onCompleted;
@@ -125,6 +125,6 @@ internal sealed class TransactionQueue
 
         internal PosRequestTelegram Request { get; }
 
-        internal Action<PosResponseTelegram> OnCompleted { get; }
+        internal Action<IPosOutboundResponse> OnCompleted { get; }
     }
 }

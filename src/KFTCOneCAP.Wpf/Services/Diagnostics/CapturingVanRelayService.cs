@@ -25,12 +25,17 @@ internal sealed class CapturingVanRelayService : IVanRelayService
     /// 전용 클래스로 계승).</summary>
     internal PosRequestTelegram? LastRequest { get; private set; }
 
+    /// <summary>Phase 26(P26-4) — 거래 상태 조회가 VAN을 전혀 호출하지 않는지 확인하는 용도(PRD.md
+    /// §3.4.7 "카드 리딩·VAN 호출·알림창을 일절 하지 않는다").</summary>
+    internal int CallCount { get; private set; }
+
     /// <summary>다음 호출이 반환할 결과를 미리 지정한다(검증 하네스 전용). <see cref="StubVanRelayService.SetNextOutcome"/>
     /// 로 그대로 위임한다.</summary>
     internal void SetNextOutcome(VanRelayOutcome outcome) => _inner.SetNextOutcome(outcome);
 
     public async Task<VanRelayOutcome> RelayAsync(PosRequestTelegram populatedRequest)
     {
+        CallCount++;
         LastRequest = populatedRequest;
         return await _inner.RelayAsync(populatedRequest).ConfigureAwait(false);
     }
