@@ -29,12 +29,19 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 /// docs/operations/development_plan.md의 "P22-6부속" 절과 docs/operations/PRD.md §1.4 참고. PIN 암호화
 /// 작업(SEED)이 착수될 때 이 클래스도 함께 재검토해야 한다.
 ///
-/// 최종 마스킹 대상(1곳, 902614 전용):
+/// 최종 마스킹 대상(3곳, 모두 902614 전용):
 /// <list type="bullet">
-/// <item><c>#46</c>(암호화된 카드정보, POSITION 407, 길이 196) — 부분 마스킹(앞 6바이트만 남김, 사용자
-///   확정). <b>단, 구간이 전부 space(카드리딩 전 스텁 등 아직 값이 채워지지 않은 상태)면 마스킹하지
-///   않고 원문(공백) 그대로 남긴다</b>(2026-09-01 사용자 지적 — 값이 없는데도 마스킹 처리되어 혼란을
-///   줬다).</item>
+/// <item><c>#46</c>(암호화된 카드정보, POSITION 407, 길이 196) — 부분 마스킹(앞 6바이트만 남기고 나머지
+///   전부 <c>*</c>, 사용자 확정). <b>단, 구간이 전부 space(카드리딩 전 스텁 등 아직 값이 채워지지 않은
+///   상태)면 마스킹하지 않고 원문(공백) 그대로 남긴다</b>(2026-09-01 사용자 지적 — 값이 없는데도 마스킹
+///   처리되어 혼란을 줬다).</item>
+/// <item><c>#14</c>(주민/사업자/법인등록번호, POSITION 70, 길이 13)와 <c>#36</c>(납부자 주민/사업자등록번호,
+///   POSITION 296, 길이 13) — 2026-09-14 CP2(Opus) 리뷰 지적("범용 패턴 마스킹 제거 후 이 두 필드가
+///   평문으로 남는다") + 사용자 결정으로 신규 추가. 카드번호가 아니라 고유식별정보지만, 삭제된
+///   <c>LogMessageMasker</c>가 13~19자리 카드번호에 쓰던 방식("앞6+뒤4 노출, 가운데만 <c>*</c>")을 그대로
+///   재사용하기로 사용자가 확정했다 — 13자리 기준 앞 6바이트(생년월일/사업자 앞자리)와 뒤 4바이트를
+///   그대로 남기고 가운데 3바이트만 <c>*</c>로 채운다. <c>#46</c>과 마찬가지로 구간이 전부 space면
+///   마스킹하지 않는다.</item>
 /// </list>
 /// 나머지 필드(902614 <c>#43/#44/#45/#48/#50/#51/#53</c>, 800000 <c>#14</c>)는 원문 그대로 남긴다.
 /// 501008은 원캡이 채우는 필드가 없어(카드 데이터 자체가 없는 전문) 이 유틸의 대상이 아니다.
@@ -43,16 +50,29 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 /// 와 정확히 일치할 때만 위치 기반 마스킹을 적용한다 — <see cref="PosTelegramSchema"/> 생성자의 자체
 /// 검증(POSITION 연속성)이 이미 보장하듯, 필드 POSITION은 "선언된 길이의 전문"에서만 신뢰할 수 있다.
 /// 전문 종류를 식별할 수 없거나(<c>PosSchemaRegistry.TryResolve</c> 실패) 길이가 어긋나면(기형 전문)
-/// 위치 기반 마스킹을 포기하고 원문을 그대로 돌려준다 — 이 경우에도 호출부가 최종적으로 거치는
-/// <see cref="FileLogger.Info(LogCategory, string, string?, string?)"/> 파이프라인이 모든 메시지에
-/// <see cref="LogMessageMasker.Mask"/>를 단일 지점에서 자동으로 한 번 더 적용하므로(13~19자리 숫자·
-/// 트랙 데이터 패턴), 최소한의 방어는 항상 걸린다 — 이 클래스가 범용 마스킹을 직접 호출할 필요는 없다.
-/// 이 폴백 경로는 <c>PaymentFlowTestScenarios</c>의 기형 전문 시나리오(902614, 길이를 일부러 어긋나게
-/// 만든 본문)로 실제 실행 검증까지 마쳤다 — 위치 기반 마스킹을 시도하지 않고 원문을 그대로 돌려주는지,
-/// 그 원문이 이후 <see cref="LogMessageMasker.Mask"/>를 거치는지를 확인한다. 902614가 애초에 길이
-/// 검증을 통과하지 못하면(E40) 요청 자체가 실패 처리되어 VAN까지 가지 않으므로(<see
-/// cref="PosRequestTelegram.Parse"/>), 이 폴백은 실제 운영에서는 로그 유틸이 직접 호출될 때만(가짜
-/// 전문 주입 등) 드물게 닿는 경로다.
+/// 위치 기반 마스킹을 포기하고 원문을 그대로 돌려준다.
+///
+/// <b>Phase 27(P27-6) 전수 확인</b> — <see cref="Redact"/>가 원문을 그대로 돌려주는 분기는 셋이다.
+/// ①스키마 미상(<c>TryResolve</c> 실패), ②길이 불일치(기형 전문), ③마스킹 대상 필드 자체가 없거나
+/// (501008/800000) 값이 아직 채워지지 않음(902614이지만 #46이 전부 space) — 이 중 ③이 정상 흐름의
+/// 절대다수다. ①②는 실제 운영에서 다음과 같이 각각 막힌다.
+/// <list type="bullet">
+/// <item>요청 경로(<c>PosSocketServer</c> 요청 수신 로그, <c>VanService.RelayAsync</c>): <see
+/// cref="PosRequestTelegram.Parse"/>가 스키마 미상이면 <c>E41</c>, 길이 불일치면 <c>E40</c>으로 그
+/// 프레임을 즉시 실패 응답 처리한다 — <c>Redact</c>까지 도달하는 요청은 이미 스키마가 확정되고 길이도
+/// 스키마와 일치하는 것만 남는다.</item>
+/// <item>VAN 응답 경로(<see cref="Services.Van.VanService.RelayAsync"/>): 응답 본문을 <c>bodyLength =
+/// populatedRequest.Schema.TotalLength</c> 크기로 직접 잘라 만들므로(요청과 같은 거래 구분 코드를
+/// 그대로 쓴다) 스키마·길이 둘 다 항상 일치한다.</item>
+/// <item>POS 응답 경로(<c>PosSocketServer.SendResponse</c>, <see cref="IPosOutboundResponse.
+/// RedactionTransactionTypeCode"/>): 고정 스키마 응답(<c>PosResponseTelegram</c>)은 위 VAN 응답과
+/// 같은 이유로 항상 일치한다. ②에 실제로 도달하는 유일한 경로는 <b>거래상태조회 응답</b>
+/// (<see cref="PosInquiryResponseTelegram"/>, 고정부 80바이트 + 가변 꼬리)이다 — 이 응답은 요청
+/// 스키마("999999", 70바이트)의 코드를 그대로 재사용하면서 실제 본문은 80바이트+꼬리라 길이가 항상
+/// 어긋나 매번 원문 그대로 로그에 남는다. 다만 그 꼬리는 <c>PosResponseTelegram.
+/// ClearCardReadingFields</c>(P26-1)가 이미 카드리딩·PIN 필드를 지운 뒤의 원거래 응답 바이트라
+/// 안전하다.</item>
+/// </list>
 ///
 /// <b>바이트 단위로만 자른다</b>: SPEC 필드는 바이트 오프셋(<see cref="PosField.Position"/>)이지,
 /// 문자(char) 오프셋이 아니다. CP949는 한글이 2바이트라 본문을 문자열로 통째로 디코딩한 뒤 그 위에서
@@ -66,12 +86,28 @@ internal static class TelegramLogRedactor
     /// <summary>SPEC #46 "암호화된 카드정보"(902614) — 부분 마스킹 대상(클래스 요약 참고).</summary>
     private const int EncryptedCardDataFieldNumber = 46;
 
-    /// <summary>#46에서 가운데를 <c>*</c>로 채우기 전 앞에 남기는 바이트 수. #46은 어차피 암호문
-    /// (사람이 읽을 값이 아니다)이라, "필드가 실제로 채워졌는지/형식이 대략 맞는지"를 눈으로 식별할 수
-    /// 있는 최소한만 남긴다 — <see cref="LogMessageMasker"/>의 카드번호 마스킹("앞6+뒤4")과 같은
-    /// 감각이되, 뒤쪽은 남길 실익이 없어(사용자 확정 2026-09-01) 앞 6바이트만 남긴다.
+    /// <summary>#46에서 앞에 남기는 바이트 수(뒤쪽은 전부 <c>*</c>). #46은 어차피 암호문(사람이 읽을
+    /// 값이 아니다)이라, "필드가 실제로 채워졌는지/형식이 대략 맞는지"를 눈으로 식별할 수 있는 최소한만
+    /// 남긴다 — 뒤쪽은 남길 실익이 없어(사용자 확정 2026-09-01) 앞 6바이트만 남기고 나머지는 전부
+    /// 마스킹한다(<see cref="CardDataVisibleSuffixLength"/> = 0).
     /// </summary>
     private const int CardDataVisiblePrefixLength = 6;
+
+    /// <summary>#46은 뒤쪽을 남길 실익이 없어 뒤쪽 노출 바이트 수는 0(전부 <c>*</c>).</summary>
+    private const int CardDataVisibleSuffixLength = 0;
+
+    /// <summary>SPEC #14 "주민(사업자,법인)등록번호"(902614) — 부분 마스킹 대상(클래스 요약 참고).</summary>
+    private const int PayerRegistrationNumberFieldNumber14 = 14;
+
+    /// <summary>SPEC #36 "납부자 주민(사업자)등록번호"(902614) — 부분 마스킹 대상(클래스 요약 참고).</summary>
+    private const int PayerRegistrationNumberFieldNumber36 = 36;
+
+    /// <summary>#14/#36(13자리 등록번호)에서 앞뒤로 남기는 바이트 수 — 삭제된 <c>LogMessageMasker</c>가
+    /// 13~19자리 카드번호에 쓰던 "앞6+뒤4 노출, 가운데만 <c>*</c>" 방식을 그대로 재사용한다(2026-09-14
+    /// 사용자 확정). 13자리 기준 가운데 3바이트(7~9번째)만 <c>*</c>로 채워진다.</summary>
+    private const int RegistrationNumberVisiblePrefixLength = 6;
+
+    private const int RegistrationNumberVisibleSuffixLength = 4;
 
     /// <summary>
     /// 전문 본문(길이 헤더 제외, <see cref="PosTelegram.ToBody"/> 결과)을 로그에 남길 수 있는 형태로
@@ -88,7 +124,7 @@ internal static class TelegramLogRedactor
 
         // POSITION 순으로 마스킹 구간을 모은다 — 이 전문 종류에 해당 필드 자체가 없으면(501008/800000)
         // 자연히 빈 목록이 되어 원문 그대로 남는다.
-        var ranges = new List<(int Position, int Length, int VisiblePrefix)>();
+        var ranges = new List<(int Position, int Length, int VisiblePrefix, int VisibleSuffix)>();
 
         // 사용자 지적(2026-09-01) — #46이 아직 채워지지 않아 순수 공백(전체 space)인 경우까지
         // 무조건 마스킹하면(앞 6바이트 노출 + 나머지 '*') 공백이 사실상 "* 범벅"으로 표시돼 혼란을
@@ -98,17 +134,38 @@ internal static class TelegramLogRedactor
         if (TryGetField(schema, EncryptedCardDataFieldNumber, out PosField? cardField)
             && !IsAllSpaces(body, cardField!.Position, cardField.Length))
         {
-            ranges.Add((cardField.Position, cardField.Length, CardDataVisiblePrefixLength));
+            ranges.Add((cardField.Position, cardField.Length, CardDataVisiblePrefixLength, CardDataVisibleSuffixLength));
         }
 
         // #51(암호화된 비밀번호 정보)은 2026-09-01 사용자 확정으로 마스킹하지 않는다(클래스 요약의
         // "2026-09-01 재확정" 절 참고) — SEED 암호화 전까지는 이 로그에 평문 PIN이 그대로 남는다.
+
+        // #14/#36(13자리 등록번호) — 2026-09-14 CP2 리뷰 지적 + 사용자 결정으로 추가(클래스 요약 참고).
+        // #46과 동일하게 "전부 space면 마스킹하지 않는다" 예외를 적용한다.
+        AddRegistrationNumberRangeIfPresent(schema, body, PayerRegistrationNumberFieldNumber14, ranges);
+        AddRegistrationNumberRangeIfPresent(schema, body, PayerRegistrationNumberFieldNumber36, ranges);
 
         if (ranges.Count == 0)
             return DecodeWhole(body);
 
         ranges.Sort((a, b) => a.Position.CompareTo(b.Position));
         return BuildMaskedText(body, ranges);
+    }
+
+    /// <summary>#14/#36 공통 처리 — 필드가 존재하고(스키마에 따라 없을 수 있음) 값이 전부 space가
+    /// 아닐 때만 마스킹 구간에 추가한다(<see cref="EncryptedCardDataFieldNumber"/> 처리와 동일한
+    /// 패턴).</summary>
+    private static void AddRegistrationNumberRangeIfPresent(
+        PosTelegramSchema schema,
+        byte[] body,
+        int fieldNumber,
+        List<(int Position, int Length, int VisiblePrefix, int VisibleSuffix)> ranges)
+    {
+        if (TryGetField(schema, fieldNumber, out PosField? field)
+            && !IsAllSpaces(body, field!.Position, field.Length))
+        {
+            ranges.Add((field.Position, field.Length, RegistrationNumberVisiblePrefixLength, RegistrationNumberVisibleSuffixLength));
+        }
     }
 
     private static bool TryGetField(PosTelegramSchema schema, int fieldNumber, out PosField? field)
@@ -133,26 +190,33 @@ internal static class TelegramLogRedactor
         return true;
     }
 
-    /// <summary>마스킹 구간 사이사이의 원문 구간과 마스킹 구간(앞 <c>VisiblePrefix</c>바이트만 원문,
-    /// 나머지 <c>*</c>)을 순서대로 각각 독립적으로 CP949 디코딩해 이어 붙인다(클래스 요약 "바이트
-    /// 단위로만 자른다" 참고). 구간은 서로 겹치지 않는다(SPEC 필드는 서로 겹치지 않으므로).</summary>
-    private static string BuildMaskedText(byte[] body, List<(int Position, int Length, int VisiblePrefix)> ranges)
+    /// <summary>마스킹 구간 사이사이의 원문 구간과 마스킹 구간(앞 <c>VisiblePrefix</c>바이트 + 뒤
+    /// <c>VisibleSuffix</c>바이트는 원문, 그 사이 가운데만 <c>*</c>)을 순서대로 각각 독립적으로 CP949
+    /// 디코딩해 이어 붙인다(클래스 요약 "바이트 단위로만 자른다" 참고). 구간은 서로 겹치지 않는다
+    /// (SPEC 필드는 서로 겹치지 않으므로). <c>VisibleSuffix</c>가 0이면(#46) 기존과 동일하게 뒤쪽이
+    /// 전부 <c>*</c>가 된다.</summary>
+    private static string BuildMaskedText(byte[] body, List<(int Position, int Length, int VisiblePrefix, int VisibleSuffix)> ranges)
     {
         var sb = new System.Text.StringBuilder();
         int cursor = 0;
 
-        foreach ((int position, int length, int visiblePrefix) in ranges)
+        foreach ((int position, int length, int visiblePrefix, int visibleSuffix) in ranges)
         {
             if (position > cursor)
                 sb.Append(PosMessageEncoding.Value.GetString(body, cursor, position - cursor));
 
-            int visible = Math.Min(visiblePrefix, length);
-            int maskedStars = length - visible;
+            // 앞뒤 노출 바이트 수가 필드 길이를 넘지 않도록 clamp한다(짧은 값 등 방어적 처리).
+            int visiblePrefixClamped = Math.Min(visiblePrefix, length);
+            int visibleSuffixClamped = Math.Min(visibleSuffix, length - visiblePrefixClamped);
+            int maskedStars = length - visiblePrefixClamped - visibleSuffixClamped;
 
-            if (visible > 0)
-                sb.Append(PosMessageEncoding.Value.GetString(body, position, visible));
+            if (visiblePrefixClamped > 0)
+                sb.Append(PosMessageEncoding.Value.GetString(body, position, visiblePrefixClamped));
 
             sb.Append('*', maskedStars);
+
+            if (visibleSuffixClamped > 0)
+                sb.Append(PosMessageEncoding.Value.GetString(body, position + length - visibleSuffixClamped, visibleSuffixClamped));
 
             cursor = position + length;
         }

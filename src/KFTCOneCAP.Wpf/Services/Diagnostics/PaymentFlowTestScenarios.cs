@@ -50,7 +50,7 @@ internal static class PaymentFlowTestScenarios
             await Scenario11_TimeoutDuringPinEntryYieldsE02().ConfigureAwait(false);
             await Scenario12_PinEnteredBeforeSubscriptionIsNotLost().ConfigureAwait(false);
             await Scenario13_ConsecutiveTransactionsDoNotLeakCardOrPinData().ConfigureAwait(false);
-            Scenario14_MalformedTelegramFallsBackToGenericMasking();
+            Scenario14_MalformedTelegramFallsBackToRawMessage();
             await Scenario15_KioskIdMatchAllowsCardApproval().ConfigureAwait(false);
             await Scenario16_KioskIdMismatchRejectsBeforeCardReading().ConfigureAwait(false);
             await Scenario17_KioskIdEmptyConfiguredRejects().ConfigureAwait(false);
@@ -586,17 +586,13 @@ internal static class PaymentFlowTestScenarios
     /// 단위 검증하는 것이다 — 프로덕션 경로(Orchestrator/PosSocketServer/VanService)는 전혀 건드리지
     /// 않는다.
     ///
-    /// 확인하는 것 2가지(development_plan.md "P22-6부속" 지시):
-    /// <list type="number">
-    /// <item>길이가 어긋나면 <c>Redact</c>가 위치 기반 마스킹(#46 부분 마스킹)을 시도하지 않고 원문을
-    /// 그대로 돌려주는지 — #46 자리에 심어 둔 16자리 숫자열이 마스킹 없이 그대로 나오는지로 확인.</item>
-    /// <item>그 원문이 파이프라인의 다음 단계인 <see cref="LogMessageMasker.Mask"/>(13~19자리 숫자
-    /// 범용 마스킹)를 거치면, 카드번호처럼 보이는 그 숫자열이 최소한 그때는 마스킹되는지.</item>
-    /// </list>
-    /// 대조군으로 길이가 올바른 정상 본문도 같이 돌려, 정상 경로에서는 위치 기반 마스킹이 그대로
-    /// 동작함을(회귀 없음) 같은 시나리오 안에서 확인한다.
+    /// Phase 27(P27-6)에서 범용 패턴 마스킹(<c>LogMessageMasker</c>, 삭제됨) 단계가 제거돼, 길이
+    /// 불일치 시 <c>Redact</c>가 원문을 그대로 반환하면 그 뒤로는 아무 마스킹도 걸리지 않는다 — 이
+    /// 시나리오는 이제 그 사실(원문 그대로 반환)만 확인한다. 대조군으로 길이가 올바른 정상 본문도
+    /// 같이 돌려, 정상 경로에서는 위치 기반 마스킹이 그대로 동작함을(회귀 없음) 같은 시나리오 안에서
+    /// 확인한다.
     /// </summary>
-    private static void Scenario14_MalformedTelegramFallsBackToGenericMasking()
+    private static void Scenario14_MalformedTelegramFallsBackToRawMessage()
     {
         if (!PosSchemaRegistry.TryResolve("902614", out PosTelegramSchema? schema) || schema is null)
         {
@@ -608,8 +604,14 @@ internal static class PaymentFlowTestScenarios
         // 암호화된 데이터가 들어갈 자리지만, 이 시나리오는 "일반 마스킹 패턴에 걸리는 숫자열"이
         // 어떻게 되는지가 관심사라 의도적으로 숫자열을 쓴다.
         const string decoyDigits = "9412345678901234"; // 16자리 — 범용 카드번호 패턴(13~19자리)에 해당.
+        // #14/#36(13자리 등록번호) 마스킹(2026-09-14 CP2 리뷰 지적 + 사용자 결정, TelegramLogRedactor
+        // 클래스 요약 참고) — 앞6+뒤4 노출, 가운데 3자리만 '*'.
+        const string registrationNumber14 = "1234567890123"; // #14(주민/사업자/법인등록번호), 13자리.
+        const string registrationNumber36 = "9876543210987"; // #36(납부자 주민/사업자등록번호), 13자리.
         var telegram = PosTelegram.CreateEmpty(schema);
         telegram.Write(46, decoyDigits);
+        telegram.Write(14, registrationNumber14);
+        telegram.Write(36, registrationNumber36);
         byte[] wellFormedBody = telegram.ToBody();
         Check("기형전문: 대조군 본문 길이가 스키마 TotalLength와 일치(전제조건)", wellFormedBody.Length == schema.TotalLength);
 
@@ -619,6 +621,15 @@ internal static class PaymentFlowTestScenarios
             !wellFormedRedacted.Contains(decoyDigits));
         Check("기형전문(대조군): 정상 길이는 #46 앞 6바이트만 노출(부분 마스킹)",
             wellFormedRedacted.Contains(decoyDigits.Substring(0, 6) + new string('*', decoyDigits.Length - 6)));
+        Check("기형전문(대조군): #14는 앞6+뒤4 노출, 가운데 3자리만 마스킹",
+            !wellFormedRedacted.Contains(registrationNumber14)
+            && wellFormedRedacted.Contains(registrationNumber14.Substring(0, 6) + "***" + registrationNumber14.Substring(9, 4)));
+        Check("기형전문(대조군): #36은 앞6+뒤4 노출, 가운데 3자리만 마스킹",
+            !wellFormedRedacted.Contains(registrationNumber36)
+            && wellFormedRedacted.Contains(registrationNumber36.Substring(0, 6) + "***" + registrationNumber36.Substring(9, 4)));
+        FileLogger.Info($"[payment-flow-test] #14 마스킹 결과 원문: {registrationNumber14}");
+        FileLogger.Info($"[payment-flow-test] #36 마스킹 결과 원문: {registrationNumber36}");
+        FileLogger.Info($"[payment-flow-test] #46/#14/#36 마스킹 적용된 전체 본문: {wellFormedRedacted}");
 
         // --- 본 시나리오: 본문 끝에 1바이트를 덧붙여 길이를 스키마와 어긋나게 만든다(기형 전문). ---
         byte[] malformedBody = new byte[wellFormedBody.Length + 1];
@@ -634,14 +645,32 @@ internal static class PaymentFlowTestScenarios
         Check("기형전문: 길이 불일치 시 위치 기반 마스킹을 시도하지 않고 원문을 그대로 반환(#46 숫자열이 마스킹 없이 그대로 남음)",
             malformedRedacted.Contains(decoyDigits));
 
-        // 확인 2 — 그 원문이 파이프라인의 다음 단계(LogMessageMasker.Mask, 실제 FileLogger 호출부가
-        // 모든 메시지에 자동으로 거는 범용 마스킹)를 거치면, 최소한 카드번호로 보이는 숫자열은
-        // 마스킹돼야 한다(클래스 요약이 말하는 "최소한의 방어").
-        string genericMasked = LogMessageMasker.Mask(malformedRedacted);
-        Check("기형전문: 범용 마스킹(LogMessageMasker)을 거치면 #46 숫자열이 마스킹됨(최소한의 방어 확인)",
-            !genericMasked.Contains(decoyDigits));
-        Check("기형전문: 범용 마스킹 결과가 카드번호 마스킹 형식(앞6+뒤4, 가운데 '*')을 따름",
-            genericMasked.Contains(decoyDigits.Substring(0, 6) + new string('*', decoyDigits.Length - 10) + decoyDigits.Substring(decoyDigits.Length - 4)));
+        // --- 값이 없는 경우(전부 space) — #46과 마찬가지로 #14/#36도 마스킹하지 않고 원문(공백) 그대로
+        // 남아야 한다(TelegramLogRedactor 클래스 요약 "값이 아직 채워지지 않음" 예외). #14/#36을 쓰지 않은
+        // 텔레그램은 PosField.Pad에 의해 자동으로 전체 space가 된다.
+        var emptyTelegram = PosTelegram.CreateEmpty(schema);
+        byte[] emptyBody = emptyTelegram.ToBody();
+        string emptyRedacted = TelegramLogRedactor.Redact("902614", emptyBody);
+        if (!TryGetFieldForTest(schema, 14, out PosField? field14) || !TryGetFieldForTest(schema, 36, out PosField? field36))
+        {
+            Check("빈값: #14/#36 스키마 필드 조회(전제조건)", false);
+        }
+        else
+        {
+            string field14Region = PosMessageEncoding.Value.GetString(emptyBody, field14!.Position, field14.Length);
+            string field36Region = PosMessageEncoding.Value.GetString(emptyBody, field36!.Position, field36.Length);
+            Check("빈값(#14 미설정): 마스킹하지 않고 원문(공백) 그대로 남음",
+                !field14Region.Contains('*') && emptyRedacted.Contains(field14Region));
+            Check("빈값(#36 미설정): 마스킹하지 않고 원문(공백) 그대로 남음",
+                !field36Region.Contains('*') && emptyRedacted.Contains(field36Region));
+            FileLogger.Info($"[payment-flow-test] #14/#36 미설정(전체 space) 본문 마스킹 결과(회귀 확인용, 전체 space 그대로): #14구간='{field14Region}' #36구간='{field36Region}'");
+        }
+    }
+
+    private static bool TryGetFieldForTest(PosTelegramSchema schema, int fieldNumber, out PosField? field)
+    {
+        field = schema.Fields.FirstOrDefault(f => f.Number == fieldNumber);
+        return field is not null;
     }
 
     /// <summary>P23-7(PRD.md §2.3.1) — 설정값과 요청 #42가 일치하면 정상 처리(카드리딩까지 진행)돼야

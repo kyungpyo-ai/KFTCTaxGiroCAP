@@ -90,10 +90,10 @@ public partial class App : Application
 
         // Phase 22(docs/operations/development_plan.md P22-3/P22-4, PRD.md §1.3-a/§1.3-d): 로그 싱크
         // 목록을 앱 기동 시 한 번 구성한다. 다른 모든 FileLogger 호출보다 먼저 실행돼야 한다.
-        // FileLogSink는 파일에 렌더링해 남기고, RingBufferSink는 최근 500건을 메모리에 유지한다
-        // (장래 장애 보고 기능이 LogRingBuffer 정적 메서드로 직접 조회). 장래 원격 싱크는 여기에
-        // 인자를 추가하는 것만으로 병렬 연결된다.
-        FileLogger.ConfigureSinks(new FileLogSink(), new RingBufferSink());
+        // FileLogSink는 파일에 렌더링해 남긴다. Phase 27(P27-5)부터 장애정보 확보는 메모리 링버퍼
+        // (RingBufferSink, 제거됨) 대신 LogFileReader가 파일을 직접 슬라이스하는 방식으로 대체됐다.
+        // 장래 원격 싱크는 여기에 인자를 추가하는 것만으로 병렬 연결된다.
+        FileLogger.ConfigureSinks(new FileLogSink());
 
         // Phase 22(docs/operations/development_plan.md P22-5, PRD.md §1.2): 90일 보관 정리를 앱 기동
         // 시 1회 백그라운드로 수행한다(기동 경로를 블로킹하지 않음). 날짜가 바뀌어 새 로그 파일을
@@ -375,6 +375,15 @@ public partial class App : Application
             // 띄운다.
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
             System.Threading.Tasks.Task.Run(MemoryClearTestScenarios.RunAll);
+        }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--log-file-reader-test")
+        {
+            // 개발/회귀 검증용(docs/operations/development_plan.md P27-4 완료 조건, 최종 산출물
+            // 아님): LogFileReader(P27-2/P27-3)와 LogLineParser(P27-1)를 합성 로그 파일(2005년대
+            // 과거 날짜, 실제 운영 로그와 겹치지 않음) + 오늘자 실제 로그 파일(동시성 검증 #6)로
+            // 검증한다. UI는 홈 화면을 그대로 띄운다.
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+            System.Threading.Tasks.Task.Run(LogFileReaderTestScenarios.RunAll);
         }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--notice-demo")
         {

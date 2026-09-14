@@ -184,6 +184,18 @@
   TelegramSchemas.cs/MainForm.cs/ErrorInjectionClient.cs, 문서 2건) payment-flow-test 하네스를
   재실행해야 해서 한시적으로 asInvoker로 낮췄다. 169/169(14:10:33)를 로그로 확인한 즉시
   requireAdministrator로 되돌렸다.
+
+  [한시적, 2026-09-14] Phase 27 P27-7 검증 재개 — 포트 8002 확보 후 pos client test /
+  repeat transactions test(하이픈 두 개 인자, 표기 생략 — 매니페스트 XML 주석에 하이픈 연속 금지)
+  재실행과 리더기 설정 화면 UI 자동화(COM 포트 재설정, 초기화 버튼 클릭)를 위해 한시적으로
+  asInvoker로 낮췄다. pos client test 전체 완료, repeat transactions test 50/50 성공(2회),
+  실장비 902614 결제 성공(10:45:23)까지 로그로 확인한 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-14] CP2(Opus) 리뷰 지적 반영: 902614의 #14/#36(주민/사업자/법인등록번호,
+  13자리)에 위치 기반 마스킹(앞6+뒤4 노출, 가운데 3자리 `*`) 추가(TelegramLogRedactor.cs). 무인 자동화로
+  payment-flow-test 하네스를 재실행해야 해서 한시적으로 asInvoker로 낮췄다. 171/171(11:18:39)를 로그로
+  확인(#14/#36 마스킹, 빈값 미마스킹, 기존 #46 마스킹 회귀 없음 모두 확인)한 즉시 requireAdministrator로
+  되돌렸다.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

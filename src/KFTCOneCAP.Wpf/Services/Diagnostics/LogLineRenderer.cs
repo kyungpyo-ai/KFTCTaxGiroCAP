@@ -67,6 +67,16 @@ public static class LogLineRenderer
     // 경로에서 자주 지나가는 곳이라 성능에 민감하다(P22-2 마스킹과 동일한 이유).
     private static readonly Regex NewlinePattern = new(@"\r\n|\r|\n", RegexOptions.Compiled);
 
+    /// <summary>
+    /// Phase 27(docs/operations/development_plan.md P27-1, PRD.md §1.8.3-b) 역파싱(<see
+    /// cref="LogLineParser"/>)이 쓰는 파싱 정규식 — 클래스 요약에 적힌 계약 그대로다. 렌더링
+    /// (<see cref="Render"/>)은 이 정규식을 쓰지 않고 직접 문자열을 조립하지만, 파서와 짝이 맞아야
+    /// 한다는 계약을 코드로 못박기 위해 <b>이 파일 안에 정규식을 한 번만</b> 선언해 두 지점(요약
+    /// 주석과 <see cref="LogLineParser"/>)이 모두 참조한다.
+    /// </summary>
+    internal static readonly Regex LineFormat =
+        new(@"^\[([^\]]*)\] \[([^\]]*)\] \[([^\]]*)\] \[([^\]]*)\] \[([^\]]*)\] (.*)$", RegexOptions.Compiled);
+
     public static string Render(LogRecord record)
     {
         if (record is null)
@@ -123,4 +133,60 @@ public static class LogLineRenderer
     }
 
     private static string EscapeNewlines(string message) => NewlinePattern.Replace(message, "\\n");
+}
+
+/// <summary>
+/// Phase 27(docs/operations/development_plan.md P27-1, PRD.md §1.8.3-b) <see cref="LogLineRenderer"/>가
+/// 만든 한 줄을 되읽는 유일한 지점. <see cref="LogLineRenderer"/>가 렌더링의 유일한 출처이듯, 역파싱도
+/// 이 클래스 하나로 모은다(같은 파일에 두어 렌더러와 나란히 대조할 수 있게 한다).
+///
+/// <b>슬라이스 판정에 필요한 값(시각·거래ID)만 뽑는다</b> — <see cref="LogRecord"/> 전체를 복원하지
+/// 않는다. 굳이 <see cref="LogCategory"/> 역매핑까지 하면 매핑되지 않는 값(빈 슬롯 <c>-</c> 등)에서
+/// 불필요한 실패 지점이 하나 더 생긴다.
+/// </summary>
+internal static class LogLineParser
+{
+    /// <summary><see cref="LogLineRenderer.Render"/>가 쓰는 시각 포맷과 대칭이다.</summary>
+    private const string TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff";
+
+    /// <summary>
+    /// 한 줄을 파싱해 시각과 거래ID를 뽑는다. 정규식에 매치되지 않거나 시각을 파싱할 수 없으면
+    /// (레코드가 아닌 줄 — 빈 줄, 형식이 다른 줄) <c>false</c>를 돌려준다. 예외는 던지지 않는다.
+    ///
+    /// 레벨/카테고리/코드/거래ID 네 슬롯은 <see cref="LogLineRenderer"/>가 고정폭 좌측정렬 패딩을
+    /// 붙이므로(폭 5/8/3/최소12) 값 비교 전 <see cref="string.Trim()"/>이 필요하다 — 거래ID는
+    /// <b>최소폭이지 최대폭이 아니므로</b>(<c>PaymentOrchestrator.LogTxId</c> fallback이 12자를
+    /// 넘을 수 있다) 길이를 가정하지 않고 값 그대로(Trim 후) 돌려준다.
+    /// </summary>
+    public static bool TryParse(string? line, out DateTime timestamp, out string transactionId)
+    {
+        timestamp = default;
+        transactionId = string.Empty;
+
+        if (string.IsNullOrEmpty(line))
+        {
+            // 빈 줄(FileLogSink의 거래 구분선 등)은 매치되지 않는다 — 포함 여부 판단은 호출부(P27-3) 몫.
+            return false;
+        }
+
+        Match match = LogLineRenderer.LineFormat.Match(line);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        string timestampText = match.Groups[1].Value.Trim();
+        if (!DateTime.TryParseExact(
+                timestampText,
+                TimestampFormat,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out timestamp))
+        {
+            return false;
+        }
+
+        transactionId = match.Groups[5].Value.Trim();
+        return true;
+    }
 }

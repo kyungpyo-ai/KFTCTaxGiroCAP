@@ -10,20 +10,23 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 /// / <see cref="Warn"/> / <see cref="Error"/>)는 그대로다.</b> 151곳의 호출부를 고치지 않는 것이
 /// 이 리팩터링의 목적이라, DI 컨테이너는 도입하지 않는다.
 ///
-/// 파이프라인 순서(PRD.md §1.4 "모든 싱크보다 앞, 단일 지점"):
-/// 1) <see cref="LogMessageMasker.Mask"/>로 메시지를 마스킹한다.
-/// 2) 마스킹된 메시지로 <see cref="LogRecord"/>를 만든다(카테고리/코드/거래ID는 기존 151곳의 호출이
-///    채우지 않으므로 <c>null</c> — P22-6에서 새 오버로드로 확장한다).
-/// 3) 등록된 각 <see cref="ILogSink"/>에 순서대로 전달한다. 싱크 하나(렌더링 포함, 예:
+/// 파이프라인 순서(Phase 27(P27-6, docs/operations/development_plan.md)에서 패턴 기반 마스킹
+/// 단계를 제거했다 — 진단 정보(전문구분·응답코드 등)까지 과도하게 가려 장애 분석을 방해했기
+/// 때문이다. 카드/PIN 보호는 위치 기반 마스킹인 <see cref="TelegramLogRedactor"/>가 호출부에서
+/// 전문 원문을 로그에 넘기기 전에 전담한다):
+/// 1) 원본 메시지 그대로 <see cref="LogRecord"/>를 만든다(카테고리/코드/거래ID는 기존 151곳의
+///    호출이 채우지 않으므로 <c>null</c> — P22-6에서 새 오버로드로 확장한다).
+/// 2) 등록된 각 <see cref="ILogSink"/>에 순서대로 전달한다. 싱크 하나(렌더링 포함, 예:
 ///    <see cref="LogLineRenderer.Render"/>가 던지는 <see cref="ArgumentOutOfRangeException"/> 등)가
 ///    예외를 던져도 다른 싱크와 호출자에게 전파되지 않는다 — 로깅 실패가 앱 동작에 영향을 주면 안
 ///    된다는 기존 계약을 유지한다.
 ///
 /// 싱크 목록은 앱 기동 시 한 번 <see cref="ConfigureSinks"/>로 구성한다(<c>App.xaml.cs</c>). 장래
 /// 원격 싱크는 그 호출에 인자를 추가하는 것만으로 붙는다. <see cref="ConfigureSinks"/>를 호출하지
-/// 않은 상태(콘솔 하네스 등 <c>OnStartup</c>을 거치지 않는 진입점)에서도 파일 로깅과 링버퍼 기록이
-/// 그대로 동작하도록 기본값은 <see cref="FileLogSink"/>와 <see cref="RingBufferSink"/> 두 개로
-/// 초기화돼 있다.
+/// 않은 상태(콘솔 하네스 등 <c>OnStartup</c>을 거치지 않는 진입점)에서도 파일 로깅이 그대로 동작하도록
+/// 기본값은 <see cref="FileLogSink"/> 하나로 초기화돼 있다. 로그 조각 확보는 Phase 27(P27-5)부터
+/// 메모리 링버퍼(<c>LogRingBuffer</c>/<c>RingBufferSink</c>, 제거됨) 대신 <see cref="LogFileReader"/>가
+/// 파일을 직접 슬라이스하는 방식으로 대체됐다.
 /// </summary>
 public static class FileLogger
 {
@@ -32,7 +35,7 @@ public static class FileLogger
     // 원래도 원자적이라 별도 lock으로 "교체 동작"을 보호할 필요는 없었다 — 이전 lock은 동시 ConfigureSinks
     // 호출끼리의 직렬화만 보장했을 뿐(실제로는 그 호출이 기동 시 1회뿐이라 의미가 없었다) 가시성은 보장하지
     // 않았으므로 volatile로 대체한다.
-    private static volatile ILogSink[] _sinks = { new FileLogSink(), new RingBufferSink() };
+    private static volatile ILogSink[] _sinks = { new FileLogSink() };
 
     /// <summary>
     /// 로그 싱크 목록을 (교체) 구성한다. 앱 기동 시 한 번만 호출한다(<c>App.xaml.cs</c>,
@@ -96,13 +99,12 @@ public static class FileLogger
     {
         try
         {
-            string masked = LogMessageMasker.Mask(message);
-            var record = new LogRecord(DateTime.Now, level, category, code, transactionId, message: masked);
+            var record = new LogRecord(DateTime.Now, level, category, code, transactionId, message);
             Dispatch(record);
         }
         catch
         {
-            // 마스킹/레코드 생성 단계의 실패까지 포함해, 로깅 실패가 앱 동작에 영향을 주면 안 된다
+            // 레코드 생성 단계의 실패까지 포함해, 로깅 실패가 앱 동작에 영향을 주면 안 된다
             // (디스크 가득참·권한 문제 등은 조용히 무시한다는 기존 계약을 유지).
         }
     }
