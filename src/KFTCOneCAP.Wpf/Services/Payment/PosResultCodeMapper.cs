@@ -58,8 +58,8 @@ internal static class PosResultCodeMapper
     };
 
     /// <summary>
-    /// 카드리딩 실패(<c>R</c>) — <see cref="CardReadCommandOutcome.Kind"/>로 업무 응답코드 실패(<c>R0x</c>)와
-    /// DLL 연동 실패(<c>R2x</c>)를 한 번에 분기한다. <see cref="CardReadCommandOutcome.FailureCategory"/>가
+    /// 카드리딩 실패(<c>R</c>) — <see cref="CardReadCommandOutcome.Kind"/>로 업무 응답코드 실패(<c>R00</c>~<c>R23</c>)와
+    /// DLL 연동 실패(<c>R24</c>~<c>R32</c>)를 한 번에 분기한다. <see cref="CardReadCommandOutcome.FailureCategory"/>가
     /// <see cref="ReaderFailureCategory.None"/>(성공)이면 호출하면 안 된다 — 성공은 카드리딩 완료 후
     /// 다음 단계(VAN)로 진행하는 것이지 실패 응답을 만드는 상황이 아니다.
     /// </summary>
@@ -70,29 +70,31 @@ internal static class PosResultCodeMapper
         // 문서(00~23)와 우리 로그를 대조하기 쉽다.
         ReaderCommandOutcomeKind.BusinessFailure => FormatReaderBusinessFailureCode(outcome.ResponseCode),
 
-        // R2x: DLL 연동 레벨 실패. ReaderResult 이름 문자열로 분기한다(Interop.ReaderResult를 이
+        // R2x(24~29): DLL 연동 레벨 실패. ReaderResult 이름 문자열로 분기한다(Interop.ReaderResult를 이
         // 계층에서 직접 참조하지 않기 위해 — CardReadCommandOutcome.DllResultName이 이미
         // ReaderSerialNative.ReaderResultToString이 만든 이름이다).
+        // 2026-09-14: R0x(리더기 업무 응답코드, SPEC상 R00~R23)와 값이 겹쳐 24부터 재배치했다
+        // (development_plan.md P27-9 (a-0), fault_alert_catalog.md §7).
         ReaderCommandOutcomeKind.DllCallFailure => outcome.DllResultName switch
         {
-            "READER_ERR_PORT_NOT_OPEN" => "R20",
-            "READER_ERR_SEND_FAIL" => "R21",
-            "READER_ERR_BUSY" => "R22",
-            "READER_ERR_PORT_NOT_FOUND" => "R23",
-            "READER_ERR_PORT_OPEN_FAIL" => "R24",
-            "READER_ERR_COMMAND_NOT_ALLOWED" => "R25",
-            _ => "R28", // PORT_CONFIG_FAIL/PORT_CLOSING/PORT_ALREADY_OPEN/INVALID_LENGTH/BUFFER_OVERFLOW/
+            "READER_ERR_PORT_NOT_OPEN" => "R24",
+            "READER_ERR_SEND_FAIL" => "R25",
+            "READER_ERR_BUSY" => "R26",
+            "READER_ERR_PORT_NOT_FOUND" => "R27",
+            "READER_ERR_PORT_OPEN_FAIL" => "R28",
+            "READER_ERR_COMMAND_NOT_ALLOWED" => "R29",
+            _ => "R31", // PORT_CONFIG_FAIL/PORT_CLOSING/PORT_ALREADY_OPEN/INVALID_LENGTH/BUFFER_OVERFLOW/
                         // INTERNAL/INVALID_ARGUMENT/MAX_READER_COUNT/INVALID_READER_ID/PINPAD_NOT_SUPPORTED
                         // 등 — 결제 흐름 중 실제로 관찰된 적 없는 종류의 catch-all(development_plan.md
                         // P17-4 참고, 필요해지면 개별 코드로 쪼갠다).
         },
 
-        // R29는 "예비"가 아니라 아래 ReaderBroadcastNoWinnerCode/ReaderNoCardDataDefensiveCode 두 방어적
+        // R32는 "예비"가 아니라 아래 ReaderBroadcastNoWinnerCode/ReaderNoCardDataDefensiveCode 두 방어적
         // 상황을 위해 남겨 뒀다(원래 계획엔 "예비"로 적었으나 P17-5 구현 중 실제 쓸 곳이 생겨 정정).
 
         // CommunicationError도 DLL 연동 레벨 실패로 분류되지만(ReaderCommandOutcomeKindExtensions
         // .ToFailureCategory) DllResultName이 비어 있으므로 별도 분기한다.
-        ReaderCommandOutcomeKind.CommunicationError => "R27",
+        ReaderCommandOutcomeKind.CommunicationError => "R30",
 
         // Timeout은 **일부러 여기 없다.** 리더기 로컬 명령 타임아웃과 거래 전체 데드라인 Timeout은
         // 사용자에게 같은 결과("카드 입력 시간 초과")로 보여야 한다(PaymentOrchestrator 클래스 주석 —
@@ -111,22 +113,24 @@ internal static class PosResultCodeMapper
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome.Kind, "매핑되지 않은 ReaderCommandOutcomeKind"),
     };
 
-    // R29 — "실패는 확실하지만 실어 보낼 CardReadCommandOutcome이 없는" 세 가지 경우가 공유한다.
+    // R32 — "실패는 확실하지만 실어 보낼 CardReadCommandOutcome이 없는" 세 가지 경우가 공유한다.
     // 셋 다 서로 원인이 다르지만(전원 송신 실패/카드데이터 없는 방어 경로/재시도 상한 초과), 공통점은
     // "세부 outcome을 식별할 수 없다"는 것뿐이라 개별 코드로 쪼갤 근거가 없다 — 로그(FileLogger)의
     // 메시지가 실제 구분을 담당한다.
+    // 2026-09-14: R0x(리더기 업무 응답코드)와 값이 겹쳐 R29 → R32로 재배치했다
+    // (development_plan.md P27-9 (a-0), fault_alert_catalog.md §7).
 
     /// <summary>참여 리더기 전원이 송신 자체에 실패해 개별 <see cref="CardReadCommandOutcome"/>이 없는
     /// 경우(<c>CardReadBroadcastResult.HasWinner == false</c>).</summary>
-    internal static string ReaderBroadcastNoWinnerCode => "R29";
+    internal static string ReaderBroadcastNoWinnerCode => "R32";
 
     /// <summary>업무 응답코드가 성공(00)인데 카드 데이터가 비어 있는, 이론상 불가능해야 하는 방어적
     /// 경로(<c>CardReadResponseParser</c> 계약 위반 방지용).</summary>
-    internal static string ReaderNoCardDataDefensiveCode => "R29";
+    internal static string ReaderNoCardDataDefensiveCode => "R32";
 
     /// <summary>07/12 응답이 반복돼 최대 재요청 횟수(<c>MaxCardReadRounds</c>)를 넘긴 경우 — 마지막
     /// 라운드의 outcome이 루프 지역 변수라 여기까지 살아남지 않는다.</summary>
-    internal static string ReaderRetryLimitExceededCode => "R29";
+    internal static string ReaderRetryLimitExceededCode => "R32";
 
     private static string FormatReaderBusinessFailureCode(string readerResponseCode)
     {

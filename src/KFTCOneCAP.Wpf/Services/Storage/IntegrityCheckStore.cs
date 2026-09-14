@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
 
@@ -103,6 +104,11 @@ VALUES
                 LogCategory.Reader,
                 $"무결성 체크 이력 저장 실패: {ex.GetType().Name} - {ex.Message}",
                 InternalFaultCodes.IntegrityStoreFailure, transactionId: null);
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.IntegrityStoreFailure, LogCategory.Reader, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
             return IntegrityCheckSaveResult.Failed(ex.Message);
         }
     }
@@ -161,6 +167,11 @@ ORDER BY CheckedAtLocal DESC;";
                 LogCategory.Reader,
                 $"무결성 체크 이력 조회 실패: {ex.GetType().Name} - {ex.Message}",
                 InternalFaultCodes.IntegrityStoreFailure, transactionId: null);
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.IntegrityStoreFailure, LogCategory.Reader, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
             return new List<IntegrityCheckHistoryEntry>();
         }
     }
@@ -202,6 +213,11 @@ LIMIT 1;";
                 LogCategory.Reader,
                 $"금일 무결성 체크 성공 이력 조회 실패({comPort}): {ex.GetType().Name} - {ex.Message}",
                 InternalFaultCodes.IntegrityStoreFailure, transactionId: null);
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.IntegrityStoreFailure, LogCategory.Reader, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
             return false;
         }
     }

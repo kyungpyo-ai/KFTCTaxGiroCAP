@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using KFTCOneCAP.Wpf.Interop;
 
 namespace KFTCOneCAP.Wpf.Services.Diagnostics;
@@ -38,6 +39,11 @@ internal static class NativeDllLoadSmokeTest
                 LogCategory.App,
                 $"DLL 로드 스모크 실패: {fileName} — 파일이 출력 폴더에 없음 (경로: {dllPath})",
                 InternalFaultCodes.DllLoadSmokeFailure, transactionId: null);
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.DllLoadSmokeFailure, LogCategory.App, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
             return;
         }
 
@@ -58,6 +64,11 @@ internal static class NativeDllLoadSmokeTest
                     LogCategory.App,
                     $"DLL 로드 스모크 실패: {fileName} — {reason}",
                     InternalFaultCodes.DllLoadSmokeFailure, transactionId: null);
+                Task.Run(() =>
+                {
+                    try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.DllLoadSmokeFailure, LogCategory.App, null); }
+                    catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+                });
                 return;
             }
 
@@ -71,6 +82,11 @@ internal static class NativeDllLoadSmokeTest
                 LogCategory.App,
                 $"DLL 로드 스모크 중 예외 발생: {fileName} — {ex.GetType().Name}: {ex.Message}",
                 InternalFaultCodes.DllLoadSmokeFailure, transactionId: null);
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.DllLoadSmokeFailure, LogCategory.App, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
         }
         finally
         {

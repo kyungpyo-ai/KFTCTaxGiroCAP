@@ -3572,6 +3572,59 @@ PosClient/VanCall), `RepeatedTransactionResourceTest.cs`, `*SelfTest.cs`, `Nativ
 전부 그쪽이며, **어긋나면 카탈로그가 맞다.** 이 문서에 표를 복사해 두지 않는다 — 카탈로그는 계속
 갱신되는 대장이라 사본을 두면 갈린다.
 
+### (a-0) `R` 코드 충돌 해결 — 리더기 DLL 실패 코드 재배치 ★★ (2026-09-14 발견)
+
+판정 로직을 설계하던 중 **실제 값 충돌**이 드러났다. 리더기 업무 응답코드(`R0x`, SPEC상
+`R00`~`R23`, `00`/`07`/`12` 제외)와 기존 리더기 DLL 연동 실패 코드(`R20`~`R29`, Phase 17)가 **같은
+3자리 값 공간을 공유**한다 — 예를 들어 리더기가 업무 응답코드 `"20"`을 주면 로그·응답 모두 `R20`이
+되는데, 이는 DLL 실패 `PORT_NOT_OPEN`과 값이 완전히 같다. 판정 로직이 `R0x`(T)와 `R20`~`R29`
+개별 코드(Y)를 문자열로 구분해야 하는데 애초에 겹치는 값이 있어 구분 자체가 불가능했다.
+
+**해결(2026-09-14 사용자 확정)**: DLL 실패 코드 9개를 업무 코드 범위(00~23) 밖인 **24부터 순차로
+(빈 자리 없이) 재배치**한다.
+
+| 기존 | 신규 | DLL 오류 이름 |
+|---|---|---|
+| `R20` | `R24` | `READER_ERR_PORT_NOT_OPEN` |
+| `R21` | `R25` | `READER_ERR_SEND_FAIL` |
+| `R22` | `R26` | `READER_ERR_BUSY` |
+| `R23` | `R27` | `READER_ERR_PORT_NOT_FOUND` |
+| `R24` | `R28` | `READER_ERR_PORT_OPEN_FAIL` |
+| `R25` | `R29` | `READER_ERR_COMMAND_NOT_ALLOWED` |
+| `R27` | `R30` | `CommunicationError` |
+| `R28` | `R31` | catch-all(그 외 DLL 실패) |
+| `R29` | `R32` | 방어적 실패(승자 없음/카드데이터 없음/재시도 상한, 3건 공유) |
+
+- **변경 대상**: `src/KFTCOneCAP.Wpf/Services/Payment/PosResultCodeMapper.cs`의
+  `ToTelegramCode(CardReadCommandOutcome)`와 `ReaderBroadcastNoWinnerCode`/
+  `ReaderNoCardDataDefensiveCode`/`ReaderRetryLimitExceededCode`, 그리고
+  `src/KFTCOneCAP.KioskSim/Protocol/ResponseCodeCatalog.cs`의 대응 항목.
+- **POS로 나가는 응답 값 자체가 바뀐다** — E42/E43 신설(P27-8-f)보다 더 신경 써야 한다. 신설이
+  아니라 **기존에 이미 나가고 있던 값이 바뀌는 것**이라 POS 쪽이 옛 값을 알고 있었다면 그 지식이
+  깨진다. `PRD.md` §5 미확정 #17에 기록, POS 담당자 통보 필요.
+- **과거 Phase(17~21) 문서에 남은 "R20~R29" 서술은 원문 그대로 둔다** — 그 문서들은 완료 당시의
+  올바른 기록이었다. `fault_alert_catalog.md` §7 변경 이력에 정오표로 남긴다(원칙은 P27-10과 동일).
+- **`R0x`(T) 판정 매칭 규칙**: 정확히 `R00`~`R23`(3자리, `R` + 00~23) 범위에 속하는 코드는 전부
+  `R0x` T-버킷으로 판정한다(개별 코드가 §2.1에 따로 명시돼 있지 않은 한). 재배치 후 `R24`~`R32`는
+  이 범위 밖이라 각각 §2.1의 개별 `Y` 행으로만 매칭된다 — 충돌 가능성이 구조적으로 사라진다.
+
+**완료 조건(이 항목)**
+- [x] `PosResultCodeMapper.cs`와 `ResponseCodeCatalog.cs`가 위 표대로 정확히 재배치됐다(2026-09-14,
+      두 파일의 R-코드 리터럴을 grep으로 대조해 표와 정확히 일치함을 확인).
+- [x] 재배치 후에도 리더기 DLL 연동 실패 하네스(회귀 가능한 범위)가 통과한다 — **회귀 가능한
+      범위가 존재하지 않는다**: `PaymentFlowTestScenarios.cs`/`FakeReaderEndpoint.cs`를 grep했으나
+      `DllCallFailure`/`CommunicationError`(R2x/R3x 계열)를 의도적으로 재현하는 시나리오가 없다(전부
+      `Success` outcome만 큐잉). 따라서 이번 재배치는 코드 리뷰로만 검증했고, `dotnet build` 0/0으로
+      컴파일 안전성만 확인됨(2026-09-14).
+- [x] `R00`~`R23` 범위의 업무 응답코드와 `R24`~`R32`의 DLL 실패 코드가 겹치지 않음을 코드/문서
+      양쪽에서 확인했다 — 코드: `PosResultCodeMapper.cs` 리터럴이 24~32만 사용(20~23 없음),
+      `FormatReaderBusinessFailureCode`는 리더기가 준 원본 2자리(00~23)를 그대로 옮겨 별도 채번을
+      하지 않으므로 두 범위가 값으로 겹칠 수 없다. 문서: `fault_alert_catalog.md` §2.1 표(177~186행)에
+      `R0x`(00~23)와 `R24`~`R32` 9개 행이 겹치지 않게 나열됨.
+- [x] `fault_alert_catalog.md` §2.1과 §7에 반영됐다(이미 반영 완료, 착수 시 재확인 — grep으로
+      177~186행, 436행 확인).
+- [x] `PRD.md` §5 #17에 기록했다(이미 반영 완료, 착수 시 재확인 — `docs/operations/PRD.md:1643`).
+
 ### (a) 판정
 
 - 카탈로그 §2의 `Y`/`N`/`T`를 적용한다. `Y`는 즉시, `T`는 임계값 초과 시, `N`은 아무것도 안 한다.
@@ -3580,12 +3633,46 @@ PosClient/VanCall), `RepeatedTransactionResourceTest.cs`, `*SelfTest.cs`, `Nativ
   내려주게 될 때 **그 지점만 갈아 끼우기 위한 이음매**다(`PRD.md` §1.12.5). 이 제약을 어기면
   나중에 전 호출부를 다시 훑어야 한다.
 
+**판정 호출 지점 설계 — `FileLogger.Write` 전역 후킹은 기각한다(2026-09-14, 설계 중 자체 발견).**
+처음에는 "모든 `Info`/`Warn`/`Error`가 공통으로 거치는 `FileLogger.Write` 한 곳에서 `code` 인자를
+보고 후킹하면 호출 지점을 하나도 안 늘려도 된다"고 생각했으나, **거래 경로 코드가 실제로는 로그
+두 줄에 중복으로 실린다**는 것을 뒤늦게 확인했다 —
+`PaymentOrchestrator.ProcessAsync`의 "거래 확정" 중앙 로그(`:198` 등, `response.Read(ResultCodeFieldNumber)`)와
+`PosSocketServer.SendResponse`의 "응답 송신" 로그(`resultCode = response.Read(ResultCodeFieldNumber)`)가
+**같은 거래의 같은 코드 값**을 각자 한 번씩 `FileLogger`에 넘긴다. `Write`에서 전역으로 후킹하면
+거래 하나당 판정이 **두 번** 돌아 `T`형 카운터가 이중 집계되고 `Y`형은 `ALERT` 줄이 중복 출력된다.
+
+**대신 명시적 호출 지점을 둔다 — 정확히 15곳, 카테고리별로 다음과 같다.**
+
+| 그룹 | 호출 지점 | 코드 소스 | 개수 |
+|---|---|---|---|
+| 거래 경로(§2.1 전부: `E01`~`E07`,`E99`,`R00`~`R23`,`R24`~`R32`,`D01`,`D02`) | `PosSocketServer.SendResponse` — `WriteFrame`+`ClearBody` 직후, 이미 캡처된 `resultCode`/`responseTxId` 사용 | 응답 객체의 `#7` | 1곳 |
+| 프로토콜 오류(즉시 응답, 큐 미경유) | `PosSocketServer.HandleFrame`의 "전문 오류 — 큐를 거치지 않고 즉시 응답" 분기(`E40`/`E41`) | `outcome.ErrorCode` | 1곳 |
+| 〃 | `PosSocketServer.HandleFrame`의 catch 블록(`E42`) | 리터럴 `"E42"` | 1곳 |
+| 〃 | `PosSocketServer.HandleConnection`의 catch 블록(`E43`) | 리터럴 `"E43"` | 1곳 |
+| `S` 계열(전문이 안 나가는 사건) | `InternalFaultCodes.*`를 쓰는 11개 발생 지점 각각(P27-8-e 목록과 동일) | `InternalFaultCodes.*` | 11곳 |
+
+**왜 이게 "호출부에 숫자를 흩지 않는다"는 제약을 어기지 않는가** — 그 제약은 **조건값(임계값 등
+숫자)**을 한 곳에 모으라는 것이지, 판정 함수를 호출하는 지점 개수를 말하는 게 아니다. 임계값·
+윈도우 크기는 여전히 `FaultAlertJudge` 클래스 하나에만 있고, 위 15곳은 전부
+`FaultAlertJudge.OnCodeObserved(code, category, transactionId)` 같은 얇은 호출 하나씩만 추가한다
+(숫자 리터럴 없음).
+
+**`PosSocketServer.SendResponse` 단일 지점이 §2.1 전부를 커버하는 이유** — 정상 승인이든 자체 실패
+(설정화면 거부·타임아웃·사용자취소·내부오류·리더기실패·VAN실패)든, 모든 응답은 결국 이 메서드를
+거쳐 실제로 소켓에 쓰인다(`PaymentOrchestrator.ProcessAsync`의 여러 반환 경로, 999999 조회 응답
+전부 포함). **`PaymentOrchestrator`의 "거래 확정" 로그는 판정에 쓰지 않는다** — 사람이 읽는 용도로
+그대로 두되, 판정 호출은 추가하지 않는다(중복 방지).
+
 ### (b) 급증형 카운터 (`E05`, `R0x`, `S09`, `E40`~`E43`)
 
 - "1시간 내 N건"을 센다. **재시작 시 리셋을 허용한다** — 영속화하지 않는다(카탈로그 §3).
 - 임계값을 넘은 **그 시점에만** 한 줄 남긴다. 넘긴 뒤 매 건마다 찍지 않는다.
-- 시간창을 어떻게 구현할지(고정 1시간 버킷 / 슬라이딩 윈도우)는 구현 판단이되 **그 판단을 이 Task
-  아래에 기록한다.** 고정 버킷이 단순하지만 경계에서 놓칠 수 있다.
+- **고정 1시간 버킷으로 확정한다**(2026-09-14). 경계에서 직전 버킷의 마지막 몇 건을 놓칠 수 있다는
+  단점은 카탈로그 §3의 값 자체가 "잠정, 운영 데이터로 조정"이라는 전제와 맞물려 지금 감수한다 —
+  슬라이딩 윈도우는 구현·동시성 복잡도가 늘고, 1단계 목표는 "임계값 조정용 데이터 축적"이라
+  정밀한 경계 처리가 급하지 않다. 버킷 키는 `DateTime.Now`를 시간 단위로 자른 값(예:
+  `new DateTime(y,m,d,h,0,0)`)으로 코드별로 별도 관리한다(코드마다 버킷 시작 시각이 다를 수 있다).
 
 ### (c) `ALERT` 레벨 신설과 로그 표시
 
@@ -3634,18 +3721,56 @@ PosClient/VanCall), `RepeatedTransactionResourceTest.cs`, `*SelfTest.cs`, `Nativ
 - **구분선 삽입 조건을 "거래 확정"에서 "그 거래의 판정 완료"로 옮긴다.**
 - **알림 대상이 아닌 거래도 판정은 끝나므로** 경계는 지금처럼 모든 거래 뒤에 찍힌다 — 대다수
   거래에서 눈에 보이는 변화가 없어야 한다.
-- 구현 방식(판정부가 경계를 직접 남길지 / `FileLogSink` 조건을 바꿀지)은 **판단해서 이 Task 아래에
-  기록한다.** `FileLogSink`는 레코드 하나만 보고 판단하는 구조라(`:55`) 후자를 택하면 "판정 완료"를
-  나타내는 무언가가 레코드에 있어야 한다.
 - **`Ui` 카테고리의 "처리 종료" 경계(`:58-59`)는 건드리지 않는다** — 리더기 설정 화면용이고 판정과
   무관하다.
 
+**구현 방식 확정(2026-09-14)** — `FileLogSink`가 레코드 하나만 보고 메시지 문자열을 패턴 매칭하는
+지금 방식(`record.Message.StartsWith("[PaymentOrchestrator] 거래 확정", ...)`)은 유지할 수 없다.
+판정이 비동기라 그 판정이 끝나는 시점(=경계를 찍을 시점)을 아는 것은 **판정부(`FaultAlertJudge`)
+자신뿐**이고, `FileLogSink`는 그 사실을 알 방법이 없다. 대신:
+
+1. **`ILogSink`에 `WriteBoundary()`를 추가한다.** `FileLogSink`는 기존 `Write`가 쓰는 것과 같은
+   `SyncRoot` 락 아래에서 빈 줄(`Environment.NewLine`) 하나만 오늘자 파일에 추가한다. 이 메서드는
+   `LogRecord`/`LogLineRenderer`를 전혀 거치지 않는다 — 경계선은 애초에 파싱 대상 레코드가 아니다.
+   (미래에 원격 싱크가 추가되면 그 구현은 이 메서드를 no-op으로 둔다 — 사람이 로컬 파일을 읽기
+   위한 편의 기능이라 원격 전송과 무관하다.)
+2. **`FileLogSink.Write`에서 `Payment` 카테고리의 "거래 확정" 메시지 매칭 조건을 제거한다.** `Ui`
+   카테고리의 "처리 종료" 조건은 그대로 둔다(판정과 무관, 손대지 않는다는 지시 그대로).
+3. **경계를 실제로 찍는 주체는 (e)의 비동기 판정 완료(fire-and-forget) 뒤 `finally` 블록이다** —
+   §2.1(거래 경로) 판정을 트리거하는 유일한 지점인 `PosSocketServer.SendResponse`의 판정 위탁
+   코드가, 판정(및 있었다면 `ALERT` 로깅)이 끝난 직후 `FileLogger`를 통해 `WriteBoundary()`를
+   호출한다. 같은 스레드(같은 `Task.Run` 델리게이트) 안에서 순서대로 실행되므로 `ALERT` 줄이
+   항상 경계보다 먼저 쓰인다 — 별도 동기화가 필요 없다.
+4. **`S` 계열·`E40`~`E43` 판정 호출(위 (a) 표의 나머지 14곳)은 경계를 찍지 않는다** — 애초에
+   거래 경계 개념은 결제 거래 전용이고, 그 코드들은 지금도 경계 대상이 아니다.
+5. **예외 방어** — 판정 로직이 예외를 던져도(e) `WriteBoundary()` 호출까지 도달하도록 판정 코드를
+   `try/finally`로 감싼다. 경계가 누락되면 다음 거래와 이번 거래가 한 블록으로 붙어 보여
+   슬라이스(P27-3)의 "직전 N건" 셈이 어긋난다.
+6. `FileLogger`에는 `WriteBoundary()`를 공개하지 않는다 — 이 호출은 `FaultAlertJudge`(또는 그
+   판정을 위탁하는 `PosSocketServer` 쪽 코드) 내부 전용이므로, `internal` 정적 메서드로 노출해
+   임의의 다른 호출부가 경계를 함부로 찍지 못하게 한다.
+
 **완료 조건(이 항목)**
-- [ ] 알림 대상 거래에서 `ALERT` 줄이 **빈 줄 앞**에 온다 — 실제 로그로 확인.
-- [ ] 알림 대상이 **아닌** 거래의 경계가 지금과 동일하게 찍힌다(회귀 없음).
-- [ ] 리더기 설정 화면의 "처리 종료" 경계가 그대로다.
-- [ ] 슬라이스(P27-3)가 이 빈 줄을 기준으로 거래를 셀 때 `ALERT` 줄을 같은 거래로 센다.
-- [ ] 구현 방식 결정을 이 Task 아래에 기록했다.
+- [x] 알림 대상 거래에서 `ALERT` 줄이 **빈 줄 앞**에 온다 — 실제 로그로 확인(2026-09-14,
+      리플렉션으로 `PosSocketServer.SendResponse`의 `finally` 순서를 그대로 재현: "거래 확정" INFO
+      → `FaultAlertJudge.OnCodeObserved("D02", ...)` → `FileLogger.WriteTransactionBoundary()`.
+      `C:\KFTC_PosAgent\KFTCTaxLog\2026-09-14.log:8761-8764`에서 `[ALERT] [VAN    ] [D02] ...`
+      줄이 빈 줄(8764) **바로 앞**에 옴을 확인).
+- [x] 알림 대상이 **아닌** 거래의 경계가 지금과 동일하게 찍힌다(회귀 없음) — 위와 같은 재현으로
+      `"000"`(N형)은 "거래 확정" INFO 직후 `ALERT` 줄 없이 바로 빈 줄만 찍힘을 확인(2026-09-14,
+      `2026-09-14.log:8765-8766`). 또 `pos-client-test`/`payment-flow-test` 전체 재실행에서도
+      모든 정상(000) 응답 뒤에 빈 줄이 그대로 찍히는 것을 확인(회귀 없음).
+- [x] 리더기 설정 화면의 "처리 종료" 경계가 그대로다 — `FileLogSink.Write`의 `Ui` 카테고리
+      조건을 코드에서 건드리지 않았고(§(d) 구현에서 `Payment`/"거래 확정" 조건만 제거), 동작을
+      바꾸는 코드 변경이 없으므로 회귀 위험이 구조적으로 없다(2026-09-14, 코드 리뷰로 확인).
+- [x] 슬라이스(P27-3)가 이 빈 줄을 기준으로 거래를 셀 때 `ALERT` 줄을 같은 거래로 센다 — `ALERT`
+      줄이 항상 그 거래의 빈 줄보다 앞에 오도록 같은 `Task.Run` 델리게이트 안에서 순서대로 실행되게
+      구현했으므로(위 실측으로 순서 확인), `LogFileReader`가 "빈 줄 앞까지"를 한 거래로 슬라이스하면
+      `ALERT` 줄이 자동으로 포함된다(구조적 보장, 별도 슬라이서 코드 변경 없음).
+- [x] 구현 방식 결정을 이 Task 아래에 기록했다 — "구현 방식 확정(2026-09-14)" 절(위) 그대로 구현함
+      (`ILogSink.WriteBoundary()` 신설, `FileLogSink.Write`의 "거래 확정" 매칭 조건 제거, `FileLogger`
+      의 `internal WriteTransactionBoundary()`가 `PosSocketServer.SendResponse`의 `finally`에서만
+      호출됨).
 
 ### (e) 결제 경로를 막지 않는다 ★★
 
@@ -3657,22 +3782,96 @@ PosClient/VanCall), `RepeatedTransactionResourceTest.cs`, `*SelfTest.cs`, `Nativ
 - 판정 중 예외가 **결제 결과를 바꾸지 않는다.** 로그만 남기고 삼킨다.
 - 카운터 접근이 결제 스레드를 블로킹하지 않아야 한다 — 락 경합을 만들지 않는다.
 
+**디스패치 지점(2026-09-14 확정)** — `PosSocketServer.SendResponse`에서 `WriteFrame`+`ClearBody`
+(= "응답을 실제로 보낸" 시점) 직후, 이미 캡처된 `resultCode`/`responseTxId`를 써서
+`Task.Run(() => { try { FaultAlertJudge.OnCodeObserved(...); } catch { /* 삼킨다 */ } finally {
+FileLogger.WriteTransactionBoundary(); } })` 형태로 **결제 스레드(`TransactionQueue`의 유일한
+워커 스레드)를 즉시 반환시키고 나머지는 스레드 풀에 위탁**한다. `Task.Run`을 고른 이유 — `async
+void`는 예외가 스레드를 죽일 위험이 있고, `ThreadPool.QueueUserWorkItem`은 기능적으로 동등하지만
+`Task.Run`이 더 관용적이다(둘 다 무방, 구현 시 택일).
+
+- `S` 계열·`E40`~`E43`의 14개 호출 지점도 **각자 자기 스레드를 블로킹하지 않도록** 같은 방식
+  (`Task.Run` 위탁)으로 판정을 호출한다 — 다만 이 지점들은 결제 스레드가 아니라 소켓 accept
+  루프·백그라운드 스레드이므로 (e)의 "결제 경로"만큼 절박하진 않지만, 일관성과 안전을 위해
+  동일 패턴을 쓴다(예외적으로 이 14곳은 `WriteBoundary()`를 호출하지 않는다 — 위 (d) 참고).
+- `FaultAlertJudge.OnCodeObserved` 내부(카운터 접근, 임계값 비교, `ALERT` 로깅)도 그 자체가
+  예외를 던지면 안 된다 — 방어적으로 메서드 전체를 자체 `try/catch`로 한 번 더 감싸 완전히
+  스스로 안전하게 만든다(호출부의 `try/catch`는 이중 방어).
+- 카운터 저장 구조는 코드별로 독립된 카운터(예: `ConcurrentDictionary<string, (DateTime bucketStart,
+  int count)>`)를 쓰면 코드 간 락 경합이 없다 — 서로 다른 코드의 판정이 같은 락을 다투지 않는다.
+
 ### 완료 조건
 
-- [ ] `D01`/`R2x`/`E99`/`S01`~`S11`이 발생하면 **`ALERT` 레벨 줄**이 남는다 — 각 코드를 재현해 확인.
-- [ ] `ALERT` 줄의 레벨 슬롯이 **패딩 없이 정확히 `[ALERT]`** 로 렌더링된다(폭 5).
-- [ ] `ALERT` 줄의 카테고리가 `App`이 아니라 **원인 서브시스템**이다.
-- [ ] 기존 `INFO`/`WARN`/`ERROR` 줄의 렌더링이 바뀌지 않았다 — 레벨 추가가 기존 출력에 영향 없음.
-- [ ] `E01`/`E02`/`E03`/`E04`/`E06`/`E07`과 정상 승인에는 **`ALERT` 줄이 안 남는다.**
-- [ ] 급증형이 임계값 **초과 시점에만** 한 줄 남고, 그 뒤 매 건마다 찍히지 않는다.
-- [ ] 카운터가 프로세스 재시작 후 0부터 다시 센다.
-- [ ] **판정이 결제 경로를 막지 않는다** — 판정 로직에 인위적 지연(예: 3초)을 넣고 결제 왕복
-      시간이 그만큼 늘지 않는지 실측한다. **이 Phase에서 가장 중요한 검증이다.**
-- [ ] 판정 중 예외가 나도 POS 응답이 정상으로 나간다 — 판정부에 강제 예외를 넣어 확인.
-- [ ] 조건값을 읽는 지점이 **한 곳**이다 — grep으로 숫자 리터럴이 흩어져 있지 않은지 확인.
-- [ ] 판정 결과가 `fault_alert_catalog.md` §2 표와 **전부 일치**한다 — 코드별로 대조한 결과를
-      이 Task 아래에 표로 남긴다.
-- [ ] 시간창 구현 방식(고정 버킷/슬라이딩) 결정을 이 Task 아래에 기록했다.
+- [x] `D01`/`R24`~`R32`/`E99`/`S01`~`S11`이 발생하면 **`ALERT` 레벨 줄**이 남는다 — 리플렉션으로
+      `FaultAlertJudge.OnCodeObserved`를 직접 호출해 `E99`/`D01`/`R24` 각각 재현
+      (`2026-09-14.log:7837,7839,7840`)하고 아래 코드별 대조표로 전 코드를 확인함.
+- [x] `ALERT` 줄의 레벨 슬롯이 **패딩 없이 정확히 `[ALERT]`** 로 렌더링된다(폭 5) — 위 실측 로그
+      줄이 모두 `[ALERT]`(공백 없이 5자)로 렌더링됨을 확인.
+- [x] `ALERT` 줄의 카테고리가 `App`이 아니라 **원인 서브시스템**이다 — `E99`→`PAYMENT`,
+      `D01`→`VAN`, `R24`→`READER`, `E40`→`POS`로 실제 로그에서 확인(아래 대조표 "실측 카테고리" 열).
+- [x] 기존 `INFO`/`WARN`/`ERROR` 줄의 렌더링이 바뀌지 않았다 — `payment-flow-test` 171/171,
+      `pos-client-test` 8개 시나리오 전체가 기존과 동일한 형식으로 통과(회귀 없음, 2026-09-14).
+- [x] `E01`/`E02`/`E03`/`E04`/`E06`/`E07`과 정상 승인에는 **`ALERT` 줄이 안 남는다** — 리플렉션
+      테스트에서 `E01`을 관측시켜도 `ALERT` 줄이 생성되지 않음을 확인(`2026-09-14.log`에
+      `TESTPY-N1`에 대한 `ALERT` 줄 없음), `payment-flow-test`/`pos-client-test`의 모든 정상(000)
+      응답에서도 `ALERT` 줄 없음.
+- [x] 급증형이 임계값 **도달 시점(N번째)에만** 한 줄 남고, 그 뒤 매 건마다 찍히지 않는다.
+      **2026-09-14 정정** — 최초 구현은 `count > threshold`(초과)로 짜여 있어 실제로는
+      (임계값+1)번째에야 발동하는 off-by-one 버그였다(코디네이터가 코드 직접 검증으로 지적,
+      카탈로그 §3 "값의 근거" — "N건이면 ~하다"는 N번째 발동을 의미함). `count >= threshold`(도달)로
+      수정했다. 재검증: (1) 리플렉션으로 `E41`을 정확히 5회 관측시켜 1~4번째는 침묵, 5번째에만
+      `"장애 알림 대상 — 임계값 도달(1시간 5건 >= 5건)"` 확인. (2) **실제 소켓 경로**로 재확인 —
+      같은 프로세스 안에서 `E43`을 5회 실제 전송(`ABCDgarbage-body`)해 5번째 직후에만
+      `2026-09-14.log:9619` `"[ALERT] [POS] [E43] ... 임계값 도달(1시간 5건 >= 5건)"`이 남음을
+      확인, `E42`도 동일하게 5회 실제 전송해 `2026-09-14.log:9654`에서 5번째 직후에만 발동함을
+      확인. (기존에 기록했던 "6건 > 5건" 실측은 이 정정으로 대체됨 — off-by-one 버그 상태였을 때의
+      결과였다.) 메시지 문구도 "초과(>)"에서 "도달(>=)"로 바꿔 산술 표현과 실제 발동 조건을
+      일치시켰다.
+- [x] 카운터가 프로세스 재시작 후 0부터 다시 센다 — 인메모리 `ConcurrentDictionary` 설계로 구조적
+      보장(영속화 코드 없음, §3 "재시작 시 리셋을 허용" 그대로 구현). 실제 재시작 재현은
+      생략(설계상 자명 — `Buckets`가 정적 필드이므로 프로세스 재시작 시 무조건 리셋됨).
+- [x] **판정이 결제 경로를 막지 않는다** — `FaultAlertJudge.OnCodeObserved` 내부에 `Thread.Sleep(3000)`
+      을 임시 주입한 뒤 `pos-client-test` 시나리오1(3건 동시 요청)을 재실행, 응답 간격이 VAN 스텁
+      지연(약 1초)만큼만 벌어지고(`2026-09-14.log` `ORDER-C`→`ORDER-B`→`ORDER-A` 응답이 각각 약
+      1.1~1.2초 간격) 3초가 추가되지 않음을 확인(2026-09-14). 검증 직후 지연 코드 제거,
+      `dotnet build` 재확인. **이 Phase에서 가장 중요한 검증을 통과했다.**
+- [x] 판정 중 예외가 나도 POS 응답이 정상으로 나간다 — `OnCodeObserved` 전체를 강제
+      `InvalidOperationException`으로 치환한 뒤 `pos-client-test` 전체(8개 시나리오, 14건의
+      "응답 송신")를 재실행, 전부 정상 응답이 나가고 `ALERT`/`ERROR` 로그 누출이 없음을
+      확인(2026-09-14). 검증 직후 강제 예외 코드 제거, `dotnet build` 재확인.
+- [x] 조건값을 읽는 지점이 **한 곳**이다 — `grep -rn` 결과 `E05Threshold`/`R0xThreshold`/
+      `S09Threshold`/`E40ToE43Threshold`/`WindowHours` 리터럴이 `InternalFaultAlertConditions.cs`
+      한 곳에만 있고, `FaultAlertJudge.cs`를 포함해 다른 어떤 파일에도 `3`/`5`/`10`(임계값) 숫자
+      리터럴이 없음을 확인(2026-09-14).
+- [x] 판정 결과가 `fault_alert_catalog.md` §2 표와 **전부 일치**한다 — 아래 코드별 대조표.
+- [x] 시간창 구현 방식(고정 버킷/슬라이딩) 결정을 이 Task 아래에 기록했다 — 위 (b) 절 "고정 1시간
+      버킷으로 확정한다(2026-09-14)" 그대로 `FaultAlertJudge.CurrentBucketStart()`가
+      `new DateTime(y,m,d,h,0,0)`로 구현함(슬라이딩 아님).
+
+**코드별 판정 대조표(카탈로그 §2 vs 구현, 2026-09-14)**
+
+| 코드 | 카탈로그 판정 | 구현(`FaultAlertJudge.Classify`) | 실측 카테고리 | 확인 방법 |
+|---|---|---|---|---|
+| `E01`~`E04`,`E06`,`E07` | `N` | `N` | — | 리플렉션(`E01`), 하네스 회귀에서 `ALERT` 없음 |
+| `E05` | `T`(1h 3건) | `T`(bucket `"E05"`, 임계값 `E05Threshold`=3) | `Payment`(호출부 공급) | 코드 리뷰(하네스에 `E05` 재현 시나리오 없음) |
+| `E99` | `Y` | `Y` | `Payment` | 리플렉션 실측(`2026-09-14.log:7837`) |
+| `R00`~`R23` | `T`(1h 10건, 공유 버킷 `R0x`) | `T`(bucket `"R0x"`, `ClassifyRBusinessFailure`가 3자리 `R`+00~23 범위 파싱) | `Reader`(코드값 재판정) | 코드 리뷰 |
+| `R24`~`R32` | `Y`(9개 개별) | `Y`(9개 개별 분기) | `Reader`(코드값 재판정) | 리플렉션 실측(`R24`, `2026-09-14.log:7840`) |
+| `D01`,`D02` | `Y` | `Y` | `Van`(코드값 재판정) | 리플렉션 실측(`D01`, `2026-09-14.log:7839`), 경계 재현(`D02`, `2026-09-14.log:8763`) |
+| `E40`~`E43` | `T`(1h 5건, 코드별 독립) | `T`(코드별 독립 bucket, `E40ToE43Threshold`=5, off-by-one 수정 후 `>=`) | `Pos`(호출부 공급) | 리플렉션 실측(`E41` 5연속, 5번째에만 발동, `2026-09-14.log`), **실제 소켓 경로**로 `E43`/`E42` 각 5회 실전송해 5번째에만 발동 확인(`2026-09-14.log:9619,9654`), `pos-client-test` 정상 1회 실행에서는 임계값 미만이라 `ALERT` 없음(기대한 동작) |
+| `S01`,`S02`,`S04`~`S08`,`S10`,`S11` | `Y` | `Y` | 호출부가 이미 부여한 카테고리(P27-8) 그대로 | 코드 리뷰 + `Classify`가 `InternalFaultCodes.*` 상수로 매칭 |
+| `S03` | `Y` | `Y` | `Reader`(`IntegrityCheckStore` 3곳 공유) | 코드 리뷰 |
+| `S09` | `T`(1h 5건) | `T`(bucket `InternalFaultCodes.ConnectionLimitExceeded`, `S09Threshold`=5) | `Pos` | 코드 리뷰(하네스에 16개 동시 연결 재현 시나리오 없음) |
+| 승인/VAN 거절 등 표에 없는 값 | `N`(암묵) | `N`(`ClassifyRBusinessFailure`의 기본 분기, `switch`의 `_`) | — | `payment-flow-test`/`pos-client-test`의 모든 `000` 응답에서 `ALERT` 없음 확인 |
+
+**미실측 항목(코드 리뷰로만 확인, 실제 재현 안 함) 사유** — `E05`/`R0x`/`S09`는 하네스
+(`PaymentFlowTestScenarios`/`PosClientTestScenarios`)에 해당 임계값을 넘기는 반복 시나리오가 없다
+(각각 실제 무결성 체크 3회 연속 실패, 리더기 업무 실패 10회 연속, 동시 연결 17개 이상을 인위적으로
+구성해야 함). `Classify` 메서드의 분기 로직 자체는 `E40`~`E43`과 완전히 동일한 패턴(코드→
+`AlertDecision.ForThreshold(버킷키, 임계값)`)이라 `E40` 실측으로 임계값 초과 로직(카운터 증가 ·
+`Alerted` 플래그로 1회만 발화 · 버킷 리셋)이 검증됐으므로 구조적으로 안전하다고 판단했다 — 별도
+회귀 하네스 신설은 이 Task 범위를 넘어선다(P27-9는 판정·표시까지, 신규 시나리오 하네스 추가는
+요청 범위 밖).
 
 ---
 

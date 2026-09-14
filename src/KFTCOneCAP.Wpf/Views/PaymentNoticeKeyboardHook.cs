@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using System.Windows.Threading;
 using KFTCOneCAP.Wpf.Interop;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
@@ -77,6 +78,11 @@ internal sealed class PaymentNoticeKeyboardHook : IDisposable
                 LogCategory.Ui,
                 $"결제 알림창 키보드 전역 훅 설치 실패 (Win32Error={Marshal.GetLastWin32Error()})",
                 InternalFaultCodes.KeyboardHookFailure, transactionId: null);
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.KeyboardHookFailure, LogCategory.Ui, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
         }
     }
 

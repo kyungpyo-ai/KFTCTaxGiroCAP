@@ -10,7 +10,7 @@ namespace KFTCOneCAP.Wpf.Protocol.Pos;
 /// <c>Services/Payment/PosResultCodeMapper</c>에 있다(P17-4에서 <c>Protocol/Pos</c>가 리더기 DLL 오류
 /// 종류를 알아서는 안 된다는 계층 규칙 때문에 옮겼다).
 ///
-/// Flow(<c>Services/Payment/</c>)는 이 열거형만 다루고 전문 코드 문자열("E01", "R20" 등)을 직접
+/// Flow(<c>Services/Payment/</c>)는 이 열거형만 다루고 전문 코드 문자열("E01", "R24" 등)을 직접
 /// 리터럴로 쓰지 않는다 — grep으로 점검 가능해야 한다(P15-3/P17-4 완료 조건).
 /// </summary>
 internal enum PosPaymentResultCode

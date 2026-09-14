@@ -95,6 +95,41 @@ public static class FileLogger
 
     public static void Error(LogCategory category, string message, string? code, string? transactionId) => Write(LogLevel.Error, category, code, transactionId, message);
 
+    /// <summary>
+    /// Phase 27(docs/operations/development_plan.md P27-9, fault_alert_catalog.md §1) — 장애 알림
+    /// 판정(<c>FaultAlertJudge</c>) 전용 <see cref="LogLevel.Alert"/> 오버로드 3종. 기존
+    /// <see cref="Info(string)"/>/<see cref="Warn(string)"/>/<see cref="Error(string)"/> 3-계층
+    /// 패턴을 그대로 따른다. <b>호출부(FaultAlertJudge)가 직접 <see cref="Write"/>를 부르지 않게 한다.</b>
+    /// </summary>
+    public static void Alert(string message) => Write(LogLevel.Alert, category: null, code: null, transactionId: null, message);
+
+    public static void Alert(LogCategory category, string message) => Write(LogLevel.Alert, category, code: null, transactionId: null, message);
+
+    public static void Alert(LogCategory category, string message, string? code, string? transactionId) => Write(LogLevel.Alert, category, code, transactionId, message);
+
+    /// <summary>
+    /// Phase 27(docs/operations/development_plan.md P27-9-(d)) — 장애 알림 판정이 끝난 직후 거래
+    /// 경계(빈 줄)를 찍는 전용 진입점. <b>공개 API가 아니다</b> — <c>FaultAlertJudge</c>를 위탁하는
+    /// <c>PosSocketServer.SendResponse</c> 내부에서만 호출한다(임의의 다른 호출부가 경계를 함부로
+    /// 찍지 못하게 <c>internal</c>로 제한). <see cref="LogRecord"/>/<see cref="LogLineRenderer"/>를
+    /// 거치지 않고 등록된 싱크의 <see cref="ILogSink.WriteBoundary"/>를 그대로 호출한다.
+    /// </summary>
+    internal static void WriteTransactionBoundary()
+    {
+        ILogSink[] sinks = _sinks;
+        foreach (ILogSink sink in sinks)
+        {
+            try
+            {
+                sink.WriteBoundary();
+            }
+            catch
+            {
+                // 싱크 실패를 조용히 무시한다(Dispatch와 동일한 방어).
+            }
+        }
+    }
+
     private static void Write(LogLevel level, LogCategory? category, string? code, string? transactionId, string message)
     {
         try

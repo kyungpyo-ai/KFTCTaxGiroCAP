@@ -20,4 +20,13 @@ public interface ILogSink
     /// 처리해야 한다.
     /// </summary>
     void Write(LogRecord record);
+
+    /// <summary>
+    /// Phase 27(docs/operations/development_plan.md P27-9-(d)) — 거래 경계(빈 줄)를 직접 찍는다.
+    /// <see cref="LogRecord"/>/<c>LogLineRenderer</c>를 거치지 않는다 — 경계선은 애초에 파싱 대상
+    /// 레코드가 아니다. <b>공개 API가 아니다</b> — <c>FileLogger.WriteTransactionBoundary</c>(내부
+    /// 전용)만 이 메서드를 호출한다. 로컬 파일이 없는 원격 싱크는 no-op으로 구현한다(사람이 로컬
+    /// 파일을 읽기 위한 편의 기능이라 원격 전송과 무관).
+    /// </summary>
+    void WriteBoundary();
 }

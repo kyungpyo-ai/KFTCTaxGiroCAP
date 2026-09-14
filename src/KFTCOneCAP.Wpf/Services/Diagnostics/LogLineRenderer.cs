@@ -95,12 +95,15 @@ public static class LogLineRenderer
         return sb.ToString();
     }
 
-    /// <summary>레벨 슬롯만 폭 5로 왼쪽 정렬한다(INFO/WARN → 4자 + 공백 1개, ERROR → 5자 그대로).</summary>
+    /// <summary>레벨 슬롯만 폭 5로 왼쪽 정렬한다(INFO/WARN → 4자 + 공백 1개, ERROR/ALERT → 5자 그대로).
+    /// Phase 27(P27-9) — <see cref="LogLevel.Alert"/>는 장애 알림 판정(<c>FaultAlertJudge</c>) 전용
+    /// 최상위 심각도다.</summary>
     private static string LevelText(LogLevel level) => level switch
     {
         LogLevel.Info => "INFO ",
         LogLevel.Warn => "WARN ",
         LogLevel.Error => "ERROR",
+        LogLevel.Alert => "ALERT",
         _ => throw new ArgumentOutOfRangeException(nameof(level), level, "매핑되지 않은 LogLevel"),
     };
 

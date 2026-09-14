@@ -132,6 +132,11 @@ public static class LogRetentionCleaner
                     LogCategory.App,
                     $"로그 정리 — 파일 삭제 실패 {failedCount}건(잠금 등, 다음 트리거 때 재시도)",
                     InternalFaultCodes.LogRetentionFailure, transactionId: null);
+                Task.Run(() =>
+                {
+                    try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.LogRetentionFailure, LogCategory.App, null); }
+                    catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+                });
             }
         }
         catch

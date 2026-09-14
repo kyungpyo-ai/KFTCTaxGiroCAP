@@ -205,6 +205,25 @@
   남아 있었다 — 세션 rate limit 중단으로 인한 미반영. 2026-09-14 마무리 검증 세션에서 pos-client-test
   Scenario1~8 재실행(17:09:43~17:10:12, ERROR 0건)까지 마친 뒤 아래에서 실제로 requireAdministrator로
   되돌렸다.)
+
+  [원복 완료, 2026-09-14] Phase 27 P27-9(알림 판정과 로그 표시) 검증을 위해 무인 자동화로
+  payment-flow-test/pos-client-test 하네스 재실행과, 리플렉션으로 FaultAlertJudge.OnCodeObserved를
+  직접 호출하는 판정 대조(Y/N/T 각 유형)를 하기 위해 한시적으로 asInvoker로 낮췄다.
+  payment-flow-test 171/171(18:00:59)을 최종 확인, pos-client-test 시나리오 1~8 전체 ERROR 0건을
+  확인(17:56~17:58, 17:59:42 재확인)했다. 비차단 검증(OnCodeObserved에 3초 Thread.Sleep 임시 주입 후
+  pos-client-test 응답 간격이 VAN 스텁 지연(약 1.1~1.2초)만큼만 벌어짐을 확인, 지연 코드 즉시 제거)과
+  예외 방어 검증(OnCodeObserved 전체를 강제 InvalidOperationException으로 치환해도 14건 모두
+  "응답 송신"이 정상 기록되고 ALERT/ERROR 누출 없음을 확인, 강제 예외 코드 즉시 제거)도 이 세션에서
+  함께 수행했다. 모든 검증이 끝난 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-14] 코디네이터가 코드 직접 검증으로 `FaultAlertJudge.cs`의 급증형(T) 판정에서
+  off-by-one 버그를 발견(`count > threshold`라 임계값+1번째에야 발동 — 카탈로그 §3 "N건이면 ~하다"는
+  N번째 발동을 의미)해, `count >= threshold`로 수정하고 재검증하기 위해 한시적으로 asInvoker로
+  낮췄다. 리플렉션으로 `E41`을 정확히 5회 관측시켜 5번째에만 발동함을 확인(로그
+  "임계값 도달(1시간 5건 >= 5건)"), 이어서 **실제 소켓 경로**로 `E43`/`E42`를 각각 정확히 5회
+  실제 전송해(같은 프로세스 내에서) 5번째 발생 직후에만 `ALERT` 한 줄이 남고 1~4번째는 침묵함을
+  확인했다(수정 전 실측이던 "6건 > 5건"을 대체). payment-flow-test 171/171, pos-client-test 8개
+  시나리오 전체(ERROR 0건) 재확인 후 즉시 requireAdministrator로 되돌렸다.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

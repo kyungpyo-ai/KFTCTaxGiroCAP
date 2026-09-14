@@ -115,6 +115,11 @@ internal sealed class TransactionQueue
                 LogCategory.Payment,
                 $"[TransactionQueue] 완료 콜백 처리 중 예외 전문={item.Request.TransactionTypeCode}: {ex}",
                 InternalFaultCodes.ResponseDeliveryFailure, transactionId: null);
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.ResponseDeliveryFailure, LogCategory.Payment, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
         }
     }
 

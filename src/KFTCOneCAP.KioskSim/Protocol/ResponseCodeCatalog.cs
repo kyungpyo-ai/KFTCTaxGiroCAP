@@ -69,22 +69,24 @@ namespace KFTCOneCAP.KioskSim.Protocol
         };
 
         /// <summary>
-        /// 리더기 DLL(ReaderSerial.dll) 연동 레벨 실패(<c>R2x</c>). 출처:
+        /// 리더기 DLL(ReaderSerial.dll) 연동 레벨 실패(<c>R24</c>~<c>R32</c>). 출처:
         /// <c>Services/Payment/PosResultCodeMapper.cs</c>의 <c>DllCallFailure</c> 분기(값만 옮김).
+        /// 2026-09-14: 원래 <c>R20</c>~<c>R29</c>였으나 리더기 업무 응답코드(<c>R00</c>~<c>R23</c>)와
+        /// 값이 겹쳐 24부터 재배치했다(development_plan.md P27-9 (a-0), fault_alert_catalog.md §7).
         /// </summary>
         private static readonly Dictionary<string, string> ReaderDllFailureCode = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["R20"] = "READER_ERR_PORT_NOT_OPEN(포트가 열려 있지 않은 상태에서 명령을 시도함)",
-            ["R21"] = "READER_ERR_SEND_FAIL(명령 송신 자체가 실패함)",
-            ["R22"] = "READER_ERR_BUSY(리더기가 이미 다른 명령을 처리 중)",
-            ["R23"] = "READER_ERR_PORT_NOT_FOUND(지정한 COM 포트를 찾을 수 없음)",
-            ["R24"] = "READER_ERR_PORT_OPEN_FAIL(포트 오픈 실패)",
-            ["R25"] = "READER_ERR_COMMAND_NOT_ALLOWED(허용되지 않는 명령)",
-            ["R27"] = "CommunicationError(응답 수신 중 통신 오류)",
-            ["R28"] = "그 외 DLL 연동 오류 catch-all(PORT_CONFIG_FAIL/PORT_CLOSING/PORT_ALREADY_OPEN/" +
+            ["R24"] = "READER_ERR_PORT_NOT_OPEN(포트가 열려 있지 않은 상태에서 명령을 시도함)",
+            ["R25"] = "READER_ERR_SEND_FAIL(명령 송신 자체가 실패함)",
+            ["R26"] = "READER_ERR_BUSY(리더기가 이미 다른 명령을 처리 중)",
+            ["R27"] = "READER_ERR_PORT_NOT_FOUND(지정한 COM 포트를 찾을 수 없음)",
+            ["R28"] = "READER_ERR_PORT_OPEN_FAIL(포트 오픈 실패)",
+            ["R29"] = "READER_ERR_COMMAND_NOT_ALLOWED(허용되지 않는 명령)",
+            ["R30"] = "CommunicationError(응답 수신 중 통신 오류)",
+            ["R31"] = "그 외 DLL 연동 오류 catch-all(PORT_CONFIG_FAIL/PORT_CLOSING/PORT_ALREADY_OPEN/" +
                       "INVALID_LENGTH/BUFFER_OVERFLOW/INTERNAL/INVALID_ARGUMENT/MAX_READER_COUNT/" +
                       "INVALID_READER_ID/PINPAD_NOT_SUPPORTED 등 — 결제 흐름 중 실관찰 없음)",
-            ["R29"] = "리더기 응답을 특정할 수 없는 방어적 실패(참여 리더기 전원 송신 실패 / 성공인데 " +
+            ["R32"] = "리더기 응답을 특정할 수 없는 방어적 실패(참여 리더기 전원 송신 실패 / 성공인데 " +
                       "카드데이터가 빈 방어 경로 / 07·12 재시도 상한 초과 중 하나 — 원인 구분은 로그가 담당)",
         };
 
@@ -105,10 +107,10 @@ namespace KFTCOneCAP.KioskSim.Protocol
                 return exact;
 
             // R 계열: "R"+2자리. 리더기 업무 응답코드(R0x, 00~23 전체를 그대로 옮김)와
-            // 리더기 DLL 연동 실패(R2x, 20~29 중 일부)가 **같은 R20~R23 문자열을 공유한다** —
-            // 실제 원인은 CardReadCommandOutcome.Kind로 갈라지지만(PosResultCodeMapper.cs),
-            // 전문에 실리는 3자리 코드만 보고는 둘을 구분할 방법이 없다. 그래서 겹치는 구간은
-            // 두 가능성을 모두 보여준다(추측으로 하나만 골라 적지 않는다).
+            // 리더기 DLL 연동 실패(R24~R32)는 2026-09-14 재배치 이후 값 공간이 분리되어 더 이상
+            // 겹치지 않는다(development_plan.md P27-9 (a-0)). 과거(R20~R29 시절)에는 두 체계가
+            // 같은 문자열을 공유해 아래처럼 두 가능성을 모두 보여줘야 했으나, 지금은 이론상 항상
+            // 한쪽만 매치된다 — 그래도 방어적으로 두 사전을 모두 조회하는 구조는 유지한다.
             if (trimmed.Length == 3 && (trimmed[0] == 'R' || trimmed[0] == 'r'))
             {
                 string digits = trimmed.Substring(1);
@@ -118,13 +120,13 @@ namespace KFTCOneCAP.KioskSim.Protocol
                 if (hasBusiness && hasDllFailure)
                 {
                     return $"[리더기 업무 응답코드 실패(R0x)일 경우] {businessDesc} / " +
-                           $"[리더기 DLL 연동 실패(R2x)일 경우] {dllDesc} " +
+                           $"[리더기 DLL 연동 실패(R24~R32)일 경우] {dllDesc} " +
                            "— 코드 문자열만으로는 두 체계 중 어느 쪽인지 구분되지 않는다(로그 대조 필요).";
                 }
                 if (hasBusiness)
                     return $"리더기 업무 응답코드 실패(R0x): {businessDesc}";
                 if (hasDllFailure)
-                    return $"리더기 DLL 연동 실패(R2x): {dllDesc}";
+                    return $"리더기 DLL 연동 실패(R24~R32): {dllDesc}";
             }
 
             return "정의되지 않은 코드";

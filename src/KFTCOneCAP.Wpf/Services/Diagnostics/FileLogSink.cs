@@ -54,14 +54,40 @@ public sealed class FileLogSink : ILogSink
         // 패턴으로 특정할 수 없다(위 Payment 조건과 달리 고정 문구가 없다) — 그래서
         // ReaderSetupViewModel.LogActionBoundary가 각 동작 끝에 내용과 무관한 고정 문구
         // ("처리 종료")를 UI 카테고리로 한 줄 남기고, 여기서는 그 고정 문구만 보고 판단한다.
+        //
+        // Phase 27(P27-9-(d)) — "거래 확정" 메시지 매칭 조건은 여기서 제거됐다. 판정
+        // (FaultAlertJudge)이 비동기라 "거래 확정" 시점에는 그 판정이 끝났는지 이 싱크가 알 방법이
+        // 없다 — 경계는 이제 판정이 끝난 직후 FileLogger.WriteTransactionBoundary/WriteBoundary가
+        // 직접 찍는다(아래 참고). Ui 카테고리의 "처리 종료" 조건은 판정과 무관해 그대로 둔다.
         bool appendBlankLineAfter =
-            (record.Category == LogCategory.Payment
-                && record.Message.StartsWith("[PaymentOrchestrator] 거래 확정", StringComparison.Ordinal))
-            || (record.Category == LogCategory.Ui
-                && record.Message.EndsWith("처리 종료", StringComparison.Ordinal));
+            record.Category == LogCategory.Ui
+                && record.Message.EndsWith("처리 종료", StringComparison.Ordinal);
 
         string filePath = Path.Combine(LogPaths.LogDirectory, $"{record.Timestamp:yyyy-MM-dd}.log");
         byte[] bytes = Encoding.UTF8.GetBytes(appendBlankLineAfter ? line + Environment.NewLine : line);
+
+        lock (SyncRoot)
+        {
+            Directory.CreateDirectory(LogPaths.LogDirectory);
+            using var stream = new FileStream(
+                filePath,
+                FileMode.Append,
+                FileAccess.Write,
+                FileShare.Read);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+    }
+
+    /// <summary>
+    /// Phase 27(docs/operations/development_plan.md P27-9-(d)) — 장애 알림 판정 완료 직후 거래
+    /// 경계(빈 줄)를 직접 찍는다. <see cref="LogRecord"/>/<c>LogLineRenderer</c>를 거치지 않고
+    /// 오늘 날짜 파일에 빈 줄 하나만 추가한다. <see cref="Write"/>와 같은 <see cref="SyncRoot"/>
+    /// 락 아래에서 실행해 두 메서드가 동시에 파일에 쓰지 않도록 한다.
+    /// </summary>
+    public void WriteBoundary()
+    {
+        string filePath = Path.Combine(LogPaths.LogDirectory, $"{DateTime.Now:yyyy-MM-dd}.log");
+        byte[] bytes = Encoding.UTF8.GetBytes(Environment.NewLine);
 
         lock (SyncRoot)
         {

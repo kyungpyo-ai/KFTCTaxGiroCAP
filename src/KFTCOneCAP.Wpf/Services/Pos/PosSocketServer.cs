@@ -4,6 +4,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
+using System.Threading.Tasks;
 using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Security;
 using KFTCOneCAP.Wpf.Services.Diagnostics;
@@ -102,6 +103,11 @@ internal sealed class PosSocketServer
                 LogCategory.Pos,
                 $"[PosSocketServer] {Port} 포트 리스닝 실패({ex.SocketErrorCode}): {ex.Message} — 소켓 서버 없이 앱 계속 기동",
                 InternalFaultCodes.ListenFailure, transactionId: null);
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.ListenFailure, LogCategory.Pos, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
             _listener = null;
             return;
         }
@@ -155,6 +161,11 @@ internal sealed class PosSocketServer
                         LogCategory.Pos,
                         $"[PosSocketServer] 수락 루프가 예기치 않은 예외로 종료됨(이후 새 연결을 받지 못함): {ex}",
                         InternalFaultCodes.AcceptLoopDied, transactionId: null);
+                    Task.Run(() =>
+                    {
+                        try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.AcceptLoopDied, LogCategory.Pos, null); }
+                        catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+                    });
                 }
 
                 break; // token.IsCancellationRequested==true면 Stop()에 의한 정상 종료.
@@ -167,6 +178,11 @@ internal sealed class PosSocketServer
                     LogCategory.Pos,
                     $"[PosSocketServer] 동시 연결 상한({MaxConcurrentConnections}) 초과 — 연결 거부",
                     InternalFaultCodes.ConnectionLimitExceeded, transactionId: null);
+                Task.Run(() =>
+                {
+                    try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.ConnectionLimitExceeded, LogCategory.Pos, null); }
+                    catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+                });
                 SafeClose(client);
                 continue;
             }
@@ -246,6 +262,11 @@ internal sealed class PosSocketServer
                             LogCategory.Pos,
                             $"[PosSocketServer] {remote} 전문 형식 오류 — 응답 회신 후 연결 종료: {ex.Message}",
                             "E43", transactionId: null);
+                        Task.Run(() =>
+                        {
+                            try { FaultAlertJudge.OnCodeObserved("E43", LogCategory.Pos, null); }
+                            catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+                        });
                         byte[] framingErrorFrame = PosUnknownTransactionErrorResponse.Build("000000", "E43");
                         WriteFrame(framingErrorFrame, stream, writeLock, remote, "전문 형식 오류(E43)");
                         break;
@@ -275,6 +296,11 @@ internal sealed class PosSocketServer
                 LogCategory.Pos,
                 $"[PosSocketServer] {remote} 처리 중 예외: {ex}",
                 InternalFaultCodes.ConnectionHandlingException, transactionId: null);
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.ConnectionHandlingException, LogCategory.Pos, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
         }
         finally
         {
@@ -313,6 +339,11 @@ internal sealed class PosSocketServer
                 LogCategory.Pos,
                 $"[PosSocketServer] {remote} 요청 파싱 오류 — 응답 회신(이 프레임만 실패, 연결 유지): {ex.Message}",
                 "E42", transactionId: null);
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved("E42", LogCategory.Pos, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
             byte[] tooShortErrorFrame = PosUnknownTransactionErrorResponse.Build("000000", "E42");
             WriteFrame(tooShortErrorFrame, stream, writeLock, remote, "요청 파싱 오류(E42)");
             responseSent.Set();
@@ -327,6 +358,12 @@ internal sealed class PosSocketServer
             // 없었다. 여기서 코드 슬롯을 채운 로그를 한 줄 남긴 뒤 WriteFrame으로 보낸다(응답 관리번호는
             // 파싱 자체가 실패한 경우가 대부분이라 알 수 없다 — txId는 null).
             FileLogger.Warn(LogCategory.Pos, $"[PosSocketServer] {remote} 전문 오류 — 큐를 거치지 않고 즉시 응답", outcome.ErrorCode, transactionId: null);
+            string? e40OrE41Code = outcome.ErrorCode;
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved(e40OrE41Code, LogCategory.Pos, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
             WriteFrame(outcome.ErrorResponseFrame!, stream, writeLock, remote, "전문 오류");
             responseSent.Set();
             return true;
@@ -388,6 +425,11 @@ internal sealed class PosSocketServer
                 LogCategory.Pos,
                 $"[PosSocketServer] 응답 직렬화 실패: {ex}",
                 InternalFaultCodes.ResponseSerializationFailure, transactionId: null);
+            Task.Run(() =>
+            {
+                try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.ResponseSerializationFailure, LogCategory.Pos, null); }
+                catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+            });
             // Phase 25 P25-6 — 직렬화 실패로 이 응답을 포기하는 경로도 거래 종료다. 여기서 반환하면
             // 아래 정상 경로의 ClearBody()를 지나치므로 이 조기 return 앞에서 지운다.
             response.ClearBody();
@@ -422,6 +464,25 @@ internal sealed class PosSocketServer
         }
         finally
         {
+            // P27-9-(a)/(d)/(e) — 응답을 실제로 보낸(WriteFrame) 직후, 결제 스레드(TransactionQueue의
+            // 유일한 워커 스레드)를 블로킹하지 않도록 판정을 Task.Run으로 위탁한다. §2.1 전부를
+            // 커버하는 유일한 지점이라, 판정이 끝난 뒤 거래 경계(빈 줄)도 여기서만 찍는다(나머지
+            // 14곳은 경계를 찍지 않는다).
+            Task.Run(() =>
+            {
+                try
+                {
+                    FaultAlertJudge.OnCodeObserved(resultCode, LogCategory.Payment, responseTxId);
+                }
+                catch
+                {
+                    // P27-9-(e) 이중 방어 — 삼킨다.
+                }
+                finally
+                {
+                    FileLogger.WriteTransactionBoundary();
+                }
+            });
             // Phase 25 P25-5(PRD.md §4.2 #13) — 송신 frame(길이 헤더 + ToFrame()의 body 복사본).
             // WriteFrame은 동기 stream.Write 한 번으로 끝나므로, 반환 시점엔 이미 이 배열이 필요
             // 없다. frame은 response 원본 버퍼(#7)와도 다른 배열(ToFrame 내부에서 새로 만듦)이라
@@ -453,6 +514,11 @@ internal sealed class PosSocketServer
                     LogCategory.Pos,
                     $"[PosSocketServer] {remote} {logLabel} 전송 실패(연결 끊김 또는 {SendTimeoutMilliseconds}ms 내 미수신으로 추정) — 폐기: {ex.Message}",
                     InternalFaultCodes.ResponseSendFailure, transactionId: null);
+                Task.Run(() =>
+                {
+                    try { FaultAlertJudge.OnCodeObserved(InternalFaultCodes.ResponseSendFailure, LogCategory.Pos, null); }
+                    catch { /* P27-9-(e) 이중 방어 — 삼킨다 */ }
+                });
             }
         }
     }
