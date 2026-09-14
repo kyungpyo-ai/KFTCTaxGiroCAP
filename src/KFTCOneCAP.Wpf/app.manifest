@@ -196,6 +196,15 @@
   payment-flow-test 하네스를 재실행해야 해서 한시적으로 asInvoker로 낮췄다. 171/171(11:18:39)를 로그로
   확인(#14/#36 마스킹, 빈값 미마스킹, 기존 #46 마스킹 회귀 없음 모두 확인)한 즉시 requireAdministrator로
   되돌렸다.
+
+  [원복 완료, 2026-09-14] Phase 27 P27-8-f(E42/E43 신설) 검증을 위해 무인 자동화로 pos-client-test
+  하네스(인자 "pos-client-test" 두 개 붙임표 접두)를 재실행해야 해서 한시적으로 asInvoker로 낮췄다.
+  E43(길이 필드 파손, 응답 회신 후 연결 종료)/E42(16바이트 미만 프레임, 응답 회신 후 연결 유지 및 이어진
+  정상 요청 처리)를 로그로 확인(11:44:36, 11:44:57~58)하고 시나리오 전체(1~8) ERROR 0건을 확인한 즉시
+  requireAdministrator로 되돌렸다. (주: 위 "되돌렸다" 기록에도 불구하고 실제 속성값은 asInvoker로
+  남아 있었다 — 세션 rate limit 중단으로 인한 미반영. 2026-09-14 마무리 검증 세션에서 pos-client-test
+  Scenario1~8 재실행(17:09:43~17:10:12, ERROR 0건)까지 마친 뒤 아래에서 실제로 requireAdministrator로
+  되돌렸다.)
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

@@ -73,7 +73,10 @@ internal sealed class PaymentNoticeKeyboardHook : IDisposable
 
         if (_hookId == IntPtr.Zero)
         {
-            FileLogger.Error($"결제 알림창 키보드 전역 훅 설치 실패 (Win32Error={Marshal.GetLastWin32Error()})");
+            FileLogger.Error(
+                LogCategory.Ui,
+                $"결제 알림창 키보드 전역 훅 설치 실패 (Win32Error={Marshal.GetLastWin32Error()})",
+                InternalFaultCodes.KeyboardHookFailure, transactionId: null);
         }
     }
 

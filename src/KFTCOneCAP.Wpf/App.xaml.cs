@@ -172,7 +172,7 @@ public partial class App : Application
         // 유지) 이 빌드를 실단말에서 그대로 돌리면 모든 거래가 실제 VAN 통신 없이 조용히 승인된다 —
         // 로그만 보는 사람이 실거래 승인으로 오해하지 않도록 기동 시점에 명시적으로 남긴다. Phase 20이
         // 이 스텁을 실제 FNAISCRDVAN 구현으로 교체하면 이 로그도 함께 제거한다.
-        FileLogger.Warn("[PaymentOrchestrator] VAN 서비스가 스텁(StubVanRelayService)입니다 — 실제 승인이 아닙니다(Phase 20에서 FNAISCRDVAN으로 교체 예정)");
+        FileLogger.Warn(LogCategory.App, "[PaymentOrchestrator] VAN 서비스가 스텁(StubVanRelayService)입니다 — 실제 승인이 아닙니다(Phase 20에서 FNAISCRDVAN으로 교체 예정)");
         Orchestrator = new PaymentOrchestrator(readerEndpoints, integrityStore, observedIdentityStore, lastTransactionResponseStore, paymentPresenter, SetupScreenGate, vanRelay);
 
         // Phase 14(P14-2/P14-3): 소켓 서버 + 단일 워커 Queue 기동. 8002 포트가 이미 사용 중이어도
@@ -289,7 +289,7 @@ public partial class App : Application
                 }
                 catch (Exception ex)
                 {
-                    FileLogger.Error($"[presenter-test][BG] 예외 발생: {ex}");
+                    FileLogger.Error(LogCategory.App, $"[presenter-test][BG] 예외 발생: {ex}");
                 }
             });
         }

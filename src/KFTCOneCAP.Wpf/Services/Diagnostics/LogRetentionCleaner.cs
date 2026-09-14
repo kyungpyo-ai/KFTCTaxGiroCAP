@@ -80,6 +80,7 @@ public static class LogRetentionCleaner
 
             DateTime cutoff = today.AddDays(-RetentionDays);
             int deletedCount = 0;
+            int failedCount = 0;
 
             foreach (string filePath in Directory.EnumerateFiles(directory, "*.log"))
             {
@@ -112,12 +113,26 @@ public static class LogRetentionCleaner
                 }
                 catch
                 {
-                    // 잠긴 파일 등 실패는 조용히 무시한다 — 다음 트리거(다음 날짜 전환 또는 다음
-                    // 기동) 때 다시 시도된다.
+                    // 잠긴 파일 등 실패는 조용히 무시하지 않는다(P27-8(d)) — 개별 파일마다 찍지 않고
+                    // 건수만 누적해 정리 1회당 한 줄로 남긴다. 다음 트리거(다음 날짜 전환 또는 다음
+                    // 기동) 때 다시 시도되는 것은 그대로다.
+                    failedCount++;
                 }
             }
 
             FileLogger.Info(LogCategory.App, $"로그 정리 — {RetentionDays}일 초과 {deletedCount}건 삭제");
+
+            // P27-8(d) 결정 — 성공 요약(위 Info) 줄에 실패 건수를 합치지 않고 별도 WARN을 낸다.
+            // 합치면 "실패가 있었는지"를 판정 로직이 성공 로그의 메시지 문자열을 파싱해서 가려내야
+            // 하는데, 이 프로젝트의 알림 판정(Phase 28)은 code 슬롯만 보고 규칙을 매칭하는 것이
+            // 계약이다(§1.12.4). 실패가 있을 때만 별도 줄을 내면 code 슬롯(S04)만으로 판정이 끝난다.
+            if (failedCount > 0)
+            {
+                FileLogger.Warn(
+                    LogCategory.App,
+                    $"로그 정리 — 파일 삭제 실패 {failedCount}건(잠금 등, 다음 트리거 때 재시도)",
+                    InternalFaultCodes.LogRetentionFailure, transactionId: null);
+            }
         }
         catch
         {

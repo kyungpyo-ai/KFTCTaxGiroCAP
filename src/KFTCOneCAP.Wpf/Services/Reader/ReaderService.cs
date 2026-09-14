@@ -466,7 +466,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
 
             if (result == (int)ReaderResult.READER_ERR_PORT_NOT_OPEN)
             {
-                FileLogger.Warn($"{autoPrefix}COM{_portNumber} 전송 중 포트 계열 에러 감지(result={ReaderNames.FormatResult(result)}) -> Close 후 재연결 시도");
+                FileLogger.Warn(LogCategory.Reader, $"{autoPrefix}COM{_portNumber} 전송 중 포트 계열 에러 감지(result={ReaderNames.FormatResult(result)}) -> Close 후 재연결 시도");
 
                 ReaderSerialNative.Reader_ClosePort(_readerId);
                 _readerId = -1;
@@ -474,7 +474,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 int reopenResult = TryAutoOpenReader(autoPrefix);
                 if (reopenResult != (int)ReaderResult.READER_OK)
                 {
-                    FileLogger.Warn($"{autoPrefix}COM{_portNumber} 재연결 실패 — readerId를 초기화합니다(다음 명령에서 다시 Open부터 시도)");
+                    FileLogger.Warn(LogCategory.Reader, $"{autoPrefix}COM{_portNumber} 재연결 실패 — readerId를 초기화합니다(다음 명령에서 다시 Open부터 시도)");
                     return reopenResult;
                 }
 
@@ -492,7 +492,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 // 방어적 조치일 뿐이다. 결과를 기다리지 않고(이 재전송 자체가 SendAndAwaitAsync의
                 // _pending 라운드를 새로 만들지 않는다 — fire-and-forget) 원래의 SEND_FAIL은 그대로
                 // 호출자에게 반환한다.
-                FileLogger.Warn($"[자동복구] COM{_portNumber} 전송 실패(result={ReaderNames.FormatResult(result)}) 감지 -> 프레임 재동기화용 초기화 요청(0x60) 방어적 전송");
+                FileLogger.Warn(LogCategory.Reader, $"[자동복구] COM{_portNumber} 전송 실패(result={ReaderNames.FormatResult(result)}) 감지 -> 프레임 재동기화용 초기화 요청(0x60) 방어적 전송");
                 ReaderSerialNative.Reader_SendCommand(_readerId, ReaderCommandCodes.INIT_REQUEST, null, 0);
             }
             // READER_ERR_BUSY 등은 복구 대상이 아니다(P10-3) — 이미 다른 명령이 정상 진행 중이라는

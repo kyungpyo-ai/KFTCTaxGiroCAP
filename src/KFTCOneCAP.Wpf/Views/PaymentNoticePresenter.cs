@@ -74,7 +74,7 @@ public sealed class PaymentNoticePresenter : IPaymentNoticePresenter
         {
             if (_viewModel is null)
             {
-                FileLogger.Warn($"PaymentNoticePresenter.ChangeState({state}): 알림창이 열려 있지 않아 무시됨");
+                FileLogger.Warn(LogCategory.Ui, $"PaymentNoticePresenter.ChangeState({state}): 알림창이 열려 있지 않아 무시됨");
                 return;
             }
 
@@ -88,7 +88,7 @@ public sealed class PaymentNoticePresenter : IPaymentNoticePresenter
         {
             if (_window is null)
             {
-                FileLogger.Warn("PaymentNoticePresenter.Close: 알림창이 열려 있지 않아 무시됨");
+                FileLogger.Warn(LogCategory.Ui, "PaymentNoticePresenter.Close: 알림창이 열려 있지 않아 무시됨");
                 return;
             }
 

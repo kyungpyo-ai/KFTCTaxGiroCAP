@@ -363,14 +363,14 @@ namespace KFTCOneCAP.KioskSim.Forms
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 3,
-                RowCount = 9,
+                RowCount = 10,
                 AutoScroll = true,
                 Padding = new Padding(8),
             };
             scenarioPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
             scenarioPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 480));
             scenarioPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 9; i++)
+            for (int i = 0; i < 10; i++)
                 scenarioPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
 
             AddErrorScenarioRow(scenarioPanel, 0, 1, "1. 선언 길이 ≠ 실제 본문 길이",
@@ -385,7 +385,7 @@ namespace KFTCOneCAP.KioskSim.Forms
 
             AddErrorScenarioRow(scenarioPanel, 2, 3, "3. 길이 필드가 숫자가 아님",
                 "길이 헤더 4바이트에 \"abcd\"를 넣고 아무 본문이나 뒤에 붙여 보낸다.\n" +
-                "기대: 응답 없이 서버가 그 연결을 닫는다(재동기화 불가 설계).",
+                "기대: #7 응답 코드 = E43(전문 형식 오류)을 회신한 뒤 그 연결을 닫는다(Phase 27 P27-8-f).",
                 () => ErrorInjectionClient.Scenario3_NonNumericLengthHeader());
 
             AddErrorScenarioRow(scenarioPanel, 3, 4, "4. 본문을 나눠 보내기",
@@ -419,6 +419,12 @@ namespace KFTCOneCAP.KioskSim.Forms
                 "읽지 않고 즉시 연결을 끊는다 → 재연결해 같은 조회를 다시 보낸다. 기대: #7=\"000\", #14=\"501008\",\n" +
                 "꼬리가 ①의 501008 응답 원문과 바이트 단위로 일치(이 Phase의 존재 이유 재현).",
                 () => ErrorInjectionClient.Scenario9_InquiryResponseLossRecovery());
+
+            AddErrorScenarioRow(scenarioPanel, 9, 10, "10. 본문 16바이트 미만(#4 식별 불가)",
+                "길이 헤더는 정상(프레이밍은 안 깨짐)이되 본문을 10바이트만 보내 #4(거래 구분 코드)조차\n" +
+                "읽지 못하게 한다. 기대: #7=E42, #4=\"000000\"(placeholder) 응답을 회신하고 연결은 유지한다 —\n" +
+                "이어서 같은 연결로 보낸 정상 501008 요청도 정상 처리된다(Phase 27 P27-8-f).",
+                () => ErrorInjectionClient.Scenario10_TooShortBodyMissingTransactionType());
 
             _errorInjectionTab.Controls.Add(scenarioPanel);
         }

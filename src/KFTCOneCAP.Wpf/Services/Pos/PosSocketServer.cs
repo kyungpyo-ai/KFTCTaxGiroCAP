@@ -98,7 +98,10 @@ internal sealed class PosSocketServer
         }
         catch (SocketException ex)
         {
-            FileLogger.Error($"[PosSocketServer] {Port} 포트 리스닝 실패({ex.SocketErrorCode}): {ex.Message} — 소켓 서버 없이 앱 계속 기동");
+            FileLogger.Error(
+                LogCategory.Pos,
+                $"[PosSocketServer] {Port} 포트 리스닝 실패({ex.SocketErrorCode}): {ex.Message} — 소켓 서버 없이 앱 계속 기동",
+                InternalFaultCodes.ListenFailure, transactionId: null);
             _listener = null;
             return;
         }
@@ -119,7 +122,7 @@ internal sealed class PosSocketServer
         }
         catch (Exception ex)
         {
-            FileLogger.Warn($"[PosSocketServer] 리스너 정지 중 예외(무시): {ex.Message}");
+            FileLogger.Warn(LogCategory.Pos, $"[PosSocketServer] 리스너 정지 중 예외(무시): {ex.Message}");
         }
 
         _acceptThread?.Join(TimeSpan.FromSeconds(2));
@@ -148,7 +151,10 @@ internal sealed class PosSocketServer
             {
                 if (!token.IsCancellationRequested)
                 {
-                    FileLogger.Error($"[PosSocketServer] 수락 루프가 예기치 않은 예외로 종료됨(이후 새 연결을 받지 못함): {ex}");
+                    FileLogger.Error(
+                        LogCategory.Pos,
+                        $"[PosSocketServer] 수락 루프가 예기치 않은 예외로 종료됨(이후 새 연결을 받지 못함): {ex}",
+                        InternalFaultCodes.AcceptLoopDied, transactionId: null);
                 }
 
                 break; // token.IsCancellationRequested==true면 Stop()에 의한 정상 종료.
@@ -157,7 +163,10 @@ internal sealed class PosSocketServer
             if (Interlocked.Increment(ref _connectionCount) > MaxConcurrentConnections)
             {
                 Interlocked.Decrement(ref _connectionCount);
-                FileLogger.Warn($"[PosSocketServer] 동시 연결 상한({MaxConcurrentConnections}) 초과 — 연결 거부");
+                FileLogger.Warn(
+                    LogCategory.Pos,
+                    $"[PosSocketServer] 동시 연결 상한({MaxConcurrentConnections}) 초과 — 연결 거부",
+                    InternalFaultCodes.ConnectionLimitExceeded, transactionId: null);
                 SafeClose(client);
                 continue;
             }
@@ -204,7 +213,7 @@ internal sealed class PosSocketServer
                     }
                     catch (IOException ex) when (IsReadTimeout(ex))
                     {
-                        FileLogger.Warn($"[PosSocketServer] {remote} 응답 전송 후 {IdleAfterResponseTimeoutMilliseconds}ms 동안 다음 요청이 없어 서버가 먼저 닫음(POS 개발 실수 대비)");
+                        FileLogger.Warn(LogCategory.Pos, $"[PosSocketServer] {remote} 응답 전송 후 {IdleAfterResponseTimeoutMilliseconds}ms 동안 다음 요청이 없어 서버가 먼저 닫음(POS 개발 실수 대비)");
                         break;
                     }
                     catch (IOException ex)
@@ -230,7 +239,15 @@ internal sealed class PosSocketServer
                     {
                         // 길이 필드 하나로만 경계를 정하는 프레이밍이라 재동기화할 방법이 없다(P14-1) —
                         // 이 연결을 통째로 닫는다. 서버·다른 연결은 계속 살아 있다(P14-5).
-                        FileLogger.Warn($"[PosSocketServer] {remote} 전문 형식 오류 — 연결 종료: {ex.Message}");
+                        // P27-8-f(fault_alert_catalog.md §2.3) — 침묵하지 않고 E41과 같은 메커니즘으로
+                        // 최소 공통부 응답을 만들어 회신한 뒤 연결을 닫는다. #4를 읽을 수단이 아예
+                        // 없으므로 placeholder "000000"을 싣는다(E42와 동일 근거, 아래 참고).
+                        FileLogger.Warn(
+                            LogCategory.Pos,
+                            $"[PosSocketServer] {remote} 전문 형식 오류 — 응답 회신 후 연결 종료: {ex.Message}",
+                            "E43", transactionId: null);
+                        byte[] framingErrorFrame = PosUnknownTransactionErrorResponse.Build("000000", "E43");
+                        WriteFrame(framingErrorFrame, stream, writeLock, remote, "전문 형식 오류(E43)");
                         break;
                     }
 
@@ -254,7 +271,10 @@ internal sealed class PosSocketServer
         }
         catch (Exception ex)
         {
-            FileLogger.Error($"[PosSocketServer] {remote} 처리 중 예외: {ex}");
+            FileLogger.Error(
+                LogCategory.Pos,
+                $"[PosSocketServer] {remote} 처리 중 예외: {ex}",
+                InternalFaultCodes.ConnectionHandlingException, transactionId: null);
         }
         finally
         {
@@ -280,11 +300,23 @@ internal sealed class PosSocketServer
         }
         catch (PosProtocolException ex)
         {
-            // 프레임 경계는 이미 지켜졌으므로(형식 오류와 다름) 이 프레임만 버리고 연결은 유지한다.
-            // #4(거래 구분 코드)조차 읽을 수 없을 만큼 짧은 본문만 여기 온다(P17-3) — 이 경우는
-            // 응답을 만들 스키마 근거가 전혀 없어 침묵 외에 대안이 없다.
-            FileLogger.Warn(LogCategory.Pos, $"[PosSocketServer] {remote} 요청 파싱 오류(이 프레임만 폐기): {ex.Message}");
-            return false;
+            // 프레임 경계는 이미 지켜졌으므로(형식 오류와 다름) 이 프레임만 실패 처리하고 연결은
+            // 유지한다. #4(거래 구분 코드)조차 읽을 수 없을 만큼 짧은 본문만 여기 온다(P17-3).
+            //
+            // P27-8-f(fault_alert_catalog.md §2.3) — 예전에는 응답을 만들 스키마 근거가 없다는
+            // 이유로 침묵했지만, E41과 같은 메커니즘(공통부 70바이트만으로 응답 조립)을 그대로 쓰면
+            // #4를 몰라도 응답을 만들 수 있다. #4 자리에는 실제 값을 알 수 없으므로 placeholder
+            // "000000"을 쓴다 — 이 코드베이스가 이미 "N형 필드 값이 없으면 0으로 채운다"는 관례를
+            // 갖고 있다(PosInquiryResponseTelegram.cs, PRD.md §3.4.5)는 근거로 2026-09-14 사용자
+            // 확정. POS가 숫자 파싱에 실패하지 않는 값이다.
+            FileLogger.Warn(
+                LogCategory.Pos,
+                $"[PosSocketServer] {remote} 요청 파싱 오류 — 응답 회신(이 프레임만 실패, 연결 유지): {ex.Message}",
+                "E42", transactionId: null);
+            byte[] tooShortErrorFrame = PosUnknownTransactionErrorResponse.Build("000000", "E42");
+            WriteFrame(tooShortErrorFrame, stream, writeLock, remote, "요청 파싱 오류(E42)");
+            responseSent.Set();
+            return true;
         }
 
         if (!outcome.IsSuccess)
@@ -352,7 +384,10 @@ internal sealed class PosSocketServer
         }
         catch (Exception ex)
         {
-            FileLogger.Error(LogCategory.Pos, $"[PosSocketServer] 응답 직렬화 실패: {ex}");
+            FileLogger.Error(
+                LogCategory.Pos,
+                $"[PosSocketServer] 응답 직렬화 실패: {ex}",
+                InternalFaultCodes.ResponseSerializationFailure, transactionId: null);
             // Phase 25 P25-6 — 직렬화 실패로 이 응답을 포기하는 경로도 거래 종료다. 여기서 반환하면
             // 아래 정상 경로의 ClearBody()를 지나치므로 이 조기 return 앞에서 지운다.
             response.ClearBody();
@@ -414,7 +449,10 @@ internal sealed class PosSocketServer
             }
             catch (Exception ex)
             {
-                FileLogger.Warn(LogCategory.Pos, $"[PosSocketServer] {remote} {logLabel} 전송 실패(연결 끊김 또는 {SendTimeoutMilliseconds}ms 내 미수신으로 추정) — 폐기: {ex.Message}");
+                FileLogger.Warn(
+                    LogCategory.Pos,
+                    $"[PosSocketServer] {remote} {logLabel} 전송 실패(연결 끊김 또는 {SendTimeoutMilliseconds}ms 내 미수신으로 추정) — 폐기: {ex.Message}",
+                    InternalFaultCodes.ResponseSendFailure, transactionId: null);
             }
         }
     }

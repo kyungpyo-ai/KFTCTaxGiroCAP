@@ -34,7 +34,10 @@ internal static class NativeDllLoadSmokeTest
 
         if (!File.Exists(dllPath))
         {
-            FileLogger.Error(LogCategory.App, $"DLL 로드 스모크 실패: {fileName} — 파일이 출력 폴더에 없음 (경로: {dllPath})");
+            FileLogger.Error(
+                LogCategory.App,
+                $"DLL 로드 스모크 실패: {fileName} — 파일이 출력 폴더에 없음 (경로: {dllPath})",
+                InternalFaultCodes.DllLoadSmokeFailure, transactionId: null);
             return;
         }
 
@@ -51,7 +54,10 @@ internal static class NativeDllLoadSmokeTest
                     ErrorModNotFound => "ERROR_MOD_NOT_FOUND(126) — 의존 DLL 누락 가능성 (예: MFC42.DLL/MSVCRT.dll/WSOCK32.dll, PRD §2.3)",
                     _ => $"Win32 오류 코드 {errorCode}",
                 };
-                FileLogger.Error(LogCategory.App, $"DLL 로드 스모크 실패: {fileName} — {reason}");
+                FileLogger.Error(
+                    LogCategory.App,
+                    $"DLL 로드 스모크 실패: {fileName} — {reason}",
+                    InternalFaultCodes.DllLoadSmokeFailure, transactionId: null);
                 return;
             }
 
@@ -61,7 +67,10 @@ internal static class NativeDllLoadSmokeTest
         {
             // LoadLibrary 자체는 예외를 던지지 않는 게 정상이지만, 방어적으로 감싼다
             // (PRD §9 — 로드 실패가 앱을 죽이면 안 된다).
-            FileLogger.Error(LogCategory.App, $"DLL 로드 스모크 중 예외 발생: {fileName} — {ex.GetType().Name}: {ex.Message}");
+            FileLogger.Error(
+                LogCategory.App,
+                $"DLL 로드 스모크 중 예외 발생: {fileName} — {ex.GetType().Name}: {ex.Message}",
+                InternalFaultCodes.DllLoadSmokeFailure, transactionId: null);
         }
         finally
         {

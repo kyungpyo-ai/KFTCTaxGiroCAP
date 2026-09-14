@@ -322,7 +322,7 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
             // 실제로 예외를 던지지 않는 것으로 확인됐지만(방어적 차원), 화면 스레드에서 예외가 그대로
             // 밖으로 새 나가 앱이 죽는 일이 없도록 CommunicationFailure류(ReaderDllFailure)로 안전하게
             // 떨어뜨린다.
-            FileLogger.Error($"[{readerLabel} 키다운로드] 예상치 못한 예외로 중단: {ex.GetType().Name}: {ex.Message}");
+            FileLogger.Error(LogCategory.Keydown, $"[{readerLabel} 키다운로드] 예상치 못한 예외로 중단: {ex.GetType().Name}: {ex.Message}");
             outcome = Services.Reader.KeyDownloadOutcome.ReaderFailure(
                 Services.Reader.KeyDownloadStage.Start, Services.Reader.ReaderFailureCategory.DllFailure,
                 string.Empty, string.Empty, $"예상치 못한 예외: {ex.GetType().Name}: {ex.Message}");
@@ -395,19 +395,19 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
         switch (kind)
         {
             case ReaderCommandOutcomeKind.Success:
-                FileLogger.Info($"[{readerLabel} {commandLabel}] 성공, 응답코드={responseCode}");
+                FileLogger.Info(LogCategory.Reader, $"[{readerLabel} {commandLabel}] 성공, 응답코드={responseCode}");
                 break;
             case ReaderCommandOutcomeKind.BusinessFailure:
-                FileLogger.Warn($"[{readerLabel} {commandLabel}] 업무 응답코드 실패={responseCode}");
+                FileLogger.Warn(LogCategory.Reader, $"[{readerLabel} {commandLabel}] 업무 응답코드 실패={responseCode}");
                 break;
             case ReaderCommandOutcomeKind.DllCallFailure:
-                FileLogger.Warn($"[{readerLabel} {commandLabel}] DLL 연동 실패: {dllResultName}({dllResult}) - {detail}");
+                FileLogger.Warn(LogCategory.Reader, $"[{readerLabel} {commandLabel}] DLL 연동 실패: {dllResultName}({dllResult}) - {detail}");
                 break;
             case ReaderCommandOutcomeKind.Timeout:
-                FileLogger.Warn($"[{readerLabel} {commandLabel}] 응답 타임아웃");
+                FileLogger.Warn(LogCategory.Reader, $"[{readerLabel} {commandLabel}] 응답 타임아웃");
                 break;
             case ReaderCommandOutcomeKind.CommunicationError:
-                FileLogger.Warn($"[{readerLabel} {commandLabel}] 통신 오류: {detail}");
+                FileLogger.Warn(LogCategory.Reader, $"[{readerLabel} {commandLabel}] 통신 오류: {detail}");
                 break;
         }
     }

@@ -99,7 +99,10 @@ VALUES
         }
         catch (Exception ex)
         {
-            FileLogger.Error($"무결성 체크 이력 저장 실패: {ex.GetType().Name} - {ex.Message}");
+            FileLogger.Error(
+                LogCategory.Reader,
+                $"무결성 체크 이력 저장 실패: {ex.GetType().Name} - {ex.Message}",
+                InternalFaultCodes.IntegrityStoreFailure, transactionId: null);
             return IntegrityCheckSaveResult.Failed(ex.Message);
         }
     }
@@ -154,7 +157,10 @@ ORDER BY CheckedAtLocal DESC;";
         }
         catch (Exception ex)
         {
-            FileLogger.Error($"무결성 체크 이력 조회 실패: {ex.GetType().Name} - {ex.Message}");
+            FileLogger.Error(
+                LogCategory.Reader,
+                $"무결성 체크 이력 조회 실패: {ex.GetType().Name} - {ex.Message}",
+                InternalFaultCodes.IntegrityStoreFailure, transactionId: null);
             return new List<IntegrityCheckHistoryEntry>();
         }
     }
@@ -192,7 +198,10 @@ LIMIT 1;";
         }
         catch (Exception ex)
         {
-            FileLogger.Error($"금일 무결성 체크 성공 이력 조회 실패({comPort}): {ex.GetType().Name} - {ex.Message}");
+            FileLogger.Error(
+                LogCategory.Reader,
+                $"금일 무결성 체크 성공 이력 조회 실패({comPort}): {ex.GetType().Name} - {ex.Message}",
+                InternalFaultCodes.IntegrityStoreFailure, transactionId: null);
             return false;
         }
     }

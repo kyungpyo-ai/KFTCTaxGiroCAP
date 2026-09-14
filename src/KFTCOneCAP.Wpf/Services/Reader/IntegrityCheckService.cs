@@ -72,7 +72,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             var saveResult = _store.Save(record);
             if (!saveResult.Success)
             {
-                FileLogger.Warn($"[무결성체크] DB 저장 실패({comPort}): {saveResult.ErrorMessage} — 체크 결과({(outcome.IsSuccess ? "성공" : "실패")})는 그대로 유지");
+                FileLogger.Warn(LogCategory.Reader, $"[무결성체크] DB 저장 실패({comPort}): {saveResult.ErrorMessage} — 체크 결과({(outcome.IsSuccess ? "성공" : "실패")})는 그대로 유지");
             }
         }
     }

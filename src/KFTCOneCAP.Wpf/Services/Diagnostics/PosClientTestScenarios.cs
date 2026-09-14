@@ -35,6 +35,7 @@ internal static class PosClientTestScenarios
             Scenario5_ProcessorException();
             Scenario6_UnresponsiveClientDoesNotBlockQueue();
             Scenario7_ServerClosesIdleConnectionAfterResponse();
+            Scenario8_TooShortFrameReceivesE42();
             FileLogger.Info("[pos-client-test] 전체 완료 — 로그 파일에서 [TransactionQueue] 처리 시작/종료 순서와 각 시나리오 결과를 대조할 것");
         }
         catch (Exception ex)
@@ -111,10 +112,17 @@ internal static class PosClientTestScenarios
         FileLogger.Info("[pos-client-test][2] 완료 — 3건 모두 응답이 왔으면 성공");
     }
 
-    /// <summary>P14-1/P14-5: 길이 필드가 숫자가 아니면 서버가 재동기화 없이 그 연결만 닫는다.</summary>
+    /// <summary>
+    /// P14-1/P14-5, P27-8-f(fault_alert_catalog.md §2.3): 길이 필드가 숫자가 아니면 서버가
+    /// 재동기화 없이 그 연결만 닫는다. Phase 27부터는 닫기 전에 <c>E43</c> 응답 프레임을 먼저
+    /// 회신하므로(예전에는 침묵 후 즉시 종료), 이 시나리오도 "응답을 먼저 읽고 → 그 다음 연결이
+    /// 닫히는지" 순서로 확인하도록 갱신했다(2026-09-14). 응답을 읽지 않고 바로
+    /// <see cref="WaitForConnectionClose"/>만 부르면 서버가 먼저 써 보낸 E43 프레임 바이트를 "닫히지
+    /// 않음"으로 오판하게 된다.
+    /// </summary>
     private static void Scenario3_MalformedLengthField()
     {
-        FileLogger.Info("[pos-client-test][3] 시작 — 잘못된 길이 필드 전송, 서버가 그 연결만 닫는지 확인(P14-1/P14-5)");
+        FileLogger.Info("[pos-client-test][3] 시작 — 잘못된 길이 필드 전송, 서버가 E43 회신 후 그 연결만 닫는지 확인(P14-1/P14-5, P27-8-f)");
 
         using var client = new TcpClient();
         client.Connect(IPAddress.Loopback, Port);
@@ -123,10 +131,56 @@ internal static class PosClientTestScenarios
         byte[] garbage = PosMessageEncoding.Value.GetBytes("ABCDgarbage-body");
         stream.Write(garbage, 0, garbage.Length);
 
+        string? body = ReadResponseFrame(stream, TimeSpan.FromSeconds(5));
+        string resultCode = body != null ? ReadResultCode(body) : "(응답 없음)";
+        FileLogger.Info($"[pos-client-test][3] E43 응답 수신 결과 — #7 응답 코드=\"{resultCode}\"" + (body != null ? $" / 원문 길이={body.Length}" : string.Empty));
+        if (resultCode != "E43")
+            FileLogger.Error(LogCategory.App, $"[pos-client-test][3] ★ 기대한 E43이 아님: \"{resultCode}\"");
+
         bool closed = WaitForConnectionClose(stream, TimeSpan.FromSeconds(5));
         FileLogger.Info(closed
-            ? "[pos-client-test][3] 완료 — 서버가 연결을 닫음(기대한 동작)"
+            ? "[pos-client-test][3] 완료 — 서버가 응답 회신 후 연결을 닫음(기대한 동작)"
             : "[pos-client-test][3] 완료 — ★ 서버가 시간 내에 연결을 닫지 않음, 확인 필요");
+    }
+
+    /// <summary>
+    /// P27-8-f(fault_alert_catalog.md §2.3): 본문이 16바이트 미만이라 #4(거래 구분 코드)조차
+    /// 읽을 수 없는 프레임을 보내면, 예전에는 침묵(프레임만 폐기)했지만 이제 <c>E42</c> 응답을
+    /// 회신하고 연결은 유지한다(프레이밍 자체는 정상이었으므로) — 뒤이어 정상 요청을 보내
+    /// 같은 연결이 계속 살아 있는지도 함께 확인한다.
+    /// </summary>
+    private static void Scenario8_TooShortFrameReceivesE42()
+    {
+        FileLogger.Info("[pos-client-test][8] 시작 — 16바이트 미만 프레임 전송, E42 회신 및 연결 유지 확인(P27-8-f)");
+
+        using var client = new TcpClient();
+        client.Connect(IPAddress.Loopback, Port);
+        using var stream = client.GetStream();
+
+        // 프레임 자체(길이 4바이트 헤더 + 본문)는 정상이지만, 본문이 10바이트뿐이라 #4(POSITION
+        // 10, 길이 6)를 읽을 수 없다 — PosRequestTelegram.MinimumBytesToIdentify(16) 미만.
+        byte[] tooShortBody = PosMessageEncoding.Value.GetBytes("0123456789");
+        byte[] lengthBytes = PosMessageEncoding.Value.GetBytes(tooShortBody.Length.ToString("D4"));
+        byte[] frame = new byte[lengthBytes.Length + tooShortBody.Length];
+        Buffer.BlockCopy(lengthBytes, 0, frame, 0, lengthBytes.Length);
+        Buffer.BlockCopy(tooShortBody, 0, frame, lengthBytes.Length, tooShortBody.Length);
+        stream.Write(frame, 0, frame.Length);
+
+        string? body = ReadResponseFrame(stream, TimeSpan.FromSeconds(5));
+        string resultCode = body != null ? ReadResultCode(body) : "(응답 없음)";
+        string transactionType = body != null ? ReadTransactionTypeCode(body) : "(응답 없음)";
+        FileLogger.Info($"[pos-client-test][8] E42 응답 수신 결과 — #7 응답 코드=\"{resultCode}\" / #4 거래구분=\"{transactionType}\"");
+        if (resultCode != "E42")
+            FileLogger.Error(LogCategory.App, $"[pos-client-test][8] ★ 기대한 E42가 아님: \"{resultCode}\"");
+        if (transactionType != "000000")
+            FileLogger.Error(LogCategory.App, $"[pos-client-test][8] ★ 기대한 거래구분 placeholder(000000)가 아님: \"{transactionType}\"");
+
+        // 연결이 살아 있는지 정상 요청으로 확인한다(E42는 "이 프레임만 실패, 연결은 유지"가 원칙).
+        WriteRequestFrame(stream, "E42-RECOVER");
+        string? recoverBody = ReadResponseFrame(stream, TimeSpan.FromSeconds(10));
+        FileLogger.Info(recoverBody != null
+            ? "[pos-client-test][8] 완료 — E42 이후에도 같은 연결로 정상 요청 처리됨(연결 유지 확인)"
+            : "[pos-client-test][8] 완료 — ★ E42 이후 같은 연결에서 정상 요청 응답을 받지 못함, 확인 필요");
     }
 
     /// <summary>P14-4/P14-5: 요청 직후 연결을 강제로 끊어도 서버가 살아 있고 다음 요청을 정상 처리한다.</summary>
@@ -319,6 +373,20 @@ internal static class PosClientTestScenarios
         // #9는 공통부에서 POSITION 35, 길이 12(공통부 정의는 3전문 동일 — PosCommonHeader 참고).
         string raw = PosMessageEncoding.Value.GetString(bytes, 35, 12);
         return raw.TrimEnd(' ');
+    }
+
+    /// <summary>P27-8-f — #7(응답 코드)은 공통부 POSITION 20, 길이 3(3전문 동일, PosCommonHeader 참고).</summary>
+    private static string ReadResultCode(string responseBody)
+    {
+        byte[] bytes = PosMessageEncoding.Value.GetBytes(responseBody);
+        return PosMessageEncoding.Value.GetString(bytes, 20, 3).TrimEnd(' ');
+    }
+
+    /// <summary>P27-8-f — #4(거래 구분 코드)는 공통부 POSITION 10, 길이 6(3전문 동일).</summary>
+    private static string ReadTransactionTypeCode(string responseBody)
+    {
+        byte[] bytes = PosMessageEncoding.Value.GetBytes(responseBody);
+        return PosMessageEncoding.Value.GetString(bytes, 10, 6).TrimEnd(' ');
     }
 
     private static string? ReadResponseFrame(NetworkStream stream, TimeSpan timeout)

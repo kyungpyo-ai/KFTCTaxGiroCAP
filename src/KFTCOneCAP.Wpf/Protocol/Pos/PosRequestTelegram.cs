@@ -62,7 +62,7 @@ public sealed class PosRequestTelegram
         if (!PosSchemaRegistry.TryResolve(transactionTypeCode, out PosTelegramSchema? schema) || schema is null)
         {
             // E41: 스키마 자체를 식별할 수 없다 — 실제 전문 레이아웃을 모르므로 최소 공통부만으로 응답한다.
-            byte[] minimalErrorFrame = PosUnknownTransactionErrorResponse.Build(transactionTypeCode);
+            byte[] minimalErrorFrame = PosUnknownTransactionErrorResponse.Build(transactionTypeCode, "E41");
             return PosRequestParseOutcome.Failure("E41", minimalErrorFrame);
         }
 

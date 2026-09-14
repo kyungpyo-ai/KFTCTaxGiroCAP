@@ -203,7 +203,10 @@ internal sealed class PaymentOrchestrator
             // 개선권장 A-2(P22 리뷰) — 예외 경로는 InternalError로 POS에 응답이 나가지만(TransactionQueue
             // 워커 루프가 처리) 이 지점의 중앙 확정 로그를 우회한다. 응답/워커 루프 동작은 바꾸지 않고
             // 로그 한 줄만 남긴 뒤 그대로 다시 던진다.
-            FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 거래 확정 — 내부 오류(InternalError)", code: null, txId);
+            FileLogger.Error(
+                LogCategory.Payment,
+                "[PaymentOrchestrator] 거래 확정 — 내부 오류(InternalError)",
+                PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.InternalError), txId);
             throw;
         }
     }
@@ -920,9 +923,10 @@ internal sealed class PaymentOrchestrator
                         return CardReadRoundResult.Early(InterruptCode(reason));
                     }
 
-                    FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 DLL 연동 실패(Kind={outcome.Kind}): {outcome.Detail}", code: null, txId);
+                    string readerDllFailureCode = PosResultCodeMapper.ToTelegramCode(outcome);
+                    FileLogger.Error(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 DLL 연동 실패(Kind={outcome.Kind}): {outcome.Detail}", readerDllFailureCode, txId);
                     winner.SendInvalidationInit();
-                    return CardReadRoundResult.Early(PosResultCodeMapper.ToTelegramCode(outcome));
+                    return CardReadRoundResult.Early(readerDllFailureCode);
             }
         }
 
@@ -972,9 +976,10 @@ internal sealed class PaymentOrchestrator
                 // 이 경로에서만 초기화한다. 다만 근거는 "리더기가 정리를 필요로 해서"가 아니라
                 // (위 Success 주석과 같은 이유로 리더기 상태는 여기서도 동일하다) PRD §4.10의 "실패 시
                 // Reader 초기화" 문구를 문자 그대로 지키고, fire-and-forget이라 비용이 없기 때문이다.
-                FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] VAN DLL 통신 실패: {outcome.Detail}", code: null, txId);
+                string vanFailureCode = PosResultCodeMapper.ToTelegramCode(outcome.FailureKind!.Value);
+                FileLogger.Error(LogCategory.Payment, $"[PaymentOrchestrator] VAN DLL 통신 실패: {outcome.Detail}", vanFailureCode, txId);
                 cardReadWinner?.SendInvalidationInit();
-                return PosResponseTelegram.Failure(request, PosResultCodeMapper.ToTelegramCode(outcome.FailureKind!.Value));
+                return PosResponseTelegram.Failure(request, vanFailureCode);
         }
     }
 
@@ -1026,7 +1031,7 @@ internal sealed class PaymentOrchestrator
                 }
                 catch (Exception ex)
                 {
-                    FileLogger.Warn($"[PaymentOrchestrator] {reason} 처리 중 리더기 초기화 실패(무시하고 계속): {ex.Message}");
+                    FileLogger.Warn(LogCategory.Reader, $"[PaymentOrchestrator] {reason} 처리 중 리더기 초기화 실패(무시하고 계속): {ex.Message}");
                 }
             }
         });

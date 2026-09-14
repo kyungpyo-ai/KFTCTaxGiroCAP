@@ -124,6 +124,20 @@ namespace KFTCOneCAP.KioskSim.Net
         }
 
         /// <summary>
+        /// 응답 본문의 <c>#4 거래 구분 코드</c>(공통부 POSITION=10, 길이=6, 3전문 공통)를 직접
+        /// 슬라이스해서 읽는다. Phase 27 P27-8-f — E42 응답이 placeholder("000000")를 정확히 실었는지
+        /// 확인하는 데 쓴다.
+        /// </summary>
+        private static string ReadTransactionTypeRaw(byte[] responseBody)
+        {
+            const int position = 10;
+            const int length = 6;
+            if (responseBody.Length < position + length)
+                return $"(응답 본문이 {responseBody.Length}바이트뿐이라 #4 위치(10~15)를 읽을 수 없음)";
+            return Cp949.GetString(responseBody, position, length).TrimEnd(' ');
+        }
+
+        /// <summary>
         /// 이미 연결된 스트림에서 "[길이 4자리][본문]" 프레임 하나를 읽는다. <see cref="OneCapClient"/>의
         /// <c>ReadExact</c>와 같은 부분 수신 누적 로직이지만, 이 클래스는 정상 클라이언트 구현을
         /// 재사용하지 않는다는 원칙(위 클래스 주석)에 따라 이 파일 안에서 독립적으로 다시 짠다.
@@ -244,7 +258,8 @@ namespace KFTCOneCAP.KioskSim.Net
         }
 
         /// <summary>3) 길이 헤더 4바이트에 "abcd"(숫자가 아님)를 넣고 아무 본문이나 뒤에 붙여 보낸다.
-        /// 기대: 서버가 응답 없이 그 연결을 닫는다(재동기화 불가 설계).</summary>
+        /// 기대(Phase 27 P27-8-f로 변경, fault_alert_catalog.md §2.3): 서버가 <b>E43 응답을 회신한
+        /// 뒤</b> 연결을 닫는다 — 예전에는 완전히 침묵한 채 연결만 닫았다.</summary>
         public static string Scenario3_NonNumericLengthHeader()
         {
             byte[] header = Cp949.GetBytes("abcd");
@@ -275,33 +290,105 @@ namespace KFTCOneCAP.KioskSim.Net
                 using var stream = client.GetStream();
                 stream.Write(toSend, 0, toSend.Length);
 
+                byte[] responseBody;
+                try
+                {
+                    responseBody = ReadFrame(stream, ShortResponseTimeoutMilliseconds);
+                }
+                catch (Exception ex)
+                {
+                    return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. E43 응답을 받지 못함({ex.GetType().Name}: {ex.Message}) — " +
+                           "기대(E43 응답 후 연결 종료)와 다름! 본 앱 결함 여부 확인 필요.";
+                }
+
+                string code = ReadResponseCodeRaw(responseBody);
+                if (code != "E43")
+                {
+                    return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. 응답은 수신됨(본문 {responseBody.Length}바이트)이나 " +
+                           $"#7 응답 코드=\"{code}\" — 기대(E43)와 불일치! 본 앱 결함 여부 확인 필요.";
+                }
+
+                // 이제 연결이 실제로 닫히는지 확인한다(E43도 "닫는다"는 원칙 자체는 그대로다).
                 stream.ReadTimeout = ShortResponseTimeoutMilliseconds;
                 var probe = new byte[1];
                 int read = stream.Read(probe, 0, 1); // 0이면 서버가 정상 종료(FIN)로 연결을 닫은 것.
                 if (read == 0)
                 {
-                    return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. 응답 없이 연결이 서버 쪽에서 종료됨(FIN 수신) — 기대와 일치.";
+                    return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. #7=\"E43\" 응답을 받은 뒤 연결이 서버 쪽에서 " +
+                           "종료됨(FIN 수신) — 기대와 일치.";
                 }
-                return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. 예상과 달리 {read}바이트가 수신됨(응답이 온 것으로 보임) — " +
-                       "기대(응답 없이 연결 종료)와 불일치! 본 앱 결함 여부 확인 필요.";
+                return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. #7=\"E43\" 응답은 받았으나 그 뒤 연결이 안 닫히고 " +
+                       $"{read}바이트가 추가로 수신됨 — 기대(응답 후 연결 종료)와 불일치! 본 앱 결함 여부 확인 필요.";
             }
             catch (IOException ex) when (IsTimeout(ex))
             {
                 return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. 타임아웃({ShortResponseTimeoutMilliseconds / 1000}초) 안에 " +
-                       "연결 종료도 응답도 없었음 — 기대(즉시 연결 종료)와 다름. 서버가 형식 오류를 못 잡고 계속 응답을 " +
-                       "대기하는 것으로 보임(확인 필요).";
+                       "E43 응답도 연결 종료도 없었음 — 기대와 다름(확인 필요).";
             }
             catch (Exception ex)
             {
-                // 연결 리셋(IOException/SocketException) 등도 "서버가 연결을 끊었다"는 관찰과 부합한다.
-                // (Connect 단계의 SocketException은 위에서 이미 별도로 잡아 걸러냈으므로, 여기
-                // 도달하는 것은 송수신 도중 발생한 연결 종료뿐이다.)
                 return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. 연결이 예외로 끊김({ex.GetType().Name}: {ex.Message}) — " +
-                       "응답 없이 연결이 종료된 것과 같은 관찰이므로 기대와 일치로 판단.";
+                       "E43 응답을 받기 전에 끊어졌다면 기대와 다름(확인 필요).";
             }
             finally
             {
                 client?.Dispose();
+            }
+        }
+
+        /// <summary>10) 본문이 16바이트 미만이라 #4(거래 구분 코드, POSITION 10~15)조차 읽을 수
+        /// 없는 프레임(길이 헤더는 정상 — 프레이밍 자체는 깨지지 않음). 기대(Phase 27 P27-8-f,
+        /// fault_alert_catalog.md §2.3): 서버가 #4="000000"(placeholder), #7="E42" 응답을 회신하고
+        /// <b>연결은 유지</b>한다 — 예전에는 이 프레임만 조용히 폐기했다. 같은 연결로 정상 501008을
+        /// 이어서 보내 연결이 실제로 살아 있는지도 함께 확인한다.</summary>
+        public static string Scenario10_TooShortBodyMissingTransactionType()
+        {
+            byte[] tooShortBody = Cp949.GetBytes("0123456789"); // 10바이트 < MinimumBytesToIdentify(16).
+            byte[] frame = new byte[4 + tooShortBody.Length];
+            byte[] header = Cp949.GetBytes(tooShortBody.Length.ToString("D4"));
+            Array.Copy(header, frame, header.Length);
+            Array.Copy(tooShortBody, 0, frame, header.Length, tooShortBody.Length);
+
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                using var client = new TcpClient();
+                client.Connect(OneCapClient.Host, OneCapClient.Port);
+                using var stream = client.GetStream();
+                stream.Write(frame, 0, frame.Length);
+
+                byte[] responseBody = ReadFrame(stream, ShortResponseTimeoutMilliseconds);
+                string code = ReadResponseCodeRaw(responseBody);
+                string transactionType = ReadTransactionTypeRaw(responseBody);
+
+                if (code != "E42" || transactionType != "000000")
+                {
+                    return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. 응답 수신됨(본문 {responseBody.Length}바이트), " +
+                           $"#7=\"{code}\", #4=\"{transactionType}\" — 기대(#7=E42, #4=000000)와 불일치! 본 앱 결함 여부 확인 필요.";
+                }
+
+                // 연결이 살아 있는지 정상 501008 요청으로 확인한다("이 프레임만 실패, 연결은 유지"가 원칙).
+                byte[] recoverFrame = BuildValid501008Frame();
+                stream.Write(recoverFrame, 0, recoverFrame.Length);
+                byte[] recoverResponse;
+                try
+                {
+                    recoverResponse = ReadFrame(stream, ShortResponseTimeoutMilliseconds);
+                }
+                catch (Exception ex)
+                {
+                    return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. #7=\"E42\", #4=\"000000\"까지는 기대와 일치했으나, " +
+                           $"같은 연결로 보낸 정상 501008 요청에 응답이 없음({ex.GetType().Name}: {ex.Message}) — " +
+                           "연결 유지 기대와 불일치! 본 앱 결함 여부 확인 필요.";
+                }
+                string recoverCode = ReadResponseCodeRaw(recoverResponse);
+                return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. #7=\"E42\", #4=\"000000\" 일치. 이어서 같은 연결로 보낸 " +
+                       $"정상 501008 요청도 응답 수신됨(#7=\"{recoverCode}\") — 연결 유지 확인, 기대와 일치.";
+            }
+            catch (Exception ex)
+            {
+                return $"[결과] {stopwatch.Elapsed.TotalSeconds:F2}초. E42 응답을 받지 못함({ex.GetType().Name}: {ex.Message}) — " +
+                       "기대(E42 응답 후 연결 유지)와 다름! 본 앱 결함 여부 확인 필요.";
             }
         }
 

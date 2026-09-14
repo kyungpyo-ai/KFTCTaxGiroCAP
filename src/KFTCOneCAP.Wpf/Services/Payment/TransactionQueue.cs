@@ -75,7 +75,7 @@ internal sealed class TransactionQueue
             }
             catch (Exception ex)
             {
-                FileLogger.Error($"[TransactionQueue] 처리 중 예외 전문={txType}: {ex}");
+                FileLogger.Error(LogCategory.Payment, $"[TransactionQueue] 처리 중 예외 전문={txType}: {ex}");
                 // 결과코드 리터럴을 직접 쓰지 않고 PosResultCodeMapper를 거친다(P15-3/P17-4 — Flow/큐
                 // 어디에도 전문 코드 문자열이 등장하지 않아야 한다).
                 IPosOutboundResponse fallback = PosResponseTelegram.Failure(
@@ -111,7 +111,10 @@ internal sealed class TransactionQueue
         }
         catch (Exception ex)
         {
-            FileLogger.Error($"[TransactionQueue] 완료 콜백 처리 중 예외 전문={item.Request.TransactionTypeCode}: {ex}");
+            FileLogger.Error(
+                LogCategory.Payment,
+                $"[TransactionQueue] 완료 콜백 처리 중 예외 전문={item.Request.TransactionTypeCode}: {ex}",
+                InternalFaultCodes.ResponseDeliveryFailure, transactionId: null);
         }
     }
 

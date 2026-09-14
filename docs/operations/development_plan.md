@@ -3344,6 +3344,40 @@ CLI 하네스가 유일한 검증 수단이다.
 - **code 슬롯은 아래 (e)에서 별도로 다룬다** — 이 항목(a)은 카테고리만 채운다. `S01`~`S11`에
   해당하는 지점만 (e)에서 code를 받고, 나머지는 `-`로 남는다.
 
+**실제 착수 결과(2026-09-14)** — grep 재확인 결과 `VanService.cs`/`KeyDownloadVanClient.cs`/
+`KeyDownloadService.cs`는 **이미 이전 Phase(P27-6 등)에서 카테고리가 채워져 있어 대상에서
+제외**했다. 실제로 남아있던 카테고리 없는 호출은 총 **27곳**(Error 11 + Warn 16, 위 초안 31곳보다
+적음 — 초안 작성 이후 일부가 먼저 정리된 상태였다).
+
+| 파일:줄(2026-09-14 기준) | 레벨 | 상황 | 부여 카테고리 |
+|---|---|---|---|
+| `App.xaml.cs:175` | Warn | VAN 스텁 사용 경고(기동 시점) | `App` |
+| `App.xaml.cs:292` | Error | presenter-test 배경 예외 | `App` |
+| `ViewModels/ReaderSetupViewModel.cs:325` | Error | 키다운로드 예상치 못한 예외 | `Keydown` |
+| `ViewModels/ReaderSetupViewModel.cs:398,401,404,407,410` | Info/Warn | 리더기 명령(초기화/상태체크/무결성체크 등) 결과 로그 | `Reader` |
+| `Services/Payment/TransactionQueue.cs:78` | Error | 워커 처리 중 예외(`E99` 응답) | `Payment` |
+| `Services/Payment/TransactionQueue.cs:118` | Error | 완료 콜백 처리 중 예외 | `Payment`(+`S06`, (e) 참고) |
+| `Services/Payment/PaymentOrchestrator.cs:1032` | Warn | 리더기 초기화 실패(정리 경로) | `Reader` |
+| `Views/PaymentNoticeKeyboardHook.cs:76` | Error | 전역 키보드 훅 설치 실패 | `Ui`(+`S05`) |
+| `Views/PaymentNoticePresenter.cs:77,91` | Warn | 알림창 안 열려있는데 상태변경/닫기 호출 | `Ui` |
+| `Services/Pos/PosSocketServer.cs:101` | Error | 8002 리스닝 실패 | `Pos`(+`S01`) |
+| `Services/Pos/PosSocketServer.cs:122` | Warn | 리스너 정지 중 예외 | `Pos` |
+| `Services/Pos/PosSocketServer.cs:154` | Error | 수락 루프 사망 | `Pos`(+`S02`) |
+| `Services/Pos/PosSocketServer.cs:163` | Warn | 동시 연결 상한 초과 | `Pos`(+`S09`) |
+| `Services/Pos/PosSocketServer.cs:210` | Warn | 응답 후 유휴 타임아웃 | `Pos` |
+| `Services/Pos/PosSocketServer.cs:236` | Warn | 전문 형식 오류(길이 파손, 현재는 `E43`) | `Pos` |
+| `Services/Pos/PosSocketServer.cs:260` | Error | 연결 처리 중 예외 | `Pos`(+`S10`) |
+| `Services/Storage/IntegrityCheckStore.cs:102,157,195` | Error×3 | 무결성 이력 저장/조회/금일조회 실패 | `Reader`(+`S03`) |
+| `Services/Reader/IntegrityCheckService.cs:75` | Warn | 무결성 체크 결과 DB 저장 실패 | `Reader` |
+| `Services/Reader/ReaderService.cs:469,477,495` | Warn×3 | 포트 에러 감지/재연결 실패/자동복구 재전송 | `Reader` |
+
+제외한 진단 하네스: `*TestScenarios.cs`(KeyDownload/LogFileReader/MemoryClear/PaymentFlow/
+PosClient/VanCall), `RepeatedTransactionResourceTest.cs`, `*SelfTest.cs`, `NativeDllLoadSmokeTest.cs`
+(이름은 `*SmokeTest`지만 `S11` 지점이라 예외적으로 카테고리는 유지하고 code만 (e)에서 추가).
+
+카테고리 선택은 실제로 §1.5 경계 표와 일치함을 개별 지점 확인으로 검증했다(어느 경계에서 일어난
+일인가로 정함, 파일 위치로 정하지 않음).
+
 ### (b) `E99`가 code 슬롯에 남지 않는 문제 (§1.12.1-d)
 
 `PaymentOrchestrator.cs:206` — 중앙 확정 로그(`:198`)를 우회하는 예외 경로다. POS에는
@@ -3434,30 +3468,94 @@ CLI 하네스가 유일한 검증 수단이다.
 - **POS 통보가 필요하다**(`PRD.md` §5 미확정 #16). 구현은 진행하되 담당자에게 알린다.
 
 **완료 조건(이 항목)**
-- [ ] 16바이트 미만 프레임을 보내면 POS가 `E42`를 받는다 — KioskSim으로 실측.
-- [ ] 길이 필드를 깨뜨려 보내면 POS가 `E43`을 받은 뒤 연결이 닫힌다 — KioskSim으로 실측.
-- [ ] 두 경우 모두 로그에 code 슬롯이 채워진 줄이 남는다.
-- [ ] **정상 전문 처리에 회귀가 없다** — `--pos-client-test` 통과.
-- [ ] `E42`에 넣은 거래구분 값과 그 근거를 이 Task 아래에 기록했다.
-- [ ] KioskSim의 `ResponseCodeCatalog`에 `E42`/`E43`을 추가했다(Phase 26에서 `E07` 누락으로 검증
-      결함이 났던 전례가 있다 — 같은 실수를 반복하지 않는다).
+- [x] 16바이트 미만 프레임을 보내면 POS가 `E42`를 받는다 — 2026-09-14 `--pos-client-test`
+      Scenario8로 실측(KioskSim GUI 대신 이 하네스가 같은 소켓 프로토콜로 직접 검증, 아래 로그 참고).
+      응답 `#7="E42"`, placeholder 거래구분 `#4="000000"` 확인.
+- [x] 길이 필드를 깨뜨려 보내면 POS가 `E43`을 받은 뒤 연결이 닫힌다 — 2026-09-14
+      `--pos-client-test` Scenario3으로 실측. 응답 `#7="E43"` 수신 뒤
+      `WaitForConnectionClose`가 FIN을 관측해 연결 종료 확인.
+- [x] 두 경우 모두 로그에 code 슬롯이 채워진 줄이 남는다 — 아래 실제 로그 줄 인용 참고
+      (`[WARN ] [POS ] [E42] ...`, `[WARN ] [POS ] [E43] ...`).
+- [x] **정상 전문 처리에 회귀가 없다** — `--pos-client-test` Scenario1·2·4·5·6·7 전부
+      2026-09-14 재실행에서 통과(assertion 실패 없음, `FileLogger.Error` 없음).
+- [x] `E42`에 넣은 거래구분 값과 그 근거를 이 Task 아래에 기록했다 — 아래 "E42 placeholder 결정
+      기록" 참고(코드에는 이미 `PosUnknownTransactionErrorResponse.cs`/`PosSocketServer.cs` 주석으로
+      남아 있었고, 이번에 이 문서에도 동일 판단을 옮겨 적는다).
+- [x] KioskSim의 `ResponseCodeCatalog`에 `E42`/`E43`을 추가했다(Phase 26에서 `E07` 누락으로 검증
+      결함이 났던 전례가 있다 — 같은 실수를 반복하지 않는다) — `ResponseCodeCatalog.cs:31-32`에
+      두 코드 모두 확인됨.
+
+**E42 placeholder 결정 기록(2026-09-14, 검증 세션에서 코드 주석으로부터 이 문서로 이관)**
+
+`E42`는 본문이 16바이트 미만이라 `#4`(거래 구분 코드) 자체를 읽을 수 없는 상태다.
+`PosUnknownTransactionErrorResponse.Build()`에 `"000000"`을 고정 placeholder로 넘긴다 —
+이 코드베이스가 이미 "N형 필드 값이 없으면 0으로 채운다"는 관례를 갖고 있음(`PosInquiryResponseTelegram.cs`,
+`PRD.md` §3.4.5)을 근거로 2026-09-14 사용자 확정. 6자리 숫자 문자열이라 POS가 `#4`를 숫자로 파싱해도
+실패하지 않는다. 코드 쪽 근거 주석은 `PosUnknownTransactionErrorResponse.cs`(파라미터 설명)와
+`PosSocketServer.cs`(`HandleFrame`의 catch 블록)에 이미 있다.
+
+**검증 로그 실측(2026-09-14, `--pos-client-test`, `C:\KFTC_PosAgent\KFTCTaxLog\2026-09-14.log`)**
+
+- E43 (`PosSocketServer.cs` `HandleConnection`):
+  ```
+  [2026-09-14 17:09:50.538] [WARN ] [POS     ] [E43] [-           ] [PosSocketServer] 127.0.0.1:60738 전문 형식 오류 — 응답 회신 후 연결 종료: 길이 필드가 숫자가 아님: 'ABCD'
+  [2026-09-14 17:09:50.542] [INFO ] [POS     ] [-  ] [-           ] [PosSocketServer] 연결 종료: 127.0.0.1:60738
+  [2026-09-14 17:09:50.542] [INFO ] [-       ] [-  ] [-           ] [pos-client-test][3] E43 응답 수신 결과 — #7 응답 코드="E43" / 원문 길이=70
+  [2026-09-14 17:09:50.544] [INFO ] [-       ] [-  ] [-           ] [pos-client-test][3] 완료 — 서버가 응답 회신 후 연결을 닫음(기대한 동작)
+  ```
+- E42 (`PosSocketServer.cs` `HandleFrame`) + 연결 유지 확인:
+  ```
+  [2026-09-14 17:10:11.830] [WARN ] [POS     ] [E42] [-           ] [PosSocketServer] 127.0.0.1:60788 요청 파싱 오류 — 응답 회신(이 프레임만 실패, 연결 유지): 본문이 너무 짧아 거래 구분 코드(#4)를 읽을 수 없음: 10바이트(최소 16바이트 필요)
+  [2026-09-14 17:10:11.830] [INFO ] [-       ] [-  ] [-           ] [pos-client-test][8] E42 응답 수신 결과 — #7 응답 코드="E42" / #4 거래구분="000000"
+  [2026-09-14 17:10:11.830] [INFO ] [POS     ] [-  ] [E42-RECOVER ] [PosSocketServer] 127.0.0.1:60788 요청 수신 전문=501008 원문=...
+  [2026-09-14 17:10:12.956] [INFO ] [-       ] [-  ] [-           ] [pos-client-test][8] 완료 — E42 이후에도 같은 연결로 정상 요청 처리됨(연결 유지 확인)
+  ```
+- E41 회귀(코드 리뷰로 확인, 하네스에 전용 시나리오 없음): `PosRequestTelegram.cs:65`
+  `PosUnknownTransactionErrorResponse.Build(transactionTypeCode, "E41")` — 시그니처 변경 후에도
+  파라미터 순서(거래구분, 에러코드)가 그대로이고, `transactionTypeCode`는 placeholder가 아니라
+  실제로 읽은 값을 넘긴다(E42와 구분되는 지점). 별도 회귀 없음.
 
 ### 완료 조건
 
-- [ ] 운영 코드에서 `FileLogger.Info/Warn/Error`를 **카테고리 없이** 호출하는 곳이 0곳이다 —
-      grep으로 확인(진단 하네스 제외, 제외 목록을 이 Task 아래에 기록한다).
-- [ ] 카테고리 선택이 §1.5 경계 표와 일치한다 — 31곳을 표로 정리해 이 Task 아래에 남긴다.
-- [ ] `E99`로 끝난 거래의 로그에 code 슬롯 `E99`가 남는다 — 실제 로그 줄로 확인.
-- [ ] `"E99"` 등 전문 코드 리터럴이 `Services/Payment/` 아래에 새로 생기지 않았다 — grep.
-- [ ] `D02`/`R2x`/`E99`로 거래가 실패한 로그가 `ERROR` 레벨이다 — 실제 로그 줄로 확인.
-- [ ] 정정 대상 3곳 외의 `Warn` 레벨이 바뀌지 않았다 — diff로 확인.
-- [ ] 로그 보관 정리에서 삭제 실패 시 `WARN`이 남고, 파일마다가 아니라 **1회당 한 줄**이다.
-- [ ] `S01`~`S11`이 카탈로그 §2.2의 각 지점에서 code 슬롯에 실제로 남는다 — 로그 줄로 확인.
-- [ ] `S` 리터럴이 호출부에 흩어져 있지 않다 — 한 지점에 모였고, `PosResultCodeMapper`에는 들어가지
-      않았다(전문에 실리지 않는 값이므로). 그 판단을 Task 아래에 기록했다.
-- [ ] `S12` 이상이 만들어지지 않았다 — 이번 범위는 `fault_alert_catalog.md` §2.2의 11건이다.
-- [ ] `E42`/`E43`이 실제로 POS에 회신된다((f) 완료 조건 참고).
-- [ ] `dotnet build` 경고 0 / 오류 0.
+> 2026-09-14 검증 세션 대조 결과 — (f)는 실측(`--pos-client-test`)까지 마쳤고, (a)~(e)는 이번 세션
+> 범위 밖(재구현 금지 지시)이라 **코드 diff·grep으로 정합성만 대조**했다(31곳 표 작성처럼 순수
+> 정리·서식 작업은 하지 않음). 필요하면 별도 세션에서 표 작성 등 남은 문서화를 마저 한다.
+
+- [x] 운영 코드에서 `FileLogger.Info/Warn/Error`를 **카테고리 없이** 호출하는 곳이 0곳이다 —
+      2026-09-14 grep 재확인(`grep -rn "FileLogger\.\(Warn\|Error\)(\"" --include="*.cs"` 중
+      `TestScenarios`/`SelfTest`/`SmokeTest`/`RepeatedTransactionResourceTest` 제외 결과 0건).
+      진단 하네스 제외 목록은 위 4가지 패턴.
+- [x] 카테고리 선택이 §1.5 경계 표와 일치한다 — 27곳 표를 (a) 절 아래에 기록했다(2026-09-14).
+      초안 31곳 중 4곳(`VanService.cs`/`KeyDownloadVanClient.cs`/`KeyDownloadService.cs`)은
+      이전 Phase에서 이미 정리돼 있어 제외.
+- [x] `E99`로 끝난 거래의 로그에 code 슬롯 `E99`가 남는다 — 실제 로그 줄로 확인:
+      `[2026-09-14 11:33:43.152] [ERROR] [PAYMENT ] [E99] [0EC000000007] [PaymentOrchestrator] 거래 확정 — 내부 오류(InternalError)`
+      (같은 날 앞선 세션 로그, 이번 검증 세션에서 재생성한 것은 아니다).
+- [x] `"E99"` 등 전문 코드 리터럴이 `Services/Payment/` 아래에 새로 생기지 않았다 — grep 결과
+      `PosResultCodeMapper.cs:44`(매핑 원본 정의) 1곳뿐, 다른 호출부에 리터럴 없음.
+- [x] `D02`/`R2x`/`E99`로 거래가 실패한 로그가 `ERROR` 레벨이다 — 실제 로그 줄로 확인:
+      `[2026-09-14 11:33:44.208] [ERROR] [PAYMENT ] [D02] [0EC000000009] [PaymentOrchestrator] VAN DLL 통신 실패: 테스트용 통신 실패`
+      (`E99` 예시는 위 항목과 동일 줄). `R2x` 실측 로그는 이번 세션에서 못 찾았으나(카드리딩 DLL
+      실패를 재현하지 않음), 코드는 `Error(LogCategory.Payment, ..., readerDllFailureCode, txId)`로
+      동일 패턴(`PaymentOrchestrator.cs:923` 부근)이라 diff로 확인함.
+- [x] 정정 대상 3곳 외의 `Warn` 레벨이 바뀌지 않았다 — diff로 확인: `PaymentOrchestrator.cs`의
+      리더기 초기화 실패 로그, `ReaderService.cs` 4곳, `PaymentNoticePresenter.cs` 2곳,
+      `PosSocketServer.cs`의 나머지 `Warn` 호출 전부 카테고리만 추가되고 레벨은 `Warn` 그대로임을
+      `git diff`로 확인.
+- [x] 로그 보관 정리에서 삭제 실패 시 `WARN`이 남고, 파일마다가 아니라 **1회당 한 줄**이다 —
+      `LogRetentionCleaner.cs`에서 `failedCount`를 루프 안에서 누적만 하고, 루프 밖에서
+      `failedCount > 0`일 때 한 번만 `FileLogger.Warn(..., InternalFaultCodes.LogRetentionFailure, ...)`
+      호출함을 코드로 확인(실제 삭제 실패를 재현하지 않아 로그 실측은 못 함).
+- [ ] `S01`~`S11`이 카탈로그 §2.2의 각 지점에서 code 슬롯에 실제로 남는다 — **로그 실측 못 함**(이
+      세션 범위 밖, 각 조건을 인위로 재현해야 함). `InternalFaultCodes.cs`에 11개 상수가 카탈로그와
+      정확히 일치하고 11개 호출부 전부에서 쓰이는 것은 grep으로 확인했다.
+- [x] `S` 리터럴이 호출부에 흩어져 있지 않다 — `InternalFaultCodes.cs` 한 지점에 모였고,
+      `PosResultCodeMapper.cs`에는 들어가지 않음(grep으로 상호 배타 확인). 판단 근거는
+      `InternalFaultCodes.cs` 클래스 주석에 이미 기록됨.
+- [x] `S12` 이상이 만들어지지 않았다 — `InternalFaultCodes.cs`는 `S01`~`S11` 11개뿐.
+- [x] `E42`/`E43`이 실제로 POS에 회신된다((f) 완료 조건 참고, 2026-09-14 `--pos-client-test`
+      Scenario3/8로 실측).
+- [x] `dotnet build` 경고 0 / 오류 0 — 2026-09-14 재확인.
 
 ---
 
