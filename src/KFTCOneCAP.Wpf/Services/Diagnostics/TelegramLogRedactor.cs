@@ -83,6 +83,18 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 /// </summary>
 internal static class TelegramLogRedactor
 {
+    /// <summary>마스킹 대상 3곳(<c>#14</c>/<c>#36</c>/<c>#46</c>)이 전부 "902614 전용"이므로(클래스 요약)
+    /// 다른 전문 종류는 필드 번호가 같아도 마스킹하지 않는다.
+    ///
+    /// <b>2026-09-15 Phase 27 최종 검증에서 발견·수정</b> — 필드 <b>번호</b>만 보고 마스킹하면 같은
+    /// 번호가 전혀 다른 뜻으로 쓰이는 다른 전문까지 가려진다. 실측(501008 요청 1건 실전송): <c>#14</c>
+    /// (전자납부번호, 19바이트) <c>1234567890123456789</c> → <c>123456*********6789</c>, <c>#36</c>
+    /// (교통세, 15바이트) <c>000000000012345</c> → <c>000000*****2345</c>. 둘 다 민감정보가 아니라
+    /// 진단에 꼭 필요한 값이라, P27-6("과도한 마스킹이 장애 분석을 방해한다")이 없애려던 문제가
+    /// 위치 기반 마스킹 쪽에 그대로 남아 있었다. 800000의 <c>#14</c>(BIN, 8바이트)는 앞6+뒤4 clamp로
+    /// <c>*</c>가 0개라 우연히 무해했을 뿐 같은 결함이었다.</summary>
+    private const string CardApprovalTransactionTypeCode = "902614";
+
     /// <summary>SPEC #46 "암호화된 카드정보"(902614) — 부분 마스킹 대상(클래스 요약 참고).</summary>
     private const int EncryptedCardDataFieldNumber = 46;
 
@@ -121,6 +133,11 @@ internal static class TelegramLogRedactor
 
         if (body.Length != schema.TotalLength)
             return DecodeWhole(body); // 기형 전문 — POSITION을 신뢰할 수 없어 폴백.
+
+        // 마스킹 대상 3곳이 전부 902614 전용이다(CardApprovalTransactionTypeCode 주석의 실측 참고) —
+        // 501008/800000/999999는 필드 번호가 겹쳐도 손대지 않고 원문 그대로 남긴다.
+        if (!string.Equals(schema.TransactionTypeCode, CardApprovalTransactionTypeCode, StringComparison.Ordinal))
+            return DecodeWhole(body);
 
         // POSITION 순으로 마스킹 구간을 모은다 — 이 전문 종류에 해당 필드 자체가 없으면(501008/800000)
         // 자연히 빈 목록이 되어 원문 그대로 남는다.

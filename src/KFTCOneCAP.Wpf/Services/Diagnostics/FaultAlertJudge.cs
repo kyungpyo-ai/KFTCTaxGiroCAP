@@ -12,7 +12,9 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 ///
 /// <b>서버 전송은 하지 않는다(Phase 28)</b> — 이 클래스는 판정과 로그 표시까지만 책임진다.
 ///
-/// <b>호출 지점은 정확히 15곳</b>(development_plan.md P27-9-(a) 표) — 이 메서드 자체를 다른 곳에서
+/// <b>호출 지점은 정확히 19곳</b>(development_plan.md P27-9-(a) 표는 "15곳"이라 적었으나, 그 표가
+/// 1행으로 묶은 <c>S03</c>(3곳)·<c>S11</c>(3곳)이 실제로는 서로 다른 실패 경로라 코드에서는 각각
+/// 별도 지점이다 — CP3 리뷰 §4에서 19곳으로 확정) — 이 메서드 자체를 다른 곳에서
 /// 새로 호출하지 않는다(중복 판정 방지, <c>FileLogger.Write</c> 전역 후킹은 기각된 설계다).
 ///
 /// <b>카운터는 고정 1시간 버킷</b>(<see cref="InternalFaultAlertConditions.WindowHours"/>)이고

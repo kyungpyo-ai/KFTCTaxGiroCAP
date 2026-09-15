@@ -590,15 +590,33 @@ observed_identity
 
 | 파일 | 변경 |
 |---|---|
-| `Services/Diagnostics/LogRingBuffer.cs` | **삭제** |
-| `Services/Diagnostics/RingBufferSink.cs` | **삭제** |
-| `Services/Diagnostics/LogFileReader.cs` | **신규** — §1.8.3 |
-| `Services/Diagnostics/FileLogger.cs` | 기본 싱크 목록에서 `RingBufferSink` 제거(35줄) |
-| `App.xaml.cs` | `ConfigureSinks(new FileLogSink())` (96줄) |
-| `Services/Diagnostics/LogLineRenderer.cs` | 역파싱 지점 추가(§1.8.3-b) |
+| `Services/Diagnostics/LogRingBuffer.cs` | **삭제**(P27-5) |
+| `Services/Diagnostics/RingBufferSink.cs` | **삭제**(P27-5) |
+| `Services/Diagnostics/LogFileReader.cs` | **신규**(P27-2/3) — §1.8.3, `Collect` 단일 API |
+| `Services/Diagnostics/LogFileReaderTestScenarios.cs` | **신규**(P27-4) — 진단 하네스 `--log-file-reader-test` |
+| `Services/Diagnostics/FileLogger.cs` | 기본 싱크 목록에서 `RingBufferSink` 제거(P27-5) |
+| `App.xaml.cs` | `ConfigureSinks(new FileLogSink())`(P27-5), `--log-file-reader-test` 인자 분기(P27-4) |
+| `Services/Diagnostics/LogLineRenderer.cs` | 역파싱 지점(`LogLineParser`) 추가(P27-1) |
 
-`ILogSink.cs` / `FileLogSink.cs` / `LogRecord.cs` / `LogPaths.cs` / `LogRetentionCleaner.cs` /
-`LogCategory.cs` / `LogLevel.cs`는 **건드리지 않는다.**
+**2026-09-14 갱신 — "건드리지 않는다"던 목록이 P27-8/9에서 결국 바뀌었다.** 이 절 작성 시점(P27-1~7
+착수 전)에는 위 목록 밖의 파일을 건드릴 계획이 없었지만, 이후 P27-8(로그 코드 체계)과 P27-9(장애
+알림 판정·`ALERT` 레벨)가 같은 로그 파이프라인을 다시 확장했다 — 정본은 §1.12이며, 실제 최종
+변경분은 `development_plan.md`의 P27-8/P27-9 절 전체 목록을 본다. 아래는 그중 이 절이 원래
+"건드리지 않는다"고 적었던 파일들에 실제로 생긴 변경만 요약한 것이다:
+
+| 파일 | 변경(P27-8/9) |
+|---|---|
+| `Services/Diagnostics/LogLevel.cs` | `Alert` 추가(P27-9-c) |
+| `Services/Diagnostics/ILogSink.cs` | `WriteBoundary()` 추가(P27-9-d) |
+| `Services/Diagnostics/FileLogSink.cs` | `WriteBoundary()` 구현, "거래 확정" 메시지 매칭 조건 제거(P27-9-d) |
+| `Services/Diagnostics/FileLogger.cs` | `Alert(...)` 3종 오버로드, `internal WriteTransactionBoundary()` 추가(P27-9-c/d) |
+| `Services/Diagnostics/FaultAlertJudge.cs` | **신규**(P27-9) — 판정 엔진 |
+| `Services/Diagnostics/InternalFaultAlertConditions.cs` | **신규**(P27-9-a) — 조건값 단일 지점 |
+| `Services/Diagnostics/InternalFaultCodes.cs` | **신규**(P27-8-e) — `S01`~`S11` 상수 |
+
+`LogRecord.cs` / `LogPaths.cs` / `LogRetentionCleaner.cs`(로직) / `LogCategory.cs`는 여전히
+**건드리지 않았다**(구조 변경 없음, `LogRetentionCleaner.cs`는 P27-8-d에서 삭제 실패 로깅 한 줄만
+추가됐다 — 아래 §1.12 영향 범위 참고 대상).
 
 ---
 
@@ -1633,14 +1651,14 @@ Phase 착수 전에 확인해 PRD를 먼저 갱신한다(작업 방식 규칙).
 | 7 | **`[63]`/`[64]`/`[65]`의 DLL 응답 타임아웃 분류** | `ReaderSerial.dll`은 일반 명령에 3초, 거래 명령에 200초를 건다(`docs/reader_dll/DLL연동가이드.md` CALLBACK 표). 키다운로드 3종이 어느 쪽인지 문서에 명시가 없다. **2026-09-02 사용자 판단으로 "일단 3초 전제"로 진행** — `[64]` 상호인증에서 리더기의 RSA2048 검증이 3초를 넘기면 DLL이 먼저 타임아웃을 올려 앱 쪽 대기 시간을 늘려도 성공할 수 없다. 그 경우 별도 저장소(`C:\Project\KFTCReaderDLL`)에서 분류를 고쳐야 하므로 **이 저장소에서는 해결 불가** — Phase 24 P24-7에서 이 증상이 나오면 재시도하지 말고(IPEK 소모) 즉시 보고 | §3.4 |
 | 8 | **P-39와 `395`(단말기 교체 요망)의 자리수 모순** | 2026-09-02 CP1 Opus 리뷰(`development_plan.md` P24-4/5 리뷰 절)에서 발견 — §3.5 표에 P-39(응답코드)는 **AN 2**로 명시돼 있는데, §3.4의 `395` 각주는 3자리다. 사용자 확인 결과 `395`는 ISO 키다운로드 문서가 아니라 **"KFTCVAN 통합전문 SPEC(인터넷지로-VAN)"** 이라는 별도 문서의 오류코드에서 온 값이라고 하나, **그 문서는 이 저장소에 없다** — `pos-onecap-spec-expert`가 가진 `국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260831.pdf` 전 18페이지를 확인했지만 `395`는 어디에도 없고(p.18 응답코드 표에도 없음), 그 문서조차 "카드사 응답코드는 KFTCVAN통합전문스펙(인터넷지로-VAN) 참조"라고 다른(저장소에 없는) 문서를 가리킬 뿐이다. **blocker는 아니다** — `KeyDownloadService`의 `395` 특수 처리 코드는 그대로 두되(사용자가 실재한다고 확신하는 값이라 임의로 지우지 않는다), P-39가 AN 2인 이상 구조적으로 절대 매치될 수 없어 사실상 죽은 분기다. 그 KFTCVAN 통합전문 SPEC 문서를 구하면 재확인한다 | §3.4/§3.5 |
 | ~~9~~ | ~~슬라이스 결과의 시간창 기본 크기~~ | **2026-09-10 해소 — 기준 자체를 바꿨다.** 시간창이 아니라 **직전 거래 3건부터 로그 끝까지**로 확정(§1.8.3-a2). 시간 기준은 거래량에 휘둘려 문맥의 양이 들쭉날쭉하고, 장애 이후에는 거래가 없어 뒤 시간창이 낭비다. 값(N=3, 상한 가드 200줄)은 `fault_alert_catalog.md` §3이 관리한다 | §1.8 |
-| 10 | **로그 파일명 정규식의 공유 방식**(Phase 27, §1.8.4 #2) | `LogRetentionCleaner`가 이미 같은 규칙을 갖고 있다. 그대로 복사(중복) / `LogPaths`로 승격 / 별도 헬퍼 중 선택. **blocker 아니다** — 구현 판단으로 처리하되 결정 내용을 `development_plan.md`에 남긴다 | §1.8 |
+| ~~10~~ | ~~로그 파일명 정규식의 공유 방식~~ | **2026-09-14 해소 — 복사(재사용)로 결정.** `LogRetentionCleaner.FileNamePattern`은 "파일명→날짜" 방향 정규식이라 `LogFileReader`가 필요한 "날짜→파일명" 방향에는 애초에 재사용 불가 — 필요했던 건 서식 문자열 `"{0:yyyy-MM-dd}.log"` 하나뿐이라 `LogPaths`로 승격하지 않고 `FileLogSink`와 같은 리터럴을 `LogFileReader.cs` 안에서만 재사용했다(`development_plan.md` P27-2 완료 조건 기록) | §1.8 |
 | 11 | **장애정보 payload 형태**(Phase 28) | **트리거는 2026-09-10 해소 — 판정 즉시 전송**(`fault_alert_catalog.md` §3). 남은 것은 payload 형태뿐이다: JSON 본문에 문자열로 실을지, multipart 파일 파트로 보낼지. **수집 서버와 합의해야 정해지는 값**이라 이쪽에서 정할 수 없다. §1.8.3-(c)의 "텍스트 원문 반환" 결정은 어느 쪽이든 그대로 얹을 수 있다. **전송 실패 시 재시도 큐**도 여기 딸린 사안이다(즉시 전송이라 망 단절 구간이 문제가 된다) | §1.10 |
 | ~~12~~ | ~~`TelegramLogRedactor` 폴백 경로가 2차 마스킹 제거로 무방비가 되는지~~ | **2026-09-09 전수 확인으로 해소** — 카드 데이터가 새는 경로는 없다. `Redact`의 원문 반환 분기 3개 중 ①(스키마 미식별)·②(길이 불일치)는 요청 경로에서 `Parse`의 E40/E41이, VAN 응답 경로에서 `bodyLength = Schema.TotalLength`로 자르는 구현이 각각 막고 있고, ②에 실제 도달하는 유일한 경로인 거래상태조회 응답은 P26-1이 이미 카드리딩·PIN 필드를 지운 상태다. **폴백 전용 마스킹을 새로 두지 않는다** — 근거 전문은 §1.9.5 | §1.9 |
 | ~~13~~ | ~~`S` 계열 내부 오류 코드를 어느 사건에 부여할지~~ | **2026-09-10 해소 — `S01`~`S11` 확정.** 최초 5건으로 시작해 "POS가 결과 코드를 받는가" 기준으로 전수 재점검한 결과 11건이 됐다. Phase 27(P27-8-e)에서 부여하며, 목록 정본은 `fault_alert_catalog.md` §2.2다. 다음 번호는 `S12` | §1.12 |
 | ~~14~~ | ~~급증형 코드의 알림 임계값~~ | **2026-09-10 해소 — 잠정값 확정.** 값과 근거는 **`fault_alert_catalog.md` §3이 정본**이며 여기 옮겨 적지 않는다(한쪽만 갱신될 위험). 원칙만 남긴다 — **비워 두면 그 코드는 영영 알림이 안 뜨므로 근거 있는 잠정값을 넣고 재검토 조건을 함께 적는다** | §1.12 |
 | ~~15~~ | ~~급증형 판정 카운터의 재시작 처리~~ | **2026-09-10 해소 — 리셋 허용.** 영속화하지 않는다. 영속화하면 쓰기 빈도가 늘고 정리 로직이 필요한데, **재시작 자체가 별도 장애 신호로 포착**되므로(앱 기동 로그, `S` 계열) 리셋을 허용해도 장애를 통째로 놓치지 않는다 | §1.12 |
-| 16 | **`E42`/`E43` 신설을 POS에 통보**(Phase 27, `fault_alert_catalog.md` §2.3) | SPEC에 없는 자체 응답 코드라 POS가 모르면 해석할 수 없는 값을 받는다. **`E40`/`E41`이 이미 같은 처지**라 새로 생기는 문제는 아니다(그 둘의 통보 여부도 확인 필요). **blocker 아니다** — 2026-09-10 사용자 확정으로 **구현은 진행하고 통보는 별도로** 한다. 지금은 침묵하고 있어 POS가 아무것도 못 받는 상태이므로, 통보 전이라도 응답이 있는 편이 낫다 | §1.12 |
-| 17 | **리더기 DLL 연동 실패 코드 재배치(`R20`~`R29` → `R24`~`R32`)를 POS에 통보**(2026-09-14, `fault_alert_catalog.md` §2.1 변경 이력) | P27-9 착수 중 `R0x`(리더기 업무 응답코드, `R00`~`R23`)와 기존 DLL 실패 코드 `R20`~`R23`이 실제로 충돌할 수 있음이 드러나 DLL 실패 코드 9개를 `R24`~`R32`로 재배치했다. **이번엔 신설이 아니라 기존 값 자체가 바뀌므로 #16보다 더 통보가 필요하다** — POS가 이미 옛 `R20`~`R25`/`R27`~`R29` 값을 알고 있었다면 새 값을 모른다. **blocker 아니다** — 값 자체는 바뀌었어도 "포맷은 `R`+2자리"라는 계약은 그대로라 POS가 미인식 코드를 받아도 기존 E40/E41/E42/E43과 같은 처지(자체 코드를 모르는 경우)로 처리될 것으로 기대. 담당자에게 반드시 알린다 | §1.12 |
+| 16 | **`E42`/`E43` 신설을 POS에 통보**(Phase 27, `fault_alert_catalog.md` §2.3) | **구현·실측 검증 완료(2026-09-14, P27-8-f + CP3)** — `--pos-client-test`와 원시 소켓 재현으로 응답 바이트를 직접 확인함. SPEC에 없는 자체 응답 코드라 POS가 모르면 해석할 수 없는 값을 받는다는 우려는 그대로다. **`E40`/`E41`이 이미 같은 처지**라 새로 생기는 문제는 아니다. **blocker 아니다, 여전히 열려 있는 것은 "담당자 통보" 그 자체뿐이다** — 코드 작업은 끝났고 통보는 저장소 밖의 실제 행동이라 이 문서가 대신할 수 없다 | §1.12 |
+| 17 | **리더기 DLL 연동 실패 코드 재배치(`R20`~`R29` → `R24`~`R32`)를 POS에 통보**(2026-09-14, `fault_alert_catalog.md` §2.1 변경 이력) | **구현·실측 검증 완료(2026-09-14, P27-9-(a-0) + CP3)** — `PosResultCodeMapper.cs`/KioskSim `ResponseCodeCatalog.cs` 재배치 확인, `R00`~`R23`(업무코드)과 겹치지 않음을 코드로 재확인. P27-9 착수 중 `R0x`(리더기 업무 응답코드, `R00`~`R23`)와 기존 DLL 실패 코드 `R20`~`R23`이 실제로 충돌할 수 있음이 드러나 DLL 실패 코드 9개를 재배치했다. **이번엔 신설이 아니라 기존 값 자체가 바뀌므로 #16보다 더 통보가 필요하다** — POS가 이미 옛 `R20`~`R25`/`R27`~`R29` 값을 알고 있었다면 새 값을 모른다. **blocker 아니다, 여전히 열려 있는 것은 "담당자 통보" 그 자체뿐이다.** 값 자체는 바뀌었어도 "포맷은 `R`+2자리"라는 계약은 그대로라 POS가 미인식 코드를 받아도 기존 E40/E41/E42/E43과 같은 처지로 처리될 것으로 기대 | §1.12 |
 
 ---
 
