@@ -33,8 +33,11 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         internal static InitCommandOutcome DllCallFailure(int dllResult, string dllResultName, string detail) =>
             new InitCommandOutcome(ReaderCommandOutcomeKind.DllCallFailure, string.Empty, dllResult, dllResultName, detail);
 
-        internal static InitCommandOutcome Timeout() =>
-            new InitCommandOutcome(ReaderCommandOutcomeKind.Timeout, string.Empty, 0, string.Empty, "응답 대기 시간 초과");
+        /// <summary>2026-09-15 사용자 요청 — DLL이 직접 보고한 타임아웃인지 앱이 로컬 타이머로
+        /// 포기한 것인지(<see cref="ReaderService"/>의 두 <c>RawReaderCommandResult.Timeout</c>
+        /// 호출 지점 참고) <paramref name="detail"/>로 구분해서 받는다.</summary>
+        internal static InitCommandOutcome Timeout(string detail) =>
+            new InitCommandOutcome(ReaderCommandOutcomeKind.Timeout, string.Empty, 0, string.Empty, detail);
 
         internal static InitCommandOutcome CommunicationError(string detail) =>
             new InitCommandOutcome(ReaderCommandOutcomeKind.CommunicationError, string.Empty, 0, string.Empty, detail);

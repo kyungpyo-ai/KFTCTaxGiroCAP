@@ -38,8 +38,10 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         internal static StatusCommandOutcome DllCallFailure(int dllResult, string dllResultName, string detail) =>
             new StatusCommandOutcome(ReaderCommandOutcomeKind.DllCallFailure, string.Empty, string.Empty, string.Empty, dllResult, dllResultName, detail);
 
-        internal static StatusCommandOutcome Timeout() =>
-            new StatusCommandOutcome(ReaderCommandOutcomeKind.Timeout, string.Empty, string.Empty, string.Empty, 0, string.Empty, "응답 대기 시간 초과");
+        /// <summary>2026-09-15 사용자 요청 — DLL 직접 보고 타임아웃 vs 앱 로컬 포기를 <paramref name="detail"/>로
+        /// 구분한다(<see cref="InitCommandOutcome.Timeout"/> 주석 참고).</summary>
+        internal static StatusCommandOutcome Timeout(string detail) =>
+            new StatusCommandOutcome(ReaderCommandOutcomeKind.Timeout, string.Empty, string.Empty, string.Empty, 0, string.Empty, detail);
 
         internal static StatusCommandOutcome CommunicationError(string detail) =>
             new StatusCommandOutcome(ReaderCommandOutcomeKind.CommunicationError, string.Empty, string.Empty, string.Empty, 0, string.Empty, detail);

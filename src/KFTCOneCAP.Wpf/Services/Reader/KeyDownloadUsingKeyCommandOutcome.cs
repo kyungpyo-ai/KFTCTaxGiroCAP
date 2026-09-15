@@ -34,8 +34,10 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         internal static KeyDownloadUsingKeyCommandOutcome DllCallFailure(int dllResult, string dllResultName, string detail) =>
             new KeyDownloadUsingKeyCommandOutcome(ReaderCommandOutcomeKind.DllCallFailure, string.Empty, string.Empty, dllResult, dllResultName, detail);
 
-        internal static KeyDownloadUsingKeyCommandOutcome Timeout() =>
-            new KeyDownloadUsingKeyCommandOutcome(ReaderCommandOutcomeKind.Timeout, string.Empty, string.Empty, 0, string.Empty, "응답 대기 시간 초과");
+        /// <summary>2026-09-15 사용자 요청 — DLL 직접 보고 타임아웃 vs 앱 로컬 포기를 <paramref name="detail"/>로
+        /// 구분한다(<see cref="InitCommandOutcome.Timeout"/> 주석 참고).</summary>
+        internal static KeyDownloadUsingKeyCommandOutcome Timeout(string detail) =>
+            new KeyDownloadUsingKeyCommandOutcome(ReaderCommandOutcomeKind.Timeout, string.Empty, string.Empty, 0, string.Empty, detail);
 
         internal static KeyDownloadUsingKeyCommandOutcome CommunicationError(string detail) =>
             new KeyDownloadUsingKeyCommandOutcome(ReaderCommandOutcomeKind.CommunicationError, string.Empty, string.Empty, 0, string.Empty, detail);

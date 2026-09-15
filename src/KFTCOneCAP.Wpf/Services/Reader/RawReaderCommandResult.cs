@@ -32,8 +32,16 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         internal static RawReaderCommandResult Response(byte[] data) =>
             new RawReaderCommandResult(RawReaderCommandKind.Response, data, 0, string.Empty, string.Empty);
 
-        internal static RawReaderCommandResult Timeout() =>
-            new RawReaderCommandResult(RawReaderCommandKind.Timeout, System.Array.Empty<byte>(), 0, string.Empty, "응답 대기 시간 초과");
+        /// <summary>
+        /// 2026-09-15 사용자 요청 — Timeout이 두 서로 다른 근원(<see cref="ReaderService.CompletePendingIfMatches"/>의
+        /// DLL <c>READER_EVENT_TIMEOUT</c> 콜백 vs <see cref="ReaderService.SendAndAwaitAsync"/>의 앱 자체
+        /// 로컬 타이머 만료)에서 동일한 문구로 뭉뚱그려져 로그만 봐서는 원인을 구분할 수 없었다(실기
+        /// COM4 무결성체크 재현으로 발견). 호출자가 그 출처를 <paramref name="detail"/>로 명시하도록
+        /// 강제한다 — 기본값은 두던 예전 문구를 유지해 테스트 하네스(KeyDownloadTestScenarios 등)의
+        /// 인자 없는 호출을 깨지 않는다.
+        /// </summary>
+        internal static RawReaderCommandResult Timeout(string detail = "응답 대기 시간 초과") =>
+            new RawReaderCommandResult(RawReaderCommandKind.Timeout, System.Array.Empty<byte>(), 0, string.Empty, detail);
 
         internal static RawReaderCommandResult CommunicationError(string detail) =>
             new RawReaderCommandResult(RawReaderCommandKind.CommunicationError, System.Array.Empty<byte>(), 0, string.Empty, detail);

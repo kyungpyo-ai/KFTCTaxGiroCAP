@@ -43,8 +43,11 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         internal static CardReadCommandOutcome DllCallFailure(int dllResult, string dllResultName, string detail) =>
             new CardReadCommandOutcome(ReaderCommandOutcomeKind.DllCallFailure, string.Empty, null, dllResult, dllResultName, detail);
 
-        internal static CardReadCommandOutcome Timeout() =>
-            new CardReadCommandOutcome(ReaderCommandOutcomeKind.Timeout, string.Empty, null, 0, string.Empty, "응답 대기 시간 초과");
+        /// <summary>2026-09-15 사용자 요청 — DLL 직접 보고 타임아웃 vs 앱 로컬 포기를 <paramref name="detail"/>로
+        /// 구분한다(<see cref="InitCommandOutcome.Timeout"/> 주석 참고). POS 응답코드는 어느 쪽이든
+        /// E02로 고정(<c>PosResultCodeMapper</c>)이라 이 구분은 로그/알림 판정 진단 전용이다.</summary>
+        internal static CardReadCommandOutcome Timeout(string detail) =>
+            new CardReadCommandOutcome(ReaderCommandOutcomeKind.Timeout, string.Empty, null, 0, string.Empty, detail);
 
         internal static CardReadCommandOutcome CommunicationError(string detail) =>
             new CardReadCommandOutcome(ReaderCommandOutcomeKind.CommunicationError, string.Empty, null, 0, string.Empty, detail);

@@ -286,7 +286,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                         return InitCommandOutcome.CommunicationError("0x70 응답 데이터 길이 부족(2byte 미만)");
                     return parsed.IsSuccess ? InitCommandOutcome.Success(parsed.ResponseCode) : InitCommandOutcome.BusinessFailure(parsed.ResponseCode);
                 case RawReaderCommandKind.Timeout:
-                    return InitCommandOutcome.Timeout();
+                    return InitCommandOutcome.Timeout(raw.Detail);
                 case RawReaderCommandKind.CommunicationError:
                     return InitCommandOutcome.CommunicationError(raw.Detail);
                 default:
@@ -301,7 +301,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 case RawReaderCommandKind.Response:
                     return StatusCommandOutcome.FromParsed(StatusResponseParser.Parse(raw.Data));
                 case RawReaderCommandKind.Timeout:
-                    return StatusCommandOutcome.Timeout();
+                    return StatusCommandOutcome.Timeout(raw.Detail);
                 case RawReaderCommandKind.CommunicationError:
                     return StatusCommandOutcome.CommunicationError(raw.Detail);
                 default:
@@ -316,7 +316,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 case RawReaderCommandKind.Response:
                     return IntegrityCommandOutcome.FromParsed(IntegrityResponseParser.Parse(raw.Data));
                 case RawReaderCommandKind.Timeout:
-                    return IntegrityCommandOutcome.Timeout();
+                    return IntegrityCommandOutcome.Timeout(raw.Detail);
                 case RawReaderCommandKind.CommunicationError:
                     return IntegrityCommandOutcome.CommunicationError(raw.Detail);
                 default:
@@ -331,7 +331,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 case RawReaderCommandKind.Response:
                     return CardReadCommandOutcome.FromParsed(CardReadResponseParser.Parse(raw.Data));
                 case RawReaderCommandKind.Timeout:
-                    return CardReadCommandOutcome.Timeout();
+                    return CardReadCommandOutcome.Timeout(raw.Detail);
                 case RawReaderCommandKind.CommunicationError:
                     return CardReadCommandOutcome.CommunicationError(raw.Detail);
                 default:
@@ -346,7 +346,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 case RawReaderCommandKind.Response:
                     return KeyDownloadStartCommandOutcome.FromParsed(KeyDownloadStartResponseParser.Parse(raw.Data));
                 case RawReaderCommandKind.Timeout:
-                    return KeyDownloadStartCommandOutcome.Timeout();
+                    return KeyDownloadStartCommandOutcome.Timeout(raw.Detail);
                 case RawReaderCommandKind.CommunicationError:
                     return KeyDownloadStartCommandOutcome.CommunicationError(raw.Detail);
                 default:
@@ -361,7 +361,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 case RawReaderCommandKind.Response:
                     return KeyDownloadAuthCommandOutcome.FromParsed(KeyDownloadAuthResponseParser.Parse(raw.Data));
                 case RawReaderCommandKind.Timeout:
-                    return KeyDownloadAuthCommandOutcome.Timeout();
+                    return KeyDownloadAuthCommandOutcome.Timeout(raw.Detail);
                 case RawReaderCommandKind.CommunicationError:
                     return KeyDownloadAuthCommandOutcome.CommunicationError(raw.Detail);
                 default:
@@ -376,7 +376,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 case RawReaderCommandKind.Response:
                     return KeyDownloadUsingKeyCommandOutcome.FromParsed(KeyDownloadUsingKeyResponseParser.Parse(raw.Data));
                 case RawReaderCommandKind.Timeout:
-                    return KeyDownloadUsingKeyCommandOutcome.Timeout();
+                    return KeyDownloadUsingKeyCommandOutcome.Timeout(raw.Detail);
                 case RawReaderCommandKind.CommunicationError:
                     return KeyDownloadUsingKeyCommandOutcome.CommunicationError(raw.Detail);
                 default:
@@ -425,6 +425,12 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             if (Interlocked.CompareExchange(ref _pending, null, pendingCmd) != pendingCmd)
                 return await pendingCmd.Tcs.Task.ConfigureAwait(false);
 
+            // 2026-09-15 사용자 요청 — 이 CAS가 성공했다는 것은 "DLL 콜백이 도착하기 전에 앱이
+            // 먼저 포기했다"는 뜻이다(DLL이 스스로 알려준 타임아웃은 CompletePendingIfMatches의
+            // READER_EVENT_TIMEOUT 분기를 타고 여기까지 오지 않는다 — 그쪽 CAS가 먼저 이겨서
+            // 이 지점의 CAS는 실패하고 위에서 이미 반환됐을 것이다). 그래서 이 분기에서 만드는
+            // Timeout()에는 "앱이 스스로 포기했다"는 출처를 명시한다.
+
             // 라운드 누수 방어(P10-4 요구사항 3의 잔여 위험 축소): 우리가 앱 레벨에서 먼저
             // 포기했을 뿐, DLL 쪽은 여전히 이 명령의 응답을 기다리는 상태(WAITING_RESPONSE)일 수
             // 있다 — 그 상태에서 다음 라운드가 같은 expectedResponseCode로 곧바로 시작되면, 이
@@ -443,7 +449,9 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 SendCommandSafe(ReaderCommandCodes.INIT_REQUEST, null, 0);
             }
 
-            return RawReaderCommandResult.Timeout();
+            return RawReaderCommandResult.Timeout(
+                $"앱 자체 타임아웃({timeout.TotalSeconds:0}초 경과, DLL 콜백 없음 — 명령이 유실됐거나 " +
+                "응답이 설정값보다 오래 걸렸을 가능성. 리더기 고장 단정 근거 아님)");
         }
 
         // ===================== 재연결 래퍼 (P10-3, SendCommandSafe 패턴) =====================
@@ -595,7 +603,12 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                     break;
 
                 case ReaderEventType.READER_EVENT_TIMEOUT when commandCode == pending.ExpectedResponseCode:
-                    result = RawReaderCommandResult.Timeout();
+                    // 2026-09-15 사용자 요청 — 이건 DLL이 READER_EVENT_TIMEOUT 콜백으로 직접 알려온
+                    // 타임아웃이다(앱의 로컬 Task.Delay가 아니다). SendAndAwaitAsync의 앱 자체 타임아웃과
+                    // 로그 문구를 다르게 남겨야 무결성체크 등에서 "리더기/DLL이 실제로 타임아웃을
+                    // 보고했다"와 "앱이 5초 만에 먼저 포기했다"를 구분할 수 있다(실기 COM4 재현으로
+                    // 발견 — 기존엔 둘 다 "응답 대기 시간 초과" 한 문구로 뭉뚱그려져 있었다).
+                    result = RawReaderCommandResult.Timeout("DLL이 READER_EVENT_TIMEOUT 콜백으로 직접 보고한 타임아웃(하드웨어/통신 레벨)");
                     break;
 
                 case ReaderEventType.READER_EVENT_LRC_ERROR when commandCode == pending.ExpectedResponseCode:

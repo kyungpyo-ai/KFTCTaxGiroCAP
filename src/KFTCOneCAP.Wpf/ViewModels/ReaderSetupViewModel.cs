@@ -218,6 +218,7 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
     /// (콤보를 안 바꿨다면 이미 그 포트에 연결돼 있어 아무 일도 일어나지 않는다).</summary>
     private async Task ExecuteInitAsync(ReaderService reader, string readerLabel, Func<string> portAccessor)
     {
+        LogActionStart(readerLabel, "초기화");
         _connectionManager.EnsureOpenForSelection(reader, readerLabel, ComPortFormat.StripUnavailableSuffix(portAccessor()));
 
         var outcome = await reader.SendInitCommandAsync(CommandTimeout);
@@ -236,6 +237,7 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
     /// 동일한 이유(2026-08-20).</summary>
     private async Task ExecuteStatusAsync(ReaderService reader, string readerLabel, Func<string> portAccessor)
     {
+        LogActionStart(readerLabel, "상태체크");
         string comPort = ComPortFormat.StripUnavailableSuffix(portAccessor());
         _connectionManager.EnsureOpenForSelection(reader, readerLabel, comPort);
 
@@ -269,6 +271,7 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
     /// </summary>
     private async Task ExecuteIntegrityAsync(ReaderService reader, string readerLabel, Func<string> comPortAccessor)
     {
+        LogActionStart(readerLabel, "무결성체크");
         string comPort = ComPortFormat.StripUnavailableSuffix(comPortAccessor());
         _connectionManager.EnsureOpenForSelection(reader, readerLabel, comPort);
 
@@ -304,6 +307,7 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
     /// </summary>
     private async Task ExecuteKeyDownloadAsync(ReaderService reader, string readerLabel, Func<string> comPortAccessor)
     {
+        LogActionStart(readerLabel, "키다운로드");
         string comPort = ComPortFormat.StripUnavailableSuffix(comPortAccessor());
         _connectionManager.EnsureOpenForSelection(reader, readerLabel, comPort);
 
@@ -404,7 +408,10 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
                 FileLogger.Warn(LogCategory.Reader, $"[{readerLabel} {commandLabel}] DLL 연동 실패: {dllResultName}({dllResult}) - {detail}");
                 break;
             case ReaderCommandOutcomeKind.Timeout:
-                FileLogger.Warn(LogCategory.Reader, $"[{readerLabel} {commandLabel}] 응답 타임아웃");
+                // 2026-09-15 사용자 요청 — detail이 이제 "DLL이 직접 보고한 타임아웃"과 "앱이 로컬
+                // 타이머로 포기한 타임아웃"을 구분해서 담고 있다(RawReaderCommandResult.Timeout 주석
+                // 참고). 로그에 그대로 남겨야 사후 원인 분석이 가능하다.
+                FileLogger.Warn(LogCategory.Reader, $"[{readerLabel} {commandLabel}] 응답 타임아웃 — {detail}");
                 break;
             case ReaderCommandOutcomeKind.CommunicationError:
                 FileLogger.Warn(LogCategory.Reader, $"[{readerLabel} {commandLabel}] 통신 오류: {detail}");
@@ -421,6 +428,14 @@ public sealed partial class ReaderSetupViewModel : ObservableObject
     /// 구분선).</summary>
     private static void LogActionBoundary(string readerLabel, string commandLabel) =>
         FileLogger.Info(LogCategory.Ui, $"[{readerLabel} {commandLabel}] 처리 종료");
+
+    /// <summary>2026-09-15 사용자 요청 — 버튼을 누른 시점(명령 전송 시작) 자체가 로그에 안 남아서,
+    /// 결과 로그(성공/타임아웃 등) 타임스탬프만 보고는 실제로 몇 초가 걸렸는지 계산할 수 없었다
+    /// (스톱워치로 따로 재야 했음). <see cref="LogActionBoundary"/>와 짝을 이루는 시작 경계선을
+    /// 남긴다 — 이 줄의 타임스탬프와 <see cref="LogOutcome"/> 줄의 타임스탬프 차이가 실제 소요
+    /// 시간이다.</summary>
+    private static void LogActionStart(string readerLabel, string commandLabel) =>
+        FileLogger.Info(LogCategory.Ui, $"[{readerLabel} {commandLabel}] 처리 시작");
 
     // ===================== 조회(무결성 체크 리스트, PRD 4.5/4.6) =====================
 

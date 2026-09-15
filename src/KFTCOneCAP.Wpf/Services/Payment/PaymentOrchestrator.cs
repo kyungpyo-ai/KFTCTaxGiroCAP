@@ -604,7 +604,10 @@ internal sealed class PaymentOrchestrator
             }
             else
             {
-                FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] {comPortDisplay} 무결성 체크 실패(Kind={outcome.Kind}) — 카드 리딩에서 제외", code: null, txId);
+                // 2026-09-15 사용자 요청 — Detail도 함께 남긴다. Kind=Timeout일 때 이 값이
+                // "DLL이 직접 보고한 타임아웃"인지 "앱이 로컬 타이머로 포기한 타임아웃"인지를
+                // 구분해준다(RawReaderCommandResult.Timeout 주석 참고) — Kind만으로는 구분 불가.
+                FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] {comPortDisplay} 무결성 체크 실패(Kind={outcome.Kind}, Detail={outcome.Detail}) — 카드 리딩에서 제외", code: null, txId);
             }
         }
 

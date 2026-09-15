@@ -73,7 +73,11 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             CardReadCommandOutcome winnerOutcome = await firstDone.ConfigureAwait(false);
 
             // 응답 수신(같은 경계, 같은 P22-6 근거).
-            FileLogger.Info(LogCategory.Reader, $"[카드 리딩 페일오버 전송] 리더기[{winnerIndex}]({winner.ComPortDisplay}) 채택 (이번 라운드 최초 응답), Kind={winnerOutcome.Kind}", code: null, txId);
+            // 2026-09-15 사용자 요청 — Detail도 함께 남긴다. Kind=Timeout일 때 "DLL이 직접 보고한
+            // 타임아웃"인지 "앱이 로컬 타이머로 포기한 타임아웃"인지는 Kind만으로 구분되지 않는다
+            // (RawReaderCommandResult.Timeout 주석 참고) — 실제 결제 중 카드리딩 타임아웃 원인 분석에
+            // 필요하다.
+            FileLogger.Info(LogCategory.Reader, $"[카드 리딩 페일오버 전송] 리더기[{winnerIndex}]({winner.ComPortDisplay}) 채택 (이번 라운드 최초 응답), Kind={winnerOutcome.Kind}, Detail={winnerOutcome.Detail}", code: null, txId);
 
             for (int i = 0; i < participants.Count; i++)
             {

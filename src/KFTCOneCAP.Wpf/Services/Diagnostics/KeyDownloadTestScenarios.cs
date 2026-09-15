@@ -294,7 +294,7 @@ internal static class KeyDownloadTestScenarios
     private static async Task Scenario9_ReaderTimeoutAtStartStopsImmediately()
     {
         var (service, reader, van, callLog) = BuildService();
-        reader.StartOutcome = KeyDownloadStartCommandOutcome.Timeout();
+        reader.StartOutcome = KeyDownloadStartCommandOutcome.Timeout("DLL이 READER_EVENT_TIMEOUT 콜백으로 직접 보고한 타임아웃(하드웨어/통신 레벨)");
 
         KeyDownloadOutcome outcome = await service.RunAsync().ConfigureAwait(false);
 
