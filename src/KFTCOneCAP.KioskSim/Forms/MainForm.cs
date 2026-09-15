@@ -907,8 +907,16 @@ namespace KFTCOneCAP.KioskSim.Forms
         /// <summary>
         /// "직전 거래 상태 조회"(999999, Phase 26 P26-5) 버튼 핸들러. <see cref="_lastRequestBody"/>가
         /// 없으면(아직 501008/800000/902614 중 하나도 보내지 않았으면) 안내만 하고 끝낸다. 있으면
-        /// 그 요청의 #9(요청기관 전문 관리 번호)를 재사용해 조회 전문(70바이트)을 조립해 보낸다
-        /// (PRD §3.4.3 — #9 외 나머지는 기존 3전문 요청과 동일한 고정값/공백).
+        /// 그 요청의 #9(요청기관 전문 관리 번호)를 재사용해 조회 전문(70바이트)을 조립해 보낸다.
+        ///
+        /// 2026-09-15 재확인(PRD §3.4.9) — 본체 앱(PaymentOrchestrator.HandleStatusInquiry)이 이
+        /// 요청에서 실제로 읽는(값을 검증하는) 필드는 #4(라우팅 판별)와 #9(원거래 매칭 키) 둘뿐이라
+        /// 순수 업무값 필드(#1/#2/#5/#6/#8/#10/#11/#12/#13)는 <see cref="TelegramBuffer"/> 기본값
+        /// (전체 space)으로 남긴다 — 다른 전문에 쓰던 고정값(IGN/095/G/전송일시/01/1234567)을 굳이
+        /// 재현하지 않는다(TelegramSchemas.cs BuildStatusInquiryCommonFields의 AlwaysBlank 표시와
+        /// 일치). 단 #3(전문 종별 코드)은 예외다 — 원캡이 요청 값을 검증하진 않지만 "요청/응답 구분"을
+        /// 나타내는 프로토콜 골격 필드라 다른 3전문과 동일하게 "0200"을 채운다(2026-09-15 재수정 —
+        /// 요청엔 없고 응답에만 있는 것처럼 보이면 비대칭이라는 사용자 지적).
         /// </summary>
         private async System.Threading.Tasks.Task OnStatusInquiryClickAsync()
         {
@@ -934,15 +942,13 @@ namespace KFTCOneCAP.KioskSim.Forms
             }
 
             var buffer = new TelegramBuffer(TelegramSchemas.StatusInquiryRequest);
-            buffer.Write(1, "IGN");
-            buffer.Write(2, "095");
+            // 2026-09-15 재확인 — #3(전문 종별 코드)은 원캡이 요청 값을 검증하진 않지만, "요청/응답
+            // 구분"을 나타내는 프로토콜 골격 필드라 다른 3전문과 동일하게 "0200"을 채운다(값이
+            // 없는 #1/#2/#5/#6/#8/#10/#11/#12/#13과 성격이 다르다 — 사용자 지적: 요청엔 없고
+            // 응답에만 있는 것처럼 보이면 비대칭이라 이상하다).
             buffer.Write(3, "0200");
             buffer.Write(4, TelegramSchemas.StatusInquiryTransactionType);
-            buffer.Write(6, "G");
-            buffer.Write(8, DateTime.Now.ToString("yyMMddHHmmss"));
             buffer.Write(9, managementNumber);
-            buffer.Write(11, "01");
-            buffer.Write(12, "1234567");
 
             byte[] frame = TelegramCodec.Encode(buffer.ToBytes());
             ClearResponseDisplay();
@@ -995,6 +1001,12 @@ namespace KFTCOneCAP.KioskSim.Forms
         /// 라벨(<see cref="_lblStatusInquiryEnvelope"/>)로 보여주고, 꼬리(원거래 응답 원문)가 있으면
         /// #14 값으로 원거래 스키마를 찾아 <see cref="ShowFieldDecomposition"/>을 그대로 재사용해
         /// 기존 필드 분해 그리드/코드 해설/#51 마스킹을 그대로 활용한다(PRD §3.4.5 검증).
+        ///
+        /// 2026-09-15 재확인 — 봉투의 #7은 "조회 자체가 성공(직전 거래를 찾음)"만 뜻한다(찾으면
+        /// 고정 "000", 못 찾으면 "E07"). 원거래가 실제로 승인/거절이었는지는 이 #7과 무관하며, 아래
+        /// 필드 분해 그리드가 꼬리를 원거래 스키마로 다시 파싱해 보여주는 "그 스키마 자신의 #7"에서
+        /// 확인해야 한다 — 봉투의 #7과 꼬리 안의 #7은 서로 다른 값일 수 있다(더 이상 relay하지
+        /// 않으므로).
         /// </summary>
         private void ShowStatusInquiryResult(byte[] responseBody)
         {
@@ -1016,10 +1028,12 @@ namespace KFTCOneCAP.KioskSim.Forms
             int.TryParse(originalLengthRaw, out int originalLength);
             int tailLength = responseBody.Length - 80;
 
+            // 2026-09-15 재확인 — 이 #7은 "조회 자체 성공 여부"일 뿐 원거래 승인/거절과 무관하다
+            // (클래스 요약 참고). 아래 라벨 문구도 그 의미로 고정한다.
             _lblStatusInquiryEnvelope.Text =
-                $"[조회 응답 고정부] #7 응답 코드=\"{code7}\" — {ResponseCodeCatalog.Describe(code7)} / " +
+                $"[조회 응답 고정부] #7 응답 코드=\"{code7}\"(조회 자체 성공 여부 — {(code7 == "000" ? "매칭됨" : "매칭 안 됨")}) / " +
                 $"#14 원거래 거래구분=\"{originalType}\" / #15 원거래 응답 전문 길이=\"{originalLengthRaw}\"({originalLength}) / " +
-                $"실제 꼬리 길이={tailLength}바이트";
+                $"실제 꼬리 길이={tailLength}바이트 (원거래 승인/거절은 아래 필드 분해의 원거래 #7에서 확인)";
             _lblStatusInquiryEnvelope.ForeColor = code7 == "000" ? Color.DarkGreen : Color.DarkRed;
 
             if (tailLength <= 0)

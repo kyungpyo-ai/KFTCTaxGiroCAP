@@ -235,9 +235,13 @@ internal sealed class PaymentOrchestrator
                 return PosInquiryResponseTelegram.Build(request, fixedSchema, noMatchCode, originalTransactionTypeCode: null, originalResponseBody: null);
             }
 
-            // #7 relay는 하드코딩하지 않는다 — 저장된 거래구분으로 원거래 스키마를 다시 찾아 그
-            // 스키마로 원문의 #7을 읽는다(원거래 종류마다 #7 POSITION은 공통부라 같지만, 스키마
-            // 자체를 통해서만 안전하게 읽는다는 원칙을 지킨다).
+            // 2026-09-15 재확인(PRD §3.4.5 재수정, 사용자 지적) — 봉투(공통부) 자신의 #7은 "이 조회
+            // 요청 자체가 성공했는가"(직전 거래를 찾았는가)만 나타낸다. 예전에는 원거래 응답의 #7을
+            // 그대로 relay했는데, 그러면 원거래가 거절이었을 때 봉투의 #7에 그 거절 코드가 실려
+            // "조회 실패(E07)"와 "원거래 거절"을 #7 값만으로 구분하기 어려웠다 — 실제 승인/거절
+            // 판단은 항상 #16(원거래 응답 전문 원문)을 파싱해서 하도록 통일한다. 그래도 저장된
+            // 거래구분이 실제로 파싱 가능한 스키마인지는 방어적으로 확인한다(§14에 실어 보낼
+            // 값이므로 — 못 찾으면 신뢰할 수 없어 "없음"과 동일하게 처리).
             if (!PosSchemaRegistry.TryResolve(record.TransactionTypeCode, out PosTelegramSchema? originalSchema) || originalSchema is null)
             {
                 // 저장 시점에 이미 검증됐어야 하는 방어적 상황(이론상 도달 불가) — 결과를 신뢰할 수
@@ -247,9 +251,8 @@ internal sealed class PaymentOrchestrator
                 return PosInquiryResponseTelegram.Build(request, fixedSchema, defensiveNoMatchCode, originalTransactionTypeCode: null, originalResponseBody: null);
             }
 
-            string relayedResultCode = PosTelegram.FromBytes(originalSchema, record.ResponseBody).Read(ResultCodeFieldNumber);
-            FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 거래 상태 조회 — 일치하는 원거래 발견, 원문 relay", relayedResultCode, txId);
-            return PosInquiryResponseTelegram.Build(request, fixedSchema, relayedResultCode, record.TransactionTypeCode, record.ResponseBody);
+            FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 거래 상태 조회 — 일치하는 원거래 발견, 원문 relay", InquiryMatchFoundResultCode, txId);
+            return PosInquiryResponseTelegram.Build(request, fixedSchema, InquiryMatchFoundResultCode, record.TransactionTypeCode, record.ResponseBody);
         }
         catch (Exception ex)
         {
@@ -265,6 +268,13 @@ internal sealed class PaymentOrchestrator
     /// <summary>SPEC 응답 공통부 <c>#7</c>(처리결과코드) — P22-6 로깅 전용. 필드 위치는 3전문 공통
     /// (<c>PosSocketServer.ResultCodeFieldNumber</c>와 동일한 값).</summary>
     private const int ResultCodeFieldNumber = 7;
+
+    /// <summary>2026-09-15(PRD §3.4.5 재수정) — 거래 상태 조회 응답 봉투의 <c>#7</c>에 실을 "조회
+    /// 자체가 성공(직전 거래를 찾음)"을 뜻하는 고정값. 원거래가 승인이었는지 거절이었는지는 이 값과
+    /// 무관하며 <c>#16</c>(원거래 응답 전문 원문)을 파싱해서만 판단한다 — 예전처럼 원거래의 <c>#7</c>을
+    /// 그대로 relay하면 "조회 실패(<c>E07</c>)"와 "원거래 거절"이 봉투의 <c>#7</c> 값만으로 구분되지
+    /// 않았다(<see cref="HandleStatusInquiry"/> 주석 참고).</summary>
+    private const string InquiryMatchFoundResultCode = "000";
 
     /// <summary>SPEC <c>902614</c> 요청 전용 <c>#42</c>(키오스크 고유번호, AN 20) — P23-7. 501008/
     /// 800000에는 이 필드 자체가 없다.</summary>

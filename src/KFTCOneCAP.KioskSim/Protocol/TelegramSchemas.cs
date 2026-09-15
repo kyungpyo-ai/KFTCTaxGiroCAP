@@ -475,6 +475,16 @@ namespace KFTCOneCAP.KioskSim.Protocol
         // 바이트를 슬라이스해) 다룬다 — 잘라낸 뒤에는 원거래 거래구분 코드(#14 값)로
         // <see cref="ByTxType"/>을 다시 호출해 기존 3종 스키마로 그대로 파싱한다(PRD §3.4.5 "POS는
         // 기존 파서를 재사용하면 된다").
+        //
+        // 2026-09-15 재확인(PRD §3.4.9) — 본체 앱의 PaymentOrchestrator.HandleStatusInquiry는 이
+        // 요청에서 실제로 읽는(값을 검증하는) 필드가 #4(라우팅 판별)와 #9(원거래 매칭 키) 둘뿐이다.
+        // 나머지 순수 업무값 필드(#1/#2/#5/#6/#8/#10/#11/#12/#13)는 요청 바이트를 그대로 응답에
+        // 복사만 할 뿐 값을 해석·검증하지 않는다 — 그래서 클릭 핸들러(OnStatusInquiryClickAsync)는
+        // 이 필드들을 공백(0x20)으로 보낸다(70바이트 프레이밍 자체는 유지해야 하므로 자리는 있어야
+        // 하지만 값의 의미는 없다). 단 #3(전문 종별 코드)은 예외다 — "요청/응답 구분"을 나타내는
+        // 프로토콜 골격 필드라 값 검증 여부와 무관하게 다른 3전문처럼 요청 시 "0200"을 채운다
+        // (2026-09-15 재수정 — 요청엔 없고 응답에만 있으면 비대칭이라는 지적, 아래 #3 필드 주석
+        // 참고). 아래 필드 목록의 AlwaysBlank 표시는 이 구분(#3/#4/#9 제외 나머지)을 그대로 따른다.
         // ------------------------------------------------------------------
 
         /// <summary>
@@ -495,30 +505,37 @@ namespace KFTCOneCAP.KioskSim.Protocol
             return new List<TelegramField>
             {
                 new TelegramField(1, "업무 구분", TelegramRepresentation.A, 3, 0, TelegramSetLocation.Kiosk,
-                    "고정값 \"IGN\"."),
+                    "원캡이 값을 읽지 않는다(§3.4.9 재확인) — 공백으로 보낸다.", alwaysBlank: true),
                 new TelegramField(2, "요청기관 코드", TelegramRepresentation.N, 3, 3, TelegramSetLocation.Kiosk,
-                    "고정값 \"095\"."),
+                    "원캡이 값을 읽지 않는다(§3.4.9 재확인) — 공백으로 보낸다.", alwaysBlank: true),
                 new TelegramField(3, "전문 종별 코드", TelegramRepresentation.N, 4, 6, TelegramSetLocation.Kiosk,
-                    "요청 시 \"0200\", 응답 시 \"0210\"(PRD §3.4.5)."),
+                    "원캡이 요청 값을 검증하진 않지만(§3.4.9 재확인) \"요청/응답 구분\"을 나타내는 " +
+                    "프로토콜 골격 필드라 다른 3전문과 동일하게 요청 시 \"0200\"을 채운다(2026-09-15 " +
+                    "재수정 — 요청엔 없고 응답에만 있으면 비대칭이라는 지적). 응답 시에는 원캡이 " +
+                    "\"0210\"으로 채운다."),
                 new TelegramField(4, "거래 구분 코드", TelegramRepresentation.N, 6, 10, TelegramSetLocation.Kiosk,
-                    $"상태 조회 전용 신규 코드, 발주처 미채번 — 임시값 \"{StatusInquiryTransactionType}\"."),
+                    $"필수 — 원캡이 이 값으로 조회 요청임을 판별한다(라우팅). 상태 조회 전용 신규 코드, " +
+                    $"발주처 미채번 — 임시값 \"{StatusInquiryTransactionType}\"."),
                 new TelegramField(5, "상태 코드", TelegramRepresentation.N, 3, 16, TelegramSetLocation.Kiosk,
                     "기존 3전문과 동일하게 요청 시 채우지 않아도 된다 — 공백으로 보낸다.", alwaysBlank: true),
                 new TelegramField(6, "송·수신 FLAG", TelegramRepresentation.AN, 1, 19, TelegramSetLocation.Kiosk,
-                    "고정값 \"G\"."),
+                    "원캡이 값을 읽지 않는다(§3.4.9 재확인) — 공백으로 보낸다.", alwaysBlank: true),
                 new TelegramField(7, "응답 코드", TelegramRepresentation.AN, 3, 20, TelegramSetLocation.OneCap,
-                    "요청 시 SPACE. 원캡이 응답에서 조회 결과 코드로 채운다(정상 relay 시 원거래 응답의 #7과 " +
-                    "같은 값, 불일치/기록없음이면 E07 — PRD §3.4.5/§3.4.6)."),
+                    "요청 시 SPACE. \"이 조회 요청 자체가 성공했는가\"만 나타낸다 — 직전 거래를 찾았으면 " +
+                    "\"000\"(고정), 못 찾았으면 E07(불일치/기록없음). 2026-09-15 재수정 — 원거래 응답의 " +
+                    "#7을 그대로 relay하지 않는다(원거래 승인/거절은 이 값과 무관, #16을 파싱해서만 " +
+                    "판단한다 — PRD §3.4.5/§3.4.6)."),
                 new TelegramField(8, "전송 일시", TelegramRepresentation.N, 12, 23, TelegramSetLocation.Kiosk,
-                    "YYMMDDhhmmss. 이 조회 전문 자신의 전송 시각(원거래 시각이 아니다)."),
+                    "원캡이 값을 읽지 않는다(§3.4.9 재확인) — 공백으로 보낸다.", alwaysBlank: true),
                 new TelegramField(9, "요청기관 전문 관리 번호", TelegramRepresentation.AN, 12, 35, TelegramSetLocation.Kiosk,
-                    "원거래(501008/800000/902614)에 실제로 보냈던 값을 그대로 재사용한다 — 원캡이 이 값으로 " +
-                    "원거래를 찾는다(PRD §3.4.3/§3.4.4). 새로 채번하지 않는다."),
+                    "필수 — 원거래(501008/800000/902614)에 실제로 보냈던 값을 그대로 재사용한다. 원캡이 이 " +
+                    "값으로 원거래를 찾는다(PRD §3.4.3/§3.4.4/§3.4.9). 새로 채번하지 않는다."),
                 new TelegramField(10, "이용기관/센터 전문 관리 번호", TelegramRepresentation.AN, 12, 47, TelegramSetLocation.Kiosk,
                     "기존 3전문 요청과 동일하게 공백으로 보낸다.", alwaysBlank: true),
                 new TelegramField(11, "지로 이용기관 분류코드", TelegramRepresentation.N, 2, 59, TelegramSetLocation.Kiosk,
-                    "고정값 \"01\"."),
-                new TelegramField(12, "지로 이용기관 지로번호", TelegramRepresentation.N, 7, 61, TelegramSetLocation.Kiosk),
+                    "원캡이 값을 읽지 않는다(§3.4.9 재확인) — 공백으로 보낸다.", alwaysBlank: true),
+                new TelegramField(12, "지로 이용기관 지로번호", TelegramRepresentation.N, 7, 61, TelegramSetLocation.Kiosk,
+                    "원캡이 값을 읽지 않는다(§3.4.9 재확인) — 공백으로 보낸다.", alwaysBlank: true),
                 new TelegramField(13, "FILLER", TelegramRepresentation.N, 2, 68, TelegramSetLocation.Kiosk,
                     "요청 시 kiosk가 space로 채운다.", alwaysBlank: true),
             };
