@@ -115,7 +115,7 @@ internal sealed class PosSocketServer
         _cts = new CancellationTokenSource();
         _acceptThread = new Thread(() => AcceptLoop(_cts.Token)) { IsBackground = true, Name = "PosSocketAccept" };
         _acceptThread.Start();
-        FileLogger.Info($"[PosSocketServer] {Port} 포트 리스닝 시작");
+        FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] {Port} 포트 리스닝 시작");
     }
 
     /// <summary>앱 종료 시 호출(App.xaml.cs OnExit, PRD §9 리소스 정리).</summary>
@@ -133,7 +133,7 @@ internal sealed class PosSocketServer
 
         _acceptThread?.Join(TimeSpan.FromSeconds(2));
         _listener = null;
-        FileLogger.Info("[PosSocketServer] 정지");
+        FileLogger.Info(LogCategory.Pos, "[PosSocketServer] 정지");
     }
 
     /// <summary>
@@ -234,13 +234,13 @@ internal sealed class PosSocketServer
                     }
                     catch (IOException ex)
                     {
-                        FileLogger.Info($"[PosSocketServer] {remote} 연결 단절(수신 중): {ex.Message}");
+                        FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] {remote} 연결 단절(수신 중): {ex.Message}");
                         break;
                     }
 
                     if (read == 0)
                     {
-                        FileLogger.Info($"[PosSocketServer] {remote} 정상 종료(FIN)");
+                        FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] {remote} 정상 종료(FIN)");
                         break;
                     }
 

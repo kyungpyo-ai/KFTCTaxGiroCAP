@@ -67,10 +67,10 @@ internal sealed class TransactionQueue
             _isProcessing = true;
             try
             {
-                FileLogger.Info($"[TransactionQueue] 처리 시작 전문={txType}");
+                FileLogger.Info(LogCategory.Payment, $"[TransactionQueue] 처리 시작 전문={txType}");
                 // 이 앱에서 처리 Task를 동기적으로 기다리는 유일한 지점(P15-1) — 클래스 주석 참고.
                 IPosOutboundResponse response = _processor(item.Request).GetAwaiter().GetResult();
-                FileLogger.Info($"[TransactionQueue] 처리 종료 전문={txType}");
+                FileLogger.Info(LogCategory.Payment, $"[TransactionQueue] 처리 종료 전문={txType}");
                 InvokeCompletedSafely(item, response);
             }
             catch (Exception ex)

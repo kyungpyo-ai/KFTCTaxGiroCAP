@@ -224,6 +224,13 @@
   실제 전송해(같은 프로세스 내에서) 5번째 발생 직후에만 `ALERT` 한 줄이 남고 1~4번째는 침묵함을
   확인했다(수정 전 실측이던 "6건 > 5건"을 대체). payment-flow-test 171/171, pos-client-test 8개
   시나리오 전체(ERROR 0건) 재확인 후 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-15] P27-8 후속 보완 — 카테고리 없이 호출되던 운영 코드의 FileLogger.Info 13곳에
+  카테고리(Payment/Pos/Reader/Ui/App)를 채운 뒤 회귀 확인을 위해 한시적으로 asInvoker로 낮췄다.
+  payment-flow-test 171/171(09:29:59)을 로그로 확인했다. pos-client-test는 이 환경에서 포트 8002를
+  이미 점유 중인 별도 프로세스(KFTCOneCAP.exe, PID 5304 — 원본 MFC 참고 앱, 이 작업과 무관하며 건드리지
+  않음)와 충돌해 소켓 바인딩 자체가 실패(AccessDenied)해 이번 세션에서는 재실행하지 못했다(환경
+  제약, 코드 변경과 무관). 확인 즉시 requireAdministrator로 되돌렸다.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

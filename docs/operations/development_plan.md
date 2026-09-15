@@ -3349,6 +3349,12 @@ CLI 하네스가 유일한 검증 수단이다.
 제외**했다. 실제로 남아있던 카테고리 없는 호출은 총 **27곳**(Error 11 + Warn 16, 위 초안 31곳보다
 적음 — 초안 작성 이후 일부가 먼저 정리된 상태였다).
 
+**후속 보완(2026-09-15)** — CP3 리뷰(아래 "CP3(P27-8 · P27-9) Opus 리뷰" 절 개선권장 1)에서
+검증 grep이 `Warn`/`Error`만 확인하고 `Info`를 빠뜨린 것이 드러나, 카테고리 없이 남아 있던 운영
+코드의 `FileLogger.Info` 호출 **13곳**을 추가로 채웠다(개선권장 1의 "10곳"은 실측 전 훑어본
+값이라 부정확했다 — 실제로는 `ReaderConnectionManager.cs`에 2곳, `ReaderService.cs`에 2곳이 더
+있어 13곳이다). 합쳐서 총 **40곳**.
+
 | 파일:줄(2026-09-14 기준) | 레벨 | 상황 | 부여 카테고리 |
 |---|---|---|---|
 | `App.xaml.cs:175` | Warn | VAN 스텁 사용 경고(기동 시점) | `App` |
@@ -3370,6 +3376,24 @@ CLI 하네스가 유일한 검증 수단이다.
 | `Services/Storage/IntegrityCheckStore.cs:102,157,195` | Error×3 | 무결성 이력 저장/조회/금일조회 실패 | `Reader`(+`S03`) |
 | `Services/Reader/IntegrityCheckService.cs:75` | Warn | 무결성 체크 결과 DB 저장 실패 | `Reader` |
 | `Services/Reader/ReaderService.cs:469,477,495` | Warn×3 | 포트 에러 감지/재연결 실패/자동복구 재전송 | `Reader` |
+
+**후속 보완(2026-09-15) — 카테고리 없던 `Info` 13곳:**
+
+| 파일:줄(2026-09-15 기준) | 레벨 | 상황 | 부여 카테고리 |
+|---|---|---|---|
+| `Services/Payment/TransactionQueue.cs:70` | Info | 처리 시작 | `Payment` |
+| `Services/Payment/TransactionQueue.cs:73` | Info | 처리 종료 | `Payment` |
+| `Services/Pos/PosSocketServer.cs:118` | Info | 포트 리스닝 시작 | `Pos` |
+| `Services/Pos/PosSocketServer.cs:136` | Info | 정지 | `Pos` |
+| `Services/Pos/PosSocketServer.cs:237` | Info | 연결 단절(수신 중) | `Pos` |
+| `Services/Pos/PosSocketServer.cs:243` | Info | 정상 종료(FIN) | `Pos` |
+| `Services/Reader/ReaderConnectionManager.cs:117` | Info | 포트 미설정 — 열지 않음 | `Reader` |
+| `Services/Reader/ReaderConnectionManager.cs:122` | Info | 포트 열기 성공/실패 | `Reader` |
+| `Services/Reader/ReaderConnectionManager.cs:137` | Info | 포트 닫기 성공/실패 | `Reader` |
+| `Services/Reader/ReaderService.cs:484` | Info | 재연결 후 재전송 성공/실패 | `Reader` |
+| `Services/Reader/ReaderService.cs:516` | Info | 자동 재오픈 성공/실패 | `Reader` |
+| `ViewModels/PaymentNoticeViewModel.cs:264` | Info | PIN 4자리 입력 완료 | `Ui` |
+| `App.xaml.cs:115` | Info | POS 전문 스키마 검증 완료(기동 시점) | `App` |
 
 제외한 진단 하네스: `*TestScenarios.cs`(KeyDownload/LogFileReader/MemoryClear/PaymentFlow/
 PosClient/VanCall), `RepeatedTransactionResourceTest.cs`, `*SelfTest.cs`, `NativeDllLoadSmokeTest.cs`
@@ -3523,8 +3547,10 @@ PosClient/VanCall), `RepeatedTransactionResourceTest.cs`, `*SelfTest.cs`, `Nativ
 
 - [x] 운영 코드에서 `FileLogger.Info/Warn/Error`를 **카테고리 없이** 호출하는 곳이 0곳이다 —
       2026-09-14 grep 재확인(`grep -rn "FileLogger\.\(Warn\|Error\)(\"" --include="*.cs"` 중
-      `TestScenarios`/`SelfTest`/`SmokeTest`/`RepeatedTransactionResourceTest` 제외 결과 0건).
-      진단 하네스 제외 목록은 위 4가지 패턴.
+      `TestScenarios`/`SelfTest`/`SmokeTest`/`RepeatedTransactionResourceTest` 제외 결과 0건)
+      **은 `Info`를 빠뜨린 채 통과 처리됐던 것으로, 2026-09-15 후속 보완에서
+      `grep -rn "FileLogger\.\(Info\|Warn\|Error\)(\"" --include="*.cs"` (같은 4가지 하네스 패턴
+      제외)로 다시 확인해 0건을 재확인했다.** 진단 하네스 제외 목록은 위 4가지 패턴.
 - [x] 카테고리 선택이 §1.5 경계 표와 일치한다 — 27곳 표를 (a) 절 아래에 기록했다(2026-09-14).
       초안 31곳 중 4곳(`VanService.cs`/`KeyDownloadVanClient.cs`/`KeyDownloadService.cs`)은
       이전 Phase에서 이미 정리돼 있어 제외.
@@ -3546,7 +3572,10 @@ PosClient/VanCall), `RepeatedTransactionResourceTest.cs`, `*SelfTest.cs`, `Nativ
       `LogRetentionCleaner.cs`에서 `failedCount`를 루프 안에서 누적만 하고, 루프 밖에서
       `failedCount > 0`일 때 한 번만 `FileLogger.Warn(..., InternalFaultCodes.LogRetentionFailure, ...)`
       호출함을 코드로 확인(실제 삭제 실패를 재현하지 않아 로그 실측은 못 함).
-- [ ] `S01`~`S11`이 카탈로그 §2.2의 각 지점에서 code 슬롯에 실제로 남는다 — **로그 실측 못 함**(이
+- [x] `S01`~`S11`이 카탈로그 §2.2의 각 지점에서 code 슬롯에 실제로 남는다 — **CP3(2026-09-15)에서
+      `S01`·`S09` 2건을 실경로로 실측**(`2026-09-15.log`: `[ERROR] [POS] [S01] …` 리스닝 실패 +
+      뒤따르는 `[ALERT] [POS] [S01]`, `[WARN ] [POS] [S09] …` 5건 + `[ALERT] [POS] [S09]`).
+      나머지 9종은 아래 grep 근거 그대로(인위 재현이 필요한 경로). 원래 기록:  **로그 실측 못 함**(이
       세션 범위 밖, 각 조건을 인위로 재현해야 함). `InternalFaultCodes.cs`에 11개 상수가 카탈로그와
       정확히 일치하고 11개 호출부 전부에서 쓰이는 것은 grep으로 확인했다.
 - [x] `S` 리터럴이 호출부에 흩어져 있지 않다 — `InternalFaultCodes.cs` 한 지점에 모였고,
@@ -3872,6 +3901,102 @@ void`는 예외가 스레드를 죽일 위험이 있고, `ThreadPool.QueueUserWo
 `Alerted` 플래그로 1회만 발화 · 버킷 리셋)이 검증됐으므로 구조적으로 안전하다고 판단했다 — 별도
 회귀 하네스 신설은 이 Task 범위를 넘어선다(P27-9는 판정·표시까지, 신규 시나리오 하네스 추가는
 요청 범위 밖).
+
+---
+
+## CP3(P27-8 · P27-9) Opus 리뷰 — 2026-09-15
+
+**판정: 통과(치명적 0건).** 리뷰어가 보고를 믿지 않고 **전부 독립 재현**했다. 검증 동안만
+`app.manifest`를 `asInvoker`로 낮추고, 원본 MFC 앱(`KFTCOneCAP.exe`, pid 5304)이 `0.0.0.0:8002`를
+점유 중이어서 **그 프로세스를 건드리지 않기 위해** `PosSocketServer.Port`/`PosClientTestScenarios.Port`를
+한시적으로 `8012`로 바꿔 검증했다. **네 가지 임시 변경(매니페스트·포트 2곳·판정 지연/예외 주입)은
+검증 후 전부 원복했고 `git diff` 0줄 · `dotnet build` 경고 0/오류 0을 재확인**했다.
+
+### 1. `E42`/`E43` 회신 경로 — 원시 소켓으로 바이트 단위 확인
+
+파이썬 원시 소켓 클라이언트로 직접 보내고 받은 바이트를 그대로 떴다(하네스 판정을 믿지 않음).
+
+| 케이스 | 수신 프레임 | 길이헤더 | `#4` | `#7` | 연결 |
+|---|---|---|---|---|---|
+| `E42`(본문 10바이트) | 74바이트 | `0070` | `000000` | `E42` | **유지** — 같은 연결로 501008 재요청 성공(`#7=000`, rtt 1.06s) |
+| `E43`(길이필드 `ABCD`) | 74바이트 | `0070` | `000000` | `E43` | 응답 **전량 수신 후** FIN(`recv`→`b''`) |
+| `E41`(거래구분 `987654`) | 74바이트 | `0070` | **`987654`**(실제 읽은 값) | `E41` | — |
+
+- `Build(거래구분, 에러코드)` 분기가 **뒤바뀌지 않았음을 값으로 확인**했다 — `E41`만 실제 `#4`를
+  돌려주고 `E42`/`E43`은 placeholder `000000`이다.
+- 정상 전문 회귀: 501008 왕복 6건(단일 연결 연속 4건 + 동시 3건) 전부 `#7=000`·`#9` 보존,
+  999999(상태조회) `#7=E07`·개별부 `0000000000` 정상, `E40`(길이 불일치) 정상 회신.
+  `--pos-client-test` **8개 시나리오 전체 통과**(★ 표시 0건, 09:15:19~09:15:48),
+  `--log-file-reader-test` **17/17 통과**(경계 이전 후에도 슬라이서 회귀 없음).
+
+### 2. 결제 경로 비차단 — 지연·예외 주입으로 독립 재현
+
+- `FaultAlertJudge.OnCodeObserved` 첫 줄에 `Thread.Sleep(3000)`을 넣고 재빌드·재기동:
+  단일 연결 연속 4건 rtt **1.219 / 1.065 / 1.075 / 1.076초**(= VAN 스텁 지연 그대로),
+  동시 3건 총 3.216초(1.06 / 2.13 / 3.21초 — 큐 직렬화 간격 1.07초). **3초가 어디에도 더해지지
+  않았다** — 결제 스레드도, `TransactionQueue`의 유일한 워커도 점유하지 않는다.
+- 같은 자리를 강제 `InvalidOperationException`으로 바꾼 뒤 재실행: 정상(`000`)·`E42`·`E43` 응답이
+  전부 정상 회신되고 경계(빈 줄)도 `finally`로 계속 찍혔다.
+- 클로저 캡처 전수 확인: 19개 위탁 지점이 캡처하는 값은 `const string`(S 계열)·리터럴
+  (`"E42"`/`"E43"`)·`string`(`resultCode`/`responseTxId`/`e40OrE41Code`)뿐이다. **`byte[]`를 캡처하는
+  지점은 0곳**이라 `SecureClear.Clear`(`frame`/`responseBodyForLog`/`ClearBody`)와 경합할 수 없다.
+- 락: `lock(state)` 안에서 로깅을 하지 않고(`crossedThisCall` 플래그로 밖에서 기록), 코드별 독립
+  `BucketState`라 중첩 락·교착이 구조적으로 없다. 버킷 키는 7종으로 유한해 사전이 무한 증식하지 않는다.
+
+### 3. 카테고리·레벨·`ALERT` 표시 — 실제 로그로 확인
+
+- **`S01` 실측**(우연히 8002 점유 상태에서 재현됨):
+  `[ALERT] [POS     ] [S01] [-           ] 장애 알림 대상 — POS 소켓 리스닝 실패` — `[INFO ]`/`[WARN ]`
+  줄과 열이 정확히 정렬된다(패딩 없는 5자 `ALERT`).
+- **급증형 임계값을 실제 소켓으로 재현**: `E42` 6연속 → **5번째 직후에만** ALERT 1줄
+  (`임계값 도달(1시간 5건 >= 5건)`), 6번째는 침묵. `S09`(동시 연결 24개) → 거부 5번째 직후에만
+  ALERT 1줄. **off-by-one 수정이 실경로에서 확인됐다.**
+- `N` 코드(`E07`·`000`) 및 정상 거래에는 ALERT 줄이 없다.
+- 거래 경계: `WriteBoundary()` 이전 후 빈 줄이 "거래 확정" 직후가 아니라 **"응답 송신" 직후**로
+  두 줄 내려왔다(`[TransactionQueue] 처리 종료`·`[PosSocketServer] 응답 송신`이 이제 같은 블록 안에
+  들어온다). 설계 의도("한 거래의 모든 줄이 한 블록")에 오히려 부합해 회귀로 보지 않는다.
+
+### 4. `S01`~`S11` 19곳 배선
+
+19곳 = `S` 계열 15곳(`S03`·`S11`이 각 3곳) + 거래경로 1곳 + `E40`/`E41` 1곳 + `E42` 1곳 + `E43` 1곳.
+**"15가 아니라 19"가 맞다** — `S03` 3곳(저장/조회/금일조회)과 `S11` 3곳(파일 없음/`LoadLibrary`
+실패/예외)은 서로 다른 실패 경로이고, `NativeDllLoadSmokeTest`는 이름과 달리 `App.xaml.cs:108`에서
+**운영 기동 경로**로 호출되므로 진단 하네스 전용 지점은 하나도 없다. 19곳 전부 `try { … } catch { }`로
+감싸 있고 위탁은 전부 `Task.Run`이다.
+
+### 5. `R24`~`R32` 재배치
+
+`PosResultCodeMapper.cs`(24~29 개별 + 30 CommunicationError + 31 catch-all + 32 방어 3종)와
+KioskSim `ResponseCodeCatalog.cs`의 9개 항목이 문자열 단위로 일치한다. `FaultAlertJudge.Classify`는
+`R24`~`R32`를 개별 `Y` 분기로 먼저 잡고, 남은 `R`+00~23만 `ClassifyRBusinessFailure`가 공유 버킷
+`R0x`로 보낸다 — 두 집합이 값으로 겹치지 않는다.
+
+### 개선 권장(치명적 아님, P27-10 이후 판단)
+
+1. **[해소, 2026-09-15] 완료 기준 #7("운영 코드에 카테고리 없는 `FileLogger` 호출 0곳")이 문자
+   그대로는 아직 미충족.** P27-8-(a)는 `Warn`/`Error`만 훑었고(검증 grep도 `Warn|Error` 한정),
+   **카테고리 없는 `Info` 호출이 운영 코드에 10곳 남아 있다** — `PosSocketServer.cs`(리스닝
+   시작/정지/연결단절/FIN 4곳), `TransactionQueue.cs:70,73`, `ReaderConnectionManager.cs:117`,
+   `App.xaml.cs:115`, `PaymentNoticeViewModel.cs:264`. 실제 로그에도 `[INFO ] [-       ]`로
+   남는다(2026-09-15 로그 다수). 판정은 code 슬롯만 보므로 **알림 기능에는 영향이 없다.** 기준
+   문구를 `Warn`/`Error`로 좁힐지, `Info`까지 채울지는 사용자 결정 사항이다. → **사용자가 `Info`도
+   마저 채우기로 확정**해, 위 (a) 절 "후속 보완(2026-09-15)"에서 13곳(이 항목이 훑어본 10곳보다
+   많다 — `ReaderConnectionManager.cs` 2곳, `ReaderService.cs` 2곳이 누락돼 있었다)을 모두
+   `LogCategory`로 채우고 `Info`까지 포함한 grep으로 0곳을 재확인했다.
+2. **`E05`의 ALERT 카테고리가 `PAYMENT`다.** 호출부(`SendResponse`)가 넘긴 값을 그대로 쓰는데,
+   카탈로그 §1은 "카테고리는 **원인 서브시스템**"이고 `E05`(무결성 체크 전원 실패)의 원인은
+   리더기다. `ResolveCategory`에 `E05 → Reader` 한 줄을 더하면 해소된다(`R`/`D` 재판정과 같은 방식).
+3. **`S08`(응답 직렬화 실패) 경로에서 거래 경계가 누락된다.** `SendResponse`가 `ToFrame()` 실패 시
+   조기 `return`하므로 `Task.Run`(판정+`WriteTransactionBoundary`)에 도달하지 않는다. 예전에는
+   `FileLogSink`가 "거래 확정" 줄을 보고 찍었으므로 이 경우에도 경계가 있었다. 희귀 경로이고
+   슬라이서는 거래ID 기준이라 영향은 가독성뿐이다.
+4. **동시 거래가 겹치면 경계 빈 줄이 몇 줄 늦게 찍힐 수 있다**(3건 동시 요청 실측: 다음 거래의
+   `처리 시작` 줄 뒤에 앞 거래의 빈 줄이 옴). 판정이 스레드 풀이라 구조적으로 피할 수 없고, 1키오스크
+   1POS 환경에서는 거의 발생하지 않는다. 슬라이서는 영향을 받지 않는다.
+
+**참고(범위 밖 관찰)**: `E40` 응답의 `#4`는 공백이다(`PosResponseTelegram.Failure(schema, …)`가 빈
+전문을 만들기 때문, Phase 17부터의 기존 동작). `E42`/`E43`은 `000000`을 채운다 — POS 통보
+(`PRD.md` §5 #16) 때 이 차이를 함께 알리는 편이 좋다.
 
 ---
 

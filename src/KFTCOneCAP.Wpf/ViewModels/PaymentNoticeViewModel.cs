@@ -261,7 +261,7 @@ public sealed partial class PaymentNoticeViewModel : ObservableObject
         Array.Copy(_pinDigits, pin, PinMaxLength);
         SecureClear.Clear(_pinDigits);
         RevealedDigit = null;
-        FileLogger.Info("PaymentNoticeViewModel: PIN 4자리 입력 완료");
+        FileLogger.Info(LogCategory.Ui, "PaymentNoticeViewModel: PIN 4자리 입력 완료");
 
         RaisePinEnteredEvent(pin);
     }

@@ -112,7 +112,7 @@ public partial class App : Application
         // 틀렸다면 첫 결제 요청 때가 아니라 지금 즉시 드러난다 — DLL 로드 스모크(위)와 같은 취지다.
         // DLL 로드와 달리 이건 우리 코드의 자체 모순이라 조용히 넘기지 않고 그대로 던진다.
         PosSchemaRegistry.ValidateAtStartup();
-        FileLogger.Info("POS 전문 스키마 3종 검증 완료(POSITION 연속성·총 길이·라우팅 상수 일치)");
+        FileLogger.Info(LogCategory.App, "POS 전문 스키마 3종 검증 완료(POSITION 연속성·총 길이·라우팅 상수 일치)");
 
         // 컴팩트 모드 판정(임의 판단, 2026-08-14 Phase 6): SystemParameters.WorkArea.Height(작업
         // 표시줄 등을 제외한 가용 영역) 대신 SystemParameters.PrimaryScreenHeight(모니터 자체의

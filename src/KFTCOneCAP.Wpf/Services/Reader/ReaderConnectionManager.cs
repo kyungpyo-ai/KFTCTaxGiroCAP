@@ -114,12 +114,12 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             int portNumber = ComPortFormat.ToPortNumber(portDisplay);
             if (portNumber <= 0)
             {
-                FileLogger.Info($"[{label}] 포트 미설정('{portDisplay}') — 열지 않음");
+                FileLogger.Info(LogCategory.Reader, $"[{label}] 포트 미설정('{portDisplay}') — 열지 않음");
                 return;
             }
 
             var result = service.OpenPort(portNumber, BaudRate);
-            FileLogger.Info(result.Success
+            FileLogger.Info(LogCategory.Reader, result.Success
                 ? $"[{label}] COM{portNumber} 열기 성공(readerId={result.ReaderId})"
                 : $"[{label}] COM{portNumber} 열기 실패({result.DllResultName}({result.DllResult})) — 다음 명령 시 자동 재시도(SendCommandSafe)");
         }
@@ -134,7 +134,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 return;
 
             var result = service.ClosePort();
-            FileLogger.Info(result.Success
+            FileLogger.Info(LogCategory.Reader, result.Success
                 ? $"[{label}] 포트 닫기 성공"
                 : $"[{label}] 포트 닫기 실패({result.DllResultName}({result.DllResult}))");
         }

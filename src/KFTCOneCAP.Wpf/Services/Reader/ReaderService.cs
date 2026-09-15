@@ -481,7 +481,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
                 // 재오픈 성공 시 새로 발급된 readerId로 이미 덮어썼다(TryAutoOpenReader 안에서
                 // OpenPort를 통해 처리됨) — 옛 id로 재전송하면 무조건 실패한다(P10-3 금지 사항).
                 result = ReaderSerialNative.Reader_SendCommand(_readerId, commandCode, data, dataLength);
-                FileLogger.Info(result == (int)ReaderResult.READER_OK
+                FileLogger.Info(LogCategory.Reader, result == (int)ReaderResult.READER_OK
                     ? $"{autoPrefix}COM{_portNumber} 재연결 성공(readerId={_readerId}) -> 재전송 성공"
                     : $"{autoPrefix}COM{_portNumber} 재연결 성공(readerId={_readerId}) -> 재전송도 실패(result={ReaderNames.FormatResult(result)})");
             }
@@ -513,7 +513,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             }
 
             var openResult = OpenPort(_portNumber, _baudRate);
-            FileLogger.Info(openResult.Success
+            FileLogger.Info(LogCategory.Reader, openResult.Success
                 ? $"{logPrefix}COM{_portNumber}, {_baudRate}bps -> READER_OK, readerId={openResult.ReaderId}"
                 : $"{logPrefix}COM{_portNumber}, {_baudRate}bps -> 실패(result={openResult.DllResultName}({openResult.DllResult}))");
 
