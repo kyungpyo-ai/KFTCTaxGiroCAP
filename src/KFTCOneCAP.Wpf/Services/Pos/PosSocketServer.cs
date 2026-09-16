@@ -378,10 +378,15 @@ internal sealed class PosSocketServer
         // 쓰이고 결과(문자열)만 남는다. request.Telegram 자신의 원본 _body(#7)와는 다른 배열이므로
         // 즉시 지워도 요청 처리에 영향이 없다.
         byte[] requestBodyForLog = request.Telegram.ToBody();
+        // 2026-09-15 사용자 지적 — 이 로그는 "POS가 실제로 보낸 전문 그대로"를 표방하므로 #0(전문
+        // 길이, 소켓에 실제로 나간 바이트의 일부)도 빠지면 안 된다. #0 재구성 + 위치 기반 마스킹은
+        // TelegramLogRedactor.RedactFrameForLog로 모아 뒀다(그 메서드 주석 참고 — #0을 본문 POSITION
+        // 체계에 실제로 편입시키면 파서/프레이머/4개 스키마까지 다 흔들려서, 로그 표시만을 위해
+        // 감수할 위험이 아니라고 판단했다).
         string redactedRequestBody;
         try
         {
-            redactedRequestBody = TelegramLogRedactor.Redact(request.TransactionTypeCode, requestBodyForLog);
+            redactedRequestBody = TelegramLogRedactor.RedactFrameForLog(request.TransactionTypeCode, requestBodyForLog);
         }
         finally
         {
@@ -447,10 +452,13 @@ internal sealed class PosSocketServer
         // 지운다. response 원본 버퍼(#7)와는 다른 배열이다(P26-4 — IPosOutboundResponse.BodyForLog로
         // 일반화, PosResponseTelegram/PosInquiryResponseTelegram 둘 다 같은 계약).
         byte[] responseBodyForLog = response.BodyForLog();
+        // 2026-09-15 — 요청 로그와 동일한 이유로 TelegramLogRedactor.RedactFrameForLog를 쓴다(#0
+        // 재구성 + 위치 기반 마스킹을 그 메서드 한 곳에 모아 둠). 원캡이 실제로 내보내는 프레임
+        // (PosMessageFramer.BuildFrame)도 이 본문 길이를 그대로 "D4"로 인코딩하므로 정확히 일치한다.
         string redactedResponseBody;
         try
         {
-            redactedResponseBody = TelegramLogRedactor.Redact(response.RedactionTransactionTypeCode, responseBodyForLog);
+            redactedResponseBody = TelegramLogRedactor.RedactFrameForLog(response.RedactionTransactionTypeCode, responseBodyForLog);
         }
         finally
         {

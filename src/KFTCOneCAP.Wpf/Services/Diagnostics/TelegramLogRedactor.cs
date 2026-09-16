@@ -122,6 +122,27 @@ internal static class TelegramLogRedactor
     private const int RegistrationNumberVisibleSuffixLength = 4;
 
     /// <summary>
+    /// 2026-09-15 사용자 지적 — POS 소켓 경계(<see cref="Services.Pos.PosSocketServer"/>)의 로그는
+    /// "POS가 실제로 보낸/받은 프레임 그대로"를 표방하는데, <c>#0</c>(전문 길이, 4자리 ASCII)은
+    /// 소켓에 실제로 나가는 바이트의 일부이면서도 <see cref="Redact(string, byte[])"/>에는 빠져 있었다
+    /// — <c>#0</c>은 본문(BODY) 밖 프레임 헤더라 스키마에 필드로 등록되지 않기 때문이다
+    /// (<c>PosCommonHeader</c> 참고). 그렇다고 <c>#0</c>을 본문에 섞어 넣으면(POSITION 체계를 바꾸면)
+    /// 이 클래스가 의존하는 "필드 POSITION은 본문 오프셋"이라는 전제 전체가 깨지고, 그 위에 놓인
+    /// 파서·프레이머·4개 스키마·<c>KFTCOneCAP.KioskSim</c>의 독립 전사본까지 전부 다시 맞춰야 한다
+    /// (Phase 17부터 고정된 계약) — 로그 표시 하나를 위해 감수할 위험이 아니다.
+    ///
+    /// 그래서 <c>#0</c>은 <see cref="Redact(string, byte[])"/>의 위치 기반 마스킹에는 전혀 관여시키지
+    /// 않고(그 메서드는 순수 본문만 계속 다룬다), 이 메서드가 마스킹이 끝난 결과 앞에 <c>#0</c> 값을
+    /// 다시 조립해 붙이기만 한다. 파싱에 성공해 여기까지 온 본문은 이미 스키마 총 길이와 일치함이
+    /// 보장되므로(<see cref="Protocol.Pos.PosRequestTelegram.Parse"/>/<see
+    /// cref="Protocol.Pos.PosResponseTelegram"/>이 응답 프레임을 이 길이로 직접 만든다), <c>body.Length</c>를
+    /// <c>PosMessageFramer.BuildFrame</c>과 같은 <c>"D4"</c> 포맷으로 재구성하면 실제 전송된 <c>#0</c>
+    /// 값과 항상 일치한다 — 근사값이 아니라 정확한 재현이다.
+    /// </summary>
+    internal static string RedactFrameForLog(string transactionTypeCode, byte[] body) =>
+        body.Length.ToString("D4", System.Globalization.CultureInfo.InvariantCulture) + Redact(transactionTypeCode, body);
+
+    /// <summary>
     /// 전문 본문(길이 헤더 제외, <see cref="PosTelegram.ToBody"/> 결과)을 로그에 남길 수 있는 형태로
     /// 변환한다. 실패하지 않는다 — 스키마를 식별할 수 없거나 길이가 어긋나도 예외를 던지지 않고 원문
     /// 문자열을 그대로 돌려준다(클래스 요약의 "기형 전문" 폴백).
