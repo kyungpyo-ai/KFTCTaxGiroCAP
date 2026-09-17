@@ -1,7 +1,5 @@
 using System;
-using System.Globalization;
 using System.IO;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace KFTCOneCAP.Wpf.Services.Diagnostics;
@@ -9,7 +7,8 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 /// <summary>
 /// Phase 22(docs/operations/development_plan.md P22-5, PRD.md §1.2) 90일 보관 정리.
 ///
-/// - 삭제 기준은 <b>파일명(<c>yyyy-MM-dd.log</c>)에서 파싱한 날짜</b>다. <c>LastWriteTime</c>은
+/// - 삭제 기준은 <b>파일명(<see cref="LogPaths.BuildFileName"/>이 만드는 <c>KFTCTaxCAP{yyMMdd}.log</c>,
+///   2026-09-17 변경)에서 파싱한 날짜</b>다. <c>LastWriteTime</c>은
 ///   복사·백업으로 바뀔 수 있어 쓰지 않는다(PRD.md §1.2).
 /// - 파일명 패턴에 맞지 않는 파일(사용자가 넣어둔 파일 등)은 건드리지 않는다.
 /// - 실행 시점은 둘 — 앱 기동 시 1회(<see cref="RunAtStartup"/>, <c>App.xaml.cs</c> <c>OnStartup</c>)와
@@ -26,10 +25,6 @@ public static class LogRetentionCleaner
 {
     /// <summary>보관 기간(일). 상수로 한 곳에 둔다(장래 설정화면 노출 가능성 대비, PRD.md §1.2).</summary>
     public const int RetentionDays = 90;
-
-    // yyyy-MM-dd.log 형태만 삭제 대상 후보로 삼는다. 패턴에 맞지 않으면 정규식 자체가 매치하지 않아
-    // 자동으로 "건드리지 않는다" 규칙을 만족한다.
-    private static readonly Regex FileNamePattern = new(@"^(\d{4}-\d{2}-\d{2})\.log$", RegexOptions.Compiled);
 
     private static readonly object TriggerSync = new();
 
@@ -85,18 +80,7 @@ public static class LogRetentionCleaner
             foreach (string filePath in Directory.EnumerateFiles(directory, "*.log"))
             {
                 string fileName = Path.GetFileName(filePath);
-                Match match = FileNamePattern.Match(fileName);
-                if (!match.Success)
-                {
-                    continue;
-                }
-
-                if (!DateTime.TryParseExact(
-                        match.Groups[1].Value,
-                        "yyyy-MM-dd",
-                        CultureInfo.InvariantCulture,
-                        DateTimeStyles.None,
-                        out DateTime fileDate))
+                if (!LogPaths.TryParseDateFromFileName(fileName, out DateTime fileDate))
                 {
                     continue;
                 }

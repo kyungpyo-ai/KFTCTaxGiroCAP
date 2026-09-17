@@ -28,13 +28,10 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 /// 바이트는 모두 최상위 비트가 1이라 <c>0x0A</c>와 절대 겹치지 않으므로, 완성된 줄의 바이트 범위를
 /// 모은 뒤에만 한 번에 디코딩하면 문자가 쪼개지지 않는다.</para>
 ///
-/// <para><b>파일명 규칙 공유 판단(P27-2, PRD §1.8.4-2)</b> — <c>yyyy-MM-dd.log</c> 파일명을 이
-/// 클래스는 "날짜 → 파일명" 방향으로만 쓴다(<see cref="LogRetentionCleaner.FileNamePattern"/>은
-/// 반대 방향인 "파일명 → 날짜"용 정규식이라 그대로 재사용할 수 없다 — 새 정규식이 필요한 게 아니라
-/// 서식 문자열 하나만 있으면 된다). PRD.md §1.8.5가 이번 Phase에서 <c>LogPaths.cs</c>를 건드리지
-/// 말라고 명시했으므로, 상수를 그쪽으로 승격하지 않고 <see cref="FileLogSink"/>가 이미 쓰는 것과
-/// 같은 <c>"{0:yyyy-MM-dd}.log"</c> 리터럴을 이 파일 안에서만 재사용한다(리터럴 자체가 단순해 중복
-/// 위험이 낮다).</para>
+/// <para><b>파일명 규칙 공유(2026-09-17 변경)</b> — 파일명이 <c>yyyy-MM-dd.log</c>에서
+/// <c>KFTCTaxCAP{yyMMdd}.log</c>로 바뀌면서 이 클래스는 <see cref="LogPaths.BuildFileName"/>을
+/// "날짜 → 파일명" 방향으로 그대로 쓴다(<see cref="LogPaths.TryParseDateFromFileName"/>은
+/// <see cref="LogRetentionCleaner"/> 전용 반대 방향).</para>
 ///
 /// <para><b>실패하지 않는다</b> — 파일 부재·권한·삭제 경합 모두 예외를 밖으로 던지지 않고 있는
 /// 만큼을 돌려준다(<see cref="Services.Storage.ObservedIdentityStore"/>·<see cref="FileLogger"/>와
@@ -169,7 +166,7 @@ public static class LogFileReader
     }
 
     private static string BuildFilePath(DateTime date) =>
-        Path.Combine(LogPaths.LogDirectory, $"{date:yyyy-MM-dd}.log");
+        Path.Combine(LogPaths.LogDirectory, LogPaths.BuildFileName(date));
 
     /// <summary>
     /// 파일 하나를 끝에서부터 청크 단위로 거슬러 올라가며 완성된 줄을 최신 순으로

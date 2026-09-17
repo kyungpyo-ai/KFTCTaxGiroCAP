@@ -8,7 +8,8 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 /// Phase 22(docs/operations/development_plan.md P22-3, PRD.md §1.3-a/§1.3-e) <see cref="ILogSink"/>의
 /// 유일한 구현 — 기존 <c>FileLogger</c>가 직접 하던 파일 쓰기 로직을 그대로 옮긴 것이다.
 ///
-/// - 기록 위치는 <c>C:\KFTC_PosAgent\KFTCTaxLog\</c>(Phase 22 P22-0)이고, 파일명은 <c>yyyy-MM-dd.log</c>다.
+/// - 기록 위치는 <c>C:\KFTC_PosAgent\KFTCTaxLog\</c>(Phase 22 P22-0)이고, 파일명은
+///   <see cref="LogPaths.BuildFileName"/>이 만드는 <c>KFTCTaxCAP{yyMMdd}.log</c>다(2026-09-17 변경).
 /// - 스레드 안전: Reader CALLBACK 스레드와 UI 스레드가 동시에 기록해도 줄이 섞이지 않도록 프로세스
 ///   전체에서 하나의 lock으로 직렬화한다(기존 <c>FileLogger</c>와 동일한 전략을 유지).
 /// - 파일 열기 모드에 <b>공유 읽기</b>를 허용한다(PRD.md §1.3-e) — 장래 전송 기능이 기록 중인 파일을
@@ -109,7 +110,7 @@ public sealed class FileLogSink : ILogSink
     /// </summary>
     private static void AppendLocked(DateTime timestamp, params byte[][] chunks)
     {
-        string filePath = Path.Combine(LogPaths.LogDirectory, $"{timestamp:yyyy-MM-dd}.log");
+        string filePath = Path.Combine(LogPaths.LogDirectory, LogPaths.BuildFileName(timestamp));
         Directory.CreateDirectory(LogPaths.LogDirectory);
         using var stream = new FileStream(
             filePath,
