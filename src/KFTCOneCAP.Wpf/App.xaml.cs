@@ -103,7 +103,28 @@ public partial class App : Application
         // Phase 8(docs/payment_relay/development_plan.md P8-4): 앱 기동 시 두 네이티브 DLL의 로드
         // 가능 여부를 미리 확인해 로그로 남긴다. 실제 함수 호출은 Phase 9/17 몫이며, 여기서는 로드
         // 실패해도 앱 기동을 막지 않는다(PRD §9).
+        // 2026-09-17 사용자 요청 — 사람이 로그 파일을 눈으로 스크롤할 때 "여기서 새 프로세스가
+        // 시작됐다"를 한눈에 알아볼 수 있도록, 기동 로그의 맨 앞에 눈에 띄는 구분선을 남긴다.
+        FileLogger.WriteStartupBanner();
         FileLogger.Info(LogCategory.App, "애플리케이션 기동 시작");
+
+        // 2026-09-17 사용자 요청 — 기동 시점에 레지스트리에 저장된 설정값을 로그 한 줄로 남긴다.
+        // 실기 테스트/장애 재현 시 "이번 실행이 어떤 설정으로 동작했는지"를 레지스트리를 직접 열어
+        // 대조하지 않고도 로그만으로 바로 알 수 있게 하기 위함이다. 카드/PIN 등 민감정보는 전혀
+        // 포함되지 않는 값들이라 그대로 남긴다. ShopSettingsService.Load()가 이상값을 발견하면
+        // 평소처럼 자체적으로 WARN도 함께 남긴다(ShopSettingsService 클래스 요약 참고) — 부수 효과로
+        // 이상 설정값도 기동 시점에 바로 드러난다.
+        ReaderSettings readerSettings = new ReaderSettingsService().Load();
+        FileLogger.Info(LogCategory.Settings,
+            $"[설정] 리더기(SERIALPORT): Port1={readerSettings.Port1} Multipad1={readerSettings.Multipad1} " +
+            $"Port2={readerSettings.Port2} Multipad2={readerSettings.Multipad2}");
+
+        ShopSettings shopSettings = new ShopSettingsService().Load();
+        FileLogger.Info(LogCategory.Settings,
+            $"[설정] 가맹점(TCP/SERIALPORT): VAN_MODE={shopSettings.VanMode} KIOSK_ID=\"{shopSettings.KioskId}\" " +
+            $"CardReadTimeout={shopSettings.CardReadTimeoutSeconds}s AutoReboot={shopSettings.AutoReboot} " +
+            $"AutoUpdate={shopSettings.AutoUpdate} KeyinDim={shopSettings.KeyinDim}");
+
         string baseDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? AppDomain.CurrentDomain.BaseDirectory;
         NativeDllLoadSmokeTest.RunAll(baseDirectory);
 

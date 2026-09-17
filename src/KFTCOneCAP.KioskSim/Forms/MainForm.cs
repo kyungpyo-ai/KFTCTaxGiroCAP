@@ -48,8 +48,9 @@ namespace KFTCOneCAP.KioskSim.Forms
         private readonly Button _btnSelect800000;
         private readonly Button _btnSelect902614;
 
-        /// <summary>"직전 거래 상태 조회"(999999, Phase 26 P26-5) 버튼 — <see cref="_lastRequestBody"/>의
-        /// #9를 재사용해 조회 전문을 보낸다.</summary>
+        /// <summary>"직전 거래 상태 조회"(999999, Phase 26 P26-5) 버튼 — 다른 3개 전문 버튼과 동일하게
+        /// 스키마 선택 + 그리드 채우기만 담당한다(2026-09-16 재설계, <see cref="SelectStatusInquirySchema"/>
+        /// 참고). 실제 전송은 "전송" 버튼(<see cref="OnSendClickAsync"/>)이 한다.</summary>
         private readonly Button _btnStatusInquiry;
 
         private readonly Label _lblSelectedSchema;
@@ -90,6 +91,18 @@ namespace KFTCOneCAP.KioskSim.Forms
         /// </summary>
         private byte[]? _lastRequestBody;
         private TelegramSchema? _lastRequestSchema;
+
+        /// <summary>
+        /// "직전 거래 상태 조회"(999999) 버튼을 누른 시점의 <see cref="_lastRequestSchema"/>/
+        /// <see cref="_lastRequestBody"/> 스냅샷(2026-09-16 재설계). 조회 버튼도 다른 3개 전문
+        /// 버튼과 동일하게 그리드만 채우고 실제 전송은 "전송" 버튼이 담당하도록 통일하면서,
+        /// 조회 전문 전송 시 <see cref="OnSendClickAsync"/>가 <see cref="_lastRequestSchema"/>/
+        /// <see cref="_lastRequestBody"/>를 조회 전문(999999) 자신으로 덮어써 버린다 — 조회
+        /// 응답을 원거래 스키마로 재분해할 때 "실제로 보냈던 원거래 요청값"과 비교하려면 그
+        /// 값이 덮어써지기 전에 따로 보관해 둬야 한다(<see cref="ShowStatusInquiryResult"/> 참고).
+        /// </summary>
+        private byte[]? _priorTransactionBody;
+        private TelegramSchema? _priorTransactionSchema;
 
         /// <summary>
         /// 세 전문 전부의 kiosk 편집 가능 필드 현재 값(전문타입 → 필드번호 → 값).
@@ -327,7 +340,7 @@ namespace KFTCOneCAP.KioskSim.Forms
             _btnRefreshPreview.Click += (s, e) => UpdatePreview();
             _btnSavePreset.Click += (s, e) => SavePreset();
             _btnSend.Click += async (s, e) => await OnSendClickAsync();
-            _btnStatusInquiry.Click += async (s, e) => await OnStatusInquiryClickAsync();
+            _btnStatusInquiry.Click += (s, e) => SelectStatusInquirySchema();
             _grid.CellValueChanged += Grid_CellValueChanged;
             _grid.CurrentCellDirtyStateChanged += (s, e) =>
             {
@@ -508,6 +521,8 @@ namespace KFTCOneCAP.KioskSim.Forms
             _currentValues["501008"] = PresetStore.BuildInitialValues(loaded, TelegramSchemas.Notice501008);
             _currentValues["800000"] = PresetStore.BuildInitialValues(loaded, TelegramSchemas.CardInfo800000);
             _currentValues["902614"] = PresetStore.BuildInitialValues(loaded, TelegramSchemas.CardApproval902614);
+            _currentValues[TelegramSchemas.StatusInquiryTransactionType] =
+                PresetStore.BuildInitialValues(loaded, TelegramSchemas.StatusInquiryRequest);
         }
 
         /// <summary>전문 버튼을 눌렀을 때: 스키마 전환 + 그리드 재구성 + 미리보기 갱신.</summary>
@@ -789,6 +804,16 @@ namespace KFTCOneCAP.KioskSim.Forms
                 return;
             }
 
+            // "직전 거래 상태 조회"(999999)는 응답 구조가 다르다(공통부 70 + #14/#15 + 가변 원거래
+            // 원문) — 다른 3전문과 같은 고정 스키마 분해(ShowFieldDecomposition)를 바로 쓸 수 없어
+            // 전용 파서(ShowStatusInquiryResult)로 분기한다(2026-09-16, 조회 버튼도 "전송" 버튼으로
+            // 통일하면서 여기서 분기가 필요해졌다 — 예전에는 조회 전용 클릭 핸들러가 직접 처리했다).
+            if (_lastRequestSchema.TxType == TelegramSchemas.StatusInquiryTransactionType)
+            {
+                ShowStatusInquiryResult(result.ResponseBody);
+                return;
+            }
+
             ShowFieldDecomposition(_lastRequestSchema, _lastRequestBody, result.ResponseBody);
         }
 
@@ -905,95 +930,68 @@ namespace KFTCOneCAP.KioskSim.Forms
         }
 
         /// <summary>
-        /// "직전 거래 상태 조회"(999999, Phase 26 P26-5) 버튼 핸들러. <see cref="_lastRequestBody"/>가
-        /// 없으면(아직 501008/800000/902614 중 하나도 보내지 않았으면) 안내만 하고 끝낸다. 있으면
-        /// 그 요청의 #9(요청기관 전문 관리 번호)를 재사용해 조회 전문(70바이트)을 조립해 보낸다.
+        /// "직전 거래 상태 조회"(999999) 버튼 핸들러(2026-09-16 재설계). 다른 3개 전문 버튼
+        /// (<see cref="SelectSchema"/>)과 동일하게 스키마 전환 + 그리드 채우기만 하고, 실제 전송은
+        /// "전송" 버튼(<see cref="OnSendClickAsync"/>)에 맡긴다 — 예전에는 이 버튼을 누르면 그
+        /// 자리에서 바로 소켓 전송까지 해버려서, "조회 버튼을 누른 뒤 전송 버튼을 누르면 무엇이
+        /// 나가는가"가 다른 버튼들과 다르게 동작해 혼란을 줬다(사용자 지적 — 전송 버튼을 누르면
+        /// 직전에 선택한 그 전문이 나가야 다른 버튼과 방식이 일치한다).
         ///
-        /// 2026-09-15 재확인(PRD §3.4.9) — 본체 앱(PaymentOrchestrator.HandleStatusInquiry)이 이
-        /// 요청에서 실제로 읽는(값을 검증하는) 필드는 #4(라우팅 판별)와 #9(원거래 매칭 키) 둘뿐이라
-        /// 순수 업무값 필드(#1/#2/#5/#6/#8/#10/#11/#12/#13)는 <see cref="TelegramBuffer"/> 기본값
-        /// (전체 space)으로 남긴다 — 다른 전문에 쓰던 고정값(IGN/095/G/전송일시/01/1234567)을 굳이
-        /// 재현하지 않는다(TelegramSchemas.cs BuildStatusInquiryCommonFields의 AlwaysBlank 표시와
-        /// 일치). 단 #3(전문 종별 코드)은 예외다 — 원캡이 요청 값을 검증하진 않지만 "요청/응답 구분"을
-        /// 나타내는 프로토콜 골격 필드라 다른 3전문과 동일하게 "0200"을 채운다(2026-09-15 재수정 —
-        /// 요청엔 없고 응답에만 있는 것처럼 보이면 비대칭이라는 사용자 지적).
+        /// #9(요청기관 전문 관리 번호)는 원캡이 이 값으로 원거래를 찾으므로(PRD §3.4.9), 편의상
+        /// 직전 실제 거래(<see cref="_lastRequestSchema"/>/<see cref="_lastRequestBody"/>)에 썼던
+        /// 값을 그대로 미리 채워 둔다 — 가장 흔한 시나리오(방금 보낸 거래를 그대로 조회)를 한 번에
+        /// 되도록 하되, 그리드는 여전히 편집 가능하므로 사용자가 값을 바꿔 "원거래 불일치"(E07)
+        /// 케이스도 자유롭게 테스트할 수 있다. 직전 실제 거래가 아직 없으면(프로그램 시작 직후)
+        /// 프리셋 기본값(빈 문자열)을 그대로 두고 사용자가 직접 채우게 한다.
+        ///
+        /// <see cref="_priorTransactionSchema"/>/<see cref="_priorTransactionBody"/>에 이 시점의
+        /// <see cref="_lastRequestSchema"/>/<see cref="_lastRequestBody"/>를 스냅샷해 둔다 — 조회
+        /// 전문을 실제로 전송하면 <see cref="OnSendClickAsync"/>가 그 필드들을 조회 전문(999999)
+        /// 자신으로 덮어써 버리므로, 응답을 원거래 스키마로 재분해할 때(<see cref="ShowStatusInquiryResult"/>)
+        /// "실제로 보냈던 원거래 요청값"과 비교하려면 여기서 미리 보관해 둬야 한다.
         /// </summary>
-        private async System.Threading.Tasks.Task OnStatusInquiryClickAsync()
+        private void SelectStatusInquirySchema()
         {
-            if (_lastRequestBody == null || _lastRequestSchema == null)
-            {
-                MessageBox.Show(this,
-                    "먼저 501008/800000/902614 중 하나를 보낸 뒤에 조회할 수 있다.",
-                    "직전 거래 없음", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
+            _priorTransactionSchema = _lastRequestSchema;
+            _priorTransactionBody = _lastRequestBody;
 
-            string managementNumber;
-            try
-            {
-                var lastBuffer = new TelegramBuffer(_lastRequestSchema, _lastRequestBody);
-                managementNumber = lastBuffer.Read(9);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, $"직전 요청에서 #9(요청기관 전문 관리 번호)를 읽는 데 실패했다: {ex.Message}",
-                    "조회 전문 생성 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
+            SelectSchema(TelegramSchemas.StatusInquiryRequest);
 
-            var buffer = new TelegramBuffer(TelegramSchemas.StatusInquiryRequest);
-            // 2026-09-15 재확인 — #3(전문 종별 코드)은 원캡이 요청 값을 검증하진 않지만, "요청/응답
-            // 구분"을 나타내는 프로토콜 골격 필드라 다른 3전문과 동일하게 "0200"을 채운다(값이
-            // 없는 #1/#2/#5/#6/#8/#10/#11/#12/#13과 성격이 다르다 — 사용자 지적: 요청엔 없고
-            // 응답에만 있는 것처럼 보이면 비대칭이라 이상하다).
-            buffer.Write(3, "0200");
-            buffer.Write(4, TelegramSchemas.StatusInquiryTransactionType);
-            buffer.Write(9, managementNumber);
-
-            byte[] frame = TelegramCodec.Encode(buffer.ToBytes());
-            ClearResponseDisplay();
-
-            SetSendingState(true, TelegramSchemas.StatusInquiryTransactionType);
-            _lblStatus.Text = $"직전 거래 상태 조회(999999, #9=\"{managementNumber}\") 전송 중… (0.0초)";
-            try
+            if (_priorTransactionSchema != null && _priorTransactionBody != null)
             {
-                Action<TimeSpan> onElapsed = elapsed =>
+                try
                 {
-                    if (IsDisposed || !IsHandleCreated)
-                        return;
-                    try
-                    {
-                        BeginInvoke(new Action(() =>
-                        {
-                            if (!IsDisposed)
-                                _lblStatus.Text = $"직전 거래 상태 조회 응답 대기 중… ({elapsed.TotalSeconds:F1}초)";
-                        }));
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // 폼 종료 경합 — 무시.
-                    }
-                };
-
-                OneCapClientResult result = await OneCapClient.SendAsync(frame, onElapsed);
-
-                _lblStatus.Text = $"[결과: {result.Kind}] {result.Message}" +
-                    (result.Error != null ? $" / 예외: {result.Error.GetType().Name}: {result.Error.Message}" : string.Empty);
-                _lblStatus.ForeColor = result.Kind == OneCapClientResultKind.Success ? Color.DarkGreen : Color.DarkRed;
-
-                if (result.Kind != OneCapClientResultKind.Success || result.ResponseBody == null)
-                {
-                    _lblStatusInquiryEnvelope.Text = "조회 응답 없음 — 위 상태 메시지 참고.";
-                    _lblStatusInquiryEnvelope.ForeColor = Color.DarkRed;
-                    return;
+                    var priorBuffer = new TelegramBuffer(_priorTransactionSchema, _priorTransactionBody);
+                    SetGridFieldValue(9, priorBuffer.Read(9));
                 }
+                catch
+                {
+                    // 직전 요청에서 #9를 못 읽으면(이례적) 프리셋 기본값 그대로 두고 사용자가 직접 채우게 한다.
+                }
+            }
+        }
 
-                ShowStatusInquiryResult(result.ResponseBody);
-            }
-            finally
+        /// <summary>
+        /// 그리드에서 해당 필드 번호의 값 셀을 찾아 값을 채우고, <see cref="Grid_CellValueChanged"/>와
+        /// 동일하게 <see cref="_currentValues"/>/미리보기에도 반영한다. <see cref="SelectStatusInquirySchema"/>가
+        /// #9를 코드에서 미리 채워 넣을 때 쓴다(사용자가 그리드 셀을 직접 편집한 것과 동일한 효과).
+        /// </summary>
+        private void SetGridFieldValue(int fieldNumber, string value)
+        {
+            if (_currentSchema == null)
+                return;
+
+            foreach (DataGridViewRow row in _grid.Rows)
             {
-                SetSendingState(false, TelegramSchemas.StatusInquiryTransactionType);
+                if (row.Tag is TelegramField field && field.Number == fieldNumber)
+                {
+                    row.Cells[ColValue].Value = value;
+                    break;
+                }
             }
+
+            _currentValues[_currentSchema.TxType][fieldNumber] = value;
+            UpdatePreview();
         }
 
         /// <summary>
@@ -1067,13 +1065,15 @@ namespace KFTCOneCAP.KioskSim.Forms
                 return;
             }
 
-            // PRD §3.4.5 "POS는 기존 파서를 재사용하면 된다" 검증 — 원거래와 같은 스키마이면 직전에
-            // 실제로 보냈던 요청 본문(_lastRequestBody)을 나란히 놓고 기존 ShowFieldDecomposition을
-            // 그대로 재사용한다(파서를 새로 만들지 않는다).
-            byte[] requestForDiff = _lastRequestSchema != null
-                && _lastRequestSchema.TxType == originalSchema.TxType
-                && _lastRequestBody != null
-                    ? _lastRequestBody
+            // PRD §3.4.5 "POS는 기존 파서를 재사용하면 된다" 검증 — 원거래와 같은 스키마이면 조회
+            // 버튼을 누르던 시점에 스냅샷해 둔 원거래 요청 본문(_priorTransactionBody, 2026-09-16
+            // 재설계 — 조회 전문 전송 시 _lastRequestBody는 이미 999999 자신으로 덮어써진 뒤라
+            // 여기선 쓸 수 없다)을 나란히 놓고 기존 ShowFieldDecomposition을 그대로 재사용한다
+            // (파서를 새로 만들지 않는다).
+            byte[] requestForDiff = _priorTransactionSchema != null
+                && _priorTransactionSchema.TxType == originalSchema.TxType
+                && _priorTransactionBody != null
+                    ? _priorTransactionBody
                     : new TelegramBuffer(originalSchema).ToBytes(); // 스키마가 다른 이례적인 경우엔 빈 요청으로만 비교.
 
             ShowFieldDecomposition(originalSchema, requestForDiff, tail);

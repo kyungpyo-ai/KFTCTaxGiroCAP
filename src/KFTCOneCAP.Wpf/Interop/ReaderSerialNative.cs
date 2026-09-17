@@ -5,28 +5,41 @@
 // 시그니처·특성([UnmanagedFunctionPointer(StdCall)], CallingConvention.StdCall)·enum 값은 한 글자도
 // 바꾸지 않았다.
 //
-// vendor/ReaderSerial/ReaderSerial.h와의 1:1 대조 결과(P9-1 완료 조건, 2026-08-19 직접 대조):
+// 2026-09-16 재대조(원본 저장소 C:\Project\KFTCReaderDLL의 사인패드 지원 개정판, reader-pinpad-spec-expert
+// 확인) — 이 프로젝트가 배포하는 ReaderSerial.dll이 사인패드 지원 빌드로 교체되면서 Reader_OpenPort의
+// 시그니처가 바뀌었다(EntryPointNotFoundException으로 실제 크래시 재현·확인). 이번 재대조에서 바뀐 것과
+// 안 바뀐 것:
+//   - Reader_OpenPort: 5번째 자리에 SignpadCallback이 추가돼 6인자에서 7인자로 늘었다(아래 참고).
+//   - PinpadCommandCode 값이 0xA0~0xA4에서 0xD0~0xD4로 재번호됐다(사인패드가 0xA0~0xAC 대역을
+//     새로 점유해서 충돌 회피). 이 프로젝트는 Pinpad_SendCommand를 아직 어디서도 호출하지 않아
+//     (ReaderService에 호출부 없음) 지금 당장 동작에 영향은 없지만, 값 자체는 DLL 계약이므로
+//     맞춰 둔다 — 나중에 이 값을 그대로 갖다 쓰다 조용히 틀리는 것을 막기 위함.
+//   - 그 외(ReaderEventType/PinpadEventType/ReaderCallback/PinpadCallback/Reader_ClosePort/
+//     Reader_IsPortOpen/Reader_SendCommand/Pinpad_SendCommand 시그니처)는 이번 개정으로 바뀌지 않았다.
+//   - 사인패드 콜백(SignpadCallback)이 실제로 이벤트를 받아 처리하는 로직(SignpadEventType 분기 등)은
+//     이번 범위에 없다 — 이 앱에 사인패드를 쓰는 기능 자체가 아직 없어서, 지금은 Reader_OpenPort
+//     시그니처를 맞추기 위해 델리게이트 타입만 선언하고 항상 null을 넘긴다(ReaderService.OpenPort).
+//
+// 원래(2026-08-19) 1:1 대조 결과, 위에서 바뀌지 않았다고 확인된 항목은 그대로 유효하다:
 //   - ReaderEventType: RESPONSE=0/TIMEOUT=1/LRC_ERROR=2/RECEIVE_ERROR=3/UNSOLICITED=4/FRAME_STALL=5
 //     — 헤더 enum 선언 순서·값과 정확히 일치.
 //   - PinpadEventType: RESPONSE=0/TIMEOUT=1/NAK=2/LRC_ERROR=3/TAMPER=4/SEND_FAIL=5/RECEIVE_ERROR=6/
 //     FRAME_STALL=7 — 헤더와 정확히 일치.
-//   - PinpadCommandCode: INIT=0xA0/PIN_PASSWORD=0xA1/PIN_NUMBER=0xA2/PIN_DES=0xA3/PIN_SEED=0xA4
-//     — 헤더와 정확히 일치.
 //   - READER_CALLBACK(int readerId, int eventType, unsigned char commandCode,
 //     const unsigned char* data, int dataLength, void* userContext) — ReaderCallback 델리게이트가
 //     동일 순서로 int/int/byte/IntPtr/int/IntPtr을 선언, [UnmanagedFunctionPointer(StdCall)] 부착.
-//   - PINPAD_CALLBACK — READER_CALLBACK과 동일한 파라미터 목록(3번째가 commandCode, resultCode
-//     없음) — PinpadCallback 델리게이트와 일치.
+//   - PINPAD_CALLBACK/SIGNPAD_CALLBACK — READER_CALLBACK과 동일한 파라미터 목록(3번째가 commandCode,
+//     resultCode 없음) — PinpadCallback/SignpadCallback 델리게이트와 일치.
 //   - Reader_OpenPort(int portNumber, int baudRate, READER_CALLBACK, PINPAD_CALLBACK,
-//     void* userContext, int* outReaderId) — 5인자 + out(6번째)인 최신 시그니처. DllImport 선언이
-//     동일한 순서·타입(ReaderCallback/PinpadCallback/IntPtr userContext/out int outReaderId)으로 일치.
+//     SIGNPAD_CALLBACK, void* userContext, int* outReaderId) — 6인자 + out(7번째)인 최신 시그니처.
+//     DllImport 선언이 동일한 순서·타입으로 일치.
 //   - Reader_ClosePort(int readerId) — 일치.
 //   - Reader_IsPortOpen(int readerId) — 일치.
 //   - Reader_SendCommand(int readerId, unsigned char commandCode, const unsigned char* data,
 //     int dataLength) — commandCode가 byte(헤더의 unsigned char와 대응, 과거 int 아님) — 일치.
 //   - Pinpad_SendCommand(int readerId, unsigned char commandCode, const unsigned char* data,
 //     int dataLength) — commandCode가 byte — 2026-08-13 변경 반영, 일치.
-//   => 5개 함수·2개 CALLBACK·3개 enum 모두 헤더와 선언이 정확히 일치함을 확인했다.
+//   => 5개 함수·3개 CALLBACK·3개 enum 모두 헤더와 선언이 정확히 일치함을 확인했다.
 using System;
 using System.Runtime.InteropServices;
 
@@ -88,13 +101,16 @@ namespace KFTCOneCAP.Wpf.Interop
     }
 
     // ReaderSerial.h의 PinpadCommandCode와 값이 완전히 동일해야 한다.
+    // 2026-09-16 재번호(사인패드 지원 개정) — 0xA0~0xA4에서 0xD0~0xD4로 바뀌었다(사인패드가
+    // 0xA0~0xAC 대역을 새로 점유해서 충돌 회피). 이 프로젝트는 아직 Pinpad_SendCommand를
+    // 어디서도 호출하지 않아 지금 당장 동작 영향은 없다.
     internal enum PinpadCommandCode
     {
-        PINPAD_CMD_INIT = 0xA0,
-        PINPAD_CMD_PIN_PASSWORD = 0xA1,
-        PINPAD_CMD_PIN_NUMBER = 0xA2,
-        PINPAD_CMD_PIN_DES = 0xA3,
-        PINPAD_CMD_PIN_SEED = 0xA4,
+        PINPAD_CMD_INIT = 0xD0,
+        PINPAD_CMD_PIN_PASSWORD = 0xD1,
+        PINPAD_CMD_PIN_NUMBER = 0xD2,
+        PINPAD_CMD_PIN_DES = 0xD3,
+        PINPAD_CMD_PIN_SEED = 0xD4,
     }
 
     // ReaderSerial.h의 READER_CALLBACK과 동일한 시그니처. StdCall 지정이
@@ -130,19 +146,35 @@ namespace KFTCOneCAP.Wpf.Interop
         int dataLength,
         IntPtr userContext);
 
+    // ReaderSerial.h의 SIGNPAD_CALLBACK과 동일한 시그니처(2026-09-16 사인패드 지원 개정,
+    // reader-pinpad-spec-expert 확인 — 헤더/SPEC PDF §3.1 원문 일치). ReaderCallback/PinpadCallback과
+    // 파라미터 목록이 완전히 동일하다. 이 프로젝트는 아직 사인패드를 쓰는 기능이 없어(핀패드와 마찬가지
+    // 이유) Reader_OpenPort 시그니처를 맞추기 위해 델리게이트 타입만 선언하고 항상 null을 넘긴다
+    // (ReaderService.OpenPort 참고).
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    internal delegate void SignpadCallback(
+        int readerId,
+        int eventType,
+        byte commandCode,
+        IntPtr data,
+        int dataLength,
+        IntPtr userContext);
+
     internal static class ReaderSerialNative
     {
         private const string DllName = "ReaderSerial.dll";
 
-        // readerCallback/pinpadCallback의 `?`도 위 data 파라미터와 동일한 이유의 nullable 참조
-        // 형식 주석이다(ABI 영향 없음) — DLL연동가이드.md §1.1: "둘 다 동시에 nullptr인 경우에만
-        // 거부됨", 이번 Phase(9)는 pinpadCallback에 항상 null을 넘긴다(PRD §2.2.1/§10, 핀패드 미사용).
+        // readerCallback/pinpadCallback/signpadCallback의 `?`도 위 data 파라미터와 동일한 이유의
+        // nullable 참조 형식 주석이다(ABI 영향 없음) — DLL연동가이드.md §1.1: "셋 다 동시에 nullptr인
+        // 경우에만 거부됨"(2026-09-16 사인패드 지원 개정으로 "둘 다"에서 "셋 다"로 바뀜), 이 프로젝트는
+        // pinpadCallback/signpadCallback에 항상 null을 넘긴다(PRD §2.2.1/§10, 핀패드·사인패드 미사용).
         [DllImport(DllName, CallingConvention = CallingConvention.StdCall)]
         internal static extern int Reader_OpenPort(
             int portNumber,
             int baudRate,
             ReaderCallback? readerCallback,
             PinpadCallback? pinpadCallback,
+            SignpadCallback? signpadCallback,
             IntPtr userContext,
             out int outReaderId);
 

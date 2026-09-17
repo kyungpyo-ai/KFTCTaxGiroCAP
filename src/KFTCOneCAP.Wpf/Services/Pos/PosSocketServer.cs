@@ -207,7 +207,15 @@ internal sealed class PosSocketServer
     private void HandleConnection(TcpClient client, CancellationToken token)
     {
         string remote = SafeRemoteEndPoint(client);
-        FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] 연결 수락: {remote}");
+
+        // 2026-09-17 사용자 요청 — 연결(=거래) 1건이 시작되는 지점에 구분선을 남긴다(거래 종료와
+        // 대칭). 이 저장소는 "전문마다 TCP 연결을 새로 연다"는 전제라(PRD.md §4.3) 연결 수락이 곧
+        // 거래 시작이다. 여러 연결이 시간상 겹칠 때(§1.12, 동시 연결 최대 16개 지원) 로그 줄이
+        // 뒤섞이는 걸 완전히 풀어내진 못하지만, 최소한 "이 줄부터 새 거래가 시작됐다"는 지점만큼은
+        // 항상 눈에 띄게 한다. 구분선과 "연결 수락" 로그를 WriteBoundaryThenWrite 하나로 원자적으로
+        // 기록한다(따로 호출하면 그 사이 틈에 다른 연결의 줄이 끼어드는 문제가 있음 — 거래 종료
+        // 쪽에서 실측으로 확인된 것과 같은 문제).
+        FileLogger.WriteBoundaryThenWrite(LogCategory.Pos, $"[PosSocketServer] 연결 수락: {remote}", remote);
 
         var framer = new PosMessageFramer();
         var writeLock = new object();
@@ -305,7 +313,15 @@ internal sealed class PosSocketServer
         finally
         {
             Interlocked.Decrement(ref _connectionCount);
-            FileLogger.Info(LogCategory.Pos, $"[PosSocketServer] 연결 종료: {remote}");
+
+            // 2026-09-17 사용자 지적 — 이 연결(=거래) 1건의 모든 종료 경로(정상 FIN/유휴 타임아웃/
+            // 연결 단절/프로토콜 예외/처리 중 예외)가 예외 없이 지나가는 지점이 여기뿐이다. 응답을
+            // 아예 못 만든 경로(예: 위 catch (PosProtocolException) 분기, 큐잉 전 실패)도 포함해
+            // "이 연결의 진짜 마지막 줄"을 보장하려면 SendResponse 쪽(비동기 판정과 경합)이 아니라
+            // 여기서 찍어야 한다. 처음엔 "연결 종료" 로그(FileLogger.Info)와 구분선을 따로 호출했는데,
+            // 그 사이 틈에 다른 연결의 줄이 끼어드는 게 실측(연결 2개 겹침)으로 확인돼 WriteThenBoundary
+            // 하나로 합쳤다(둘을 같은 락 안에서 원자적으로 기록).
+            FileLogger.WriteThenBoundary(LogCategory.Pos, $"[PosSocketServer] 연결 종료: {remote}", remote);
         }
     }
 
@@ -474,8 +490,15 @@ internal sealed class PosSocketServer
         {
             // P27-9-(a)/(d)/(e) — 응답을 실제로 보낸(WriteFrame) 직후, 결제 스레드(TransactionQueue의
             // 유일한 워커 스레드)를 블로킹하지 않도록 판정을 Task.Run으로 위탁한다. §2.1 전부를
-            // 커버하는 유일한 지점이라, 판정이 끝난 뒤 거래 경계(빈 줄)도 여기서만 찍는다(나머지
-            // 14곳은 경계를 찍지 않는다).
+            // 커버하는 유일한 지점이다.
+            //
+            // 2026-09-17 사용자 지적 — 거래 경계(구분선)를 예전엔 이 Task.Run 안에서(판정이 끝난
+            // 직후) 찍었는데, 이 Task.Run은 결제 워커 스레드를 안 막으려고 일부러 fire-and-forget으로
+            // 던진 것이라 연결 스레드(HandleConnection)의 "정상 종료(FIN)"/"연결 단절"/"연결 종료"
+            // 로그와 실행 순서가 보장되지 않는다 — 실측에서 구분선이 그 연결의 마지막 정리 로그보다
+            // 먼저 찍히는 게 확인됐다("거래 종료" 구분선 뒤에 "연결 종료" 줄이 더 나옴). 그래서
+            // 구분선은 여기서 빼고, 연결 1건의 모든 종료 경로(정상/타임아웃/단절/예외)를 예외 없이
+            // 커버하는 진짜 마지막 지점인 HandleConnection의 finally(연결 종료 로그 직후)로 옮겼다.
             Task.Run(() =>
             {
                 try
@@ -485,10 +508,6 @@ internal sealed class PosSocketServer
                 catch
                 {
                     // P27-9-(e) 이중 방어 — 삼킨다.
-                }
-                finally
-                {
-                    FileLogger.WriteTransactionBoundary();
                 }
             });
             // Phase 25 P25-5(PRD.md §4.2 #13) — 송신 frame(길이 헤더 + ToFrame()의 body 복사본).

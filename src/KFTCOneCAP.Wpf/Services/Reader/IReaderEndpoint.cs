@@ -34,7 +34,23 @@ namespace KFTCOneCAP.Wpf.Services.Reader
         Task<CardReadCommandOutcome> SendCardReadCommandAsync(TransactionInfoRequest request, TimeSpan timeout);
 
         /// <summary>0x60(초기화) 전송으로 대기 중인 명령을 무효화한다(PRD §2.2.3/§4.8/§4.9). 결과를
-        /// 기다리지 않는 Fire-and-forget 전송이며 반환값은 로그용이다.</summary>
+        /// 기다리지 않는 Fire-and-forget 전송이며 반환값은 로그용이다.
+        ///
+        /// <b>2026-09-17 사용자 지적으로 사용 중단(신규 호출부는 <see cref="SendInvalidationInitAsync"/>를
+        /// 쓴다)</b> — 이 메서드는 DLL에 0x60을 "보내는 syscall"이 끝났다는 것만 보장하지, 리더기가
+        /// 실제로 0x70 응답을 돌려줘 자유로워졌다는 것은 보장하지 않는다. 실기 테스트(902614 두 건을
+        /// 거의 동시에 보내는 시나리오)에서 이 간극 때문에 앞 거래의 정리(0x60)가 아직 안 끝난 채로
+        /// 다음 거래가 카드 리딩(0x2B)을 시작해 <c>READER_ERR_BUSY</c>가 재현됐다.</summary>
         int SendInvalidationInit();
+
+        /// <summary>
+        /// 2026-09-17 사용자 지적으로 신설 — <see cref="SendInvalidationInit"/>와 달리 0x70 응답(또는
+        /// <paramref name="timeout"/> 만료)까지 실제로 기다린다(<see cref="ReaderService.SendInitCommandAsync"/>
+        /// 위임, 카드리딩 4종 명령과 동일한 <c>SendAndAwaitAsync</c> 게이트를 거친다). 거래 종료 시
+        /// 리더기를 정리하는 모든 호출부가 이 메서드로 옮겨가, 그 정리가 실제로 끝난 뒤에야 POS
+        /// 응답을 보내고 다음 거래를 큐에서 꺼내도록 한다 — 그래야 "직전 거래의 0x60 정리"와
+        /// "다음 거래의 0x2B 시작"이 리더기 포트에서 서로 겹치지 않는다.
+        /// </summary>
+        Task<InitCommandOutcome> SendInvalidationInitAsync(TimeSpan timeout);
     }
 }

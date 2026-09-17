@@ -108,20 +108,89 @@ public static class FileLogger
     public static void Alert(LogCategory category, string message, string? code, string? transactionId) => Write(LogLevel.Alert, category, code, transactionId, message);
 
     /// <summary>
-    /// Phase 27(docs/operations/development_plan.md P27-9-(d)) — 장애 알림 판정이 끝난 직후 거래
-    /// 경계(빈 줄)를 찍는 전용 진입점. <b>공개 API가 아니다</b> — <c>FaultAlertJudge</c>를 위탁하는
-    /// <c>PosSocketServer.SendResponse</c> 내부에서만 호출한다(임의의 다른 호출부가 경계를 함부로
-    /// 찍지 못하게 <c>internal</c>로 제한). <see cref="LogRecord"/>/<see cref="LogLineRenderer"/>를
-    /// 거치지 않고 등록된 싱크의 <see cref="ILogSink.WriteBoundary"/>를 그대로 호출한다.
+    /// Phase 27(docs/operations/development_plan.md P27-9-(d)) — 로그 한 줄과 거래 종료 경계를 함께
+    /// 찍는 전용 진입점. <b>공개 API가 아니다</b> — <c>PosSocketServer.HandleConnection</c>의
+    /// <c>finally</c>(연결 1건의 모든 종료 경로를 예외 없이 커버하는 지점)에서 "연결 종료" 로그와
+    /// 함께 찍을 때만 호출한다(임의의 다른 호출부가 경계를 함부로 찍지 못하게 <c>internal</c>로 제한).
+    ///
+    /// 2026-09-17 사용자 지적으로 두 번 바뀌었다 — (1) 원래는 <c>SendResponse</c>가
+    /// <c>FaultAlertJudge</c> 판정과 함께 fire-and-forget <c>Task.Run</c> 안에서 찍었는데, 그 비동기
+    /// 작업이 연결 스레드의 나머지 종료 로그(정상 종료/연결 단절/연결 종료)보다 먼저 끝나 버려
+    /// 구분선이 실제 마지막 줄이 아닌 경우가 실측에서 확인돼 <c>HandleConnection</c>의 <c>finally</c>로
+    /// 옮겼다. (2) 옮긴 뒤에도, "연결 종료" 로그(<see cref="Write"/> 한 번)와 구분선(<see cref="ILogSink.WriteBoundary"/>
+    /// 한 번)이 **서로 다른 락 획득**이라 그 사이 틈에 다른 연결의 줄이 끼어드는 게 실측으로 또
+    /// 확인됐다 — 그래서 이 메서드가 <see cref="ILogSink.WriteThenBoundary"/> 하나로 합쳐 원자적으로
+    /// 기록한다. <see cref="Info(LogCategory, string)"/>와 같은 방식으로 <see cref="LogRecord"/>를
+    /// 만들되, 디스패치는 <see cref="ILogSink.Write"/> 대신 <see cref="ILogSink.WriteThenBoundary"/>로
+    /// 보낸다.
     /// </summary>
-    internal static void WriteTransactionBoundary()
+    internal static void WriteThenBoundary(LogCategory category, string message, string boundaryLabel)
+    {
+        try
+        {
+            var record = new LogRecord(DateTime.Now, LogLevel.Info, category, code: null, transactionId: null, message);
+            ILogSink[] sinks = _sinks;
+            foreach (ILogSink sink in sinks)
+            {
+                try
+                {
+                    sink.WriteThenBoundary(record, boundaryLabel);
+                }
+                catch
+                {
+                    // 싱크 실패를 조용히 무시한다(Dispatch와 동일한 방어).
+                }
+            }
+        }
+        catch
+        {
+            // 레코드 생성 단계의 실패까지 포함해, 로깅 실패가 앱 동작에 영향을 주면 안 된다(Write와 동일 계약).
+        }
+    }
+
+    /// <summary>
+    /// 2026-09-17 사용자 지적으로 <see cref="WriteThenBoundary"/>와 같은 이유로 신설(원래
+    /// <c>WriteTransactionStartBoundary</c> + <c>Info</c> 두 호출이었는데 그 사이 틈에 다른 연결의
+    /// 줄이 끼어드는 문제가 있어 하나로 합쳤다) — <see cref="WriteThenBoundary"/>(거래 종료)와
+    /// 대칭으로 거래 시작 지점에 구분선과 로그를 함께 찍는 전용 진입점. <b>공개 API가 아니다</b> —
+    /// <c>PosSocketServer</c>의 연결 수락 경로에서만 호출한다.
+    /// </summary>
+    internal static void WriteBoundaryThenWrite(LogCategory category, string message, string boundaryLabel)
+    {
+        try
+        {
+            var record = new LogRecord(DateTime.Now, LogLevel.Info, category, code: null, transactionId: null, message);
+            ILogSink[] sinks = _sinks;
+            foreach (ILogSink sink in sinks)
+            {
+                try
+                {
+                    sink.WriteBoundaryThenWrite(record, boundaryLabel);
+                }
+                catch
+                {
+                    // 싱크 실패를 조용히 무시한다(Dispatch와 동일한 방어).
+                }
+            }
+        }
+        catch
+        {
+            // 레코드 생성 단계의 실패까지 포함해, 로깅 실패가 앱 동작에 영향을 주면 안 된다(Write와 동일 계약).
+        }
+    }
+
+    /// <summary>
+    /// 2026-09-17 사용자 요청 — 앱 기동 맨 처음에 한 번, 눈에 띄는 구분선을 남긴다. <b>공개 API가
+    /// 아니다</b> — <c>App.xaml.cs</c>의 기동 경로에서만 호출한다.
+    /// </summary>
+    internal static void WriteStartupBanner()
     {
         ILogSink[] sinks = _sinks;
         foreach (ILogSink sink in sinks)
         {
             try
             {
-                sink.WriteBoundary();
+                sink.WriteStartupBanner();
             }
             catch
             {

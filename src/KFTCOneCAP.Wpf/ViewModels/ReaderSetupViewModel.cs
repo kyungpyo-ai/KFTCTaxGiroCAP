@@ -49,9 +49,11 @@ public enum IntegrityListState
 /// </summary>
 public sealed partial class ReaderSetupViewModel : ObservableObject
 {
-    /// <summary>명령 4종 공통 타임아웃(P12-3 — 값을 흩뿌리지 말고 한 곳에 상수로).
-    /// Phase 9 파일럿이 쓴 5초를 그대로 따른다. Phase 16에서 결제 타임아웃(120초)과 함께 재검토.</summary>
-    private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(5);
+    /// <summary>명령 4종 공통 타임아웃(P12-3 — 값을 흩뿌리지 말고 한 곳에 상수로). 명령어 1건당
+    /// 예산이다(무결성체크처럼 명령을 여러 번 보내는 동작은 각 명령이 이 값을 각자 새로 받는다 —
+    /// RunAsync(reader, comPort, CommandTimeout, CommandTimeout) 참고).
+    /// 2026-09-16 사용자 요청으로 5초 → 10초로 상향.</summary>
+    private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(10);
 
     private readonly ReaderSettingsService _settingsService = new();
     private readonly ReaderConnectionManager _connectionManager;

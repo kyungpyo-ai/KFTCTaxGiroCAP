@@ -72,10 +72,12 @@ namespace KFTCOneCAP.Wpf.Services.Reader
 
         /// <summary>
         /// baudRate는 PRD §2.2.1/§10에 따라 이 계층 호출자가 115200으로 고정해 넘긴다(이 서비스
-        /// 자체는 값을 강제하지 않는다). pinpadCallback은 이 프로젝트 범위에서 항상 null이다
-        /// (PRD §2.2.1/§10, 핀패드 미사용). 성공 여부와 무관하게 portNumber/baudRate는 항상
-        /// 기억해 둔다 — 첫 시도가 실패해도(리더기 미연결 등) 이후 SendCommandSafe가 같은 값으로
-        /// 재시도할 수 있어야 하기 때문이다(PRD §2.2.2 "결제 요청 시 다시 시도").
+        /// 자체는 값을 강제하지 않는다). pinpadCallback/signpadCallback은 이 프로젝트 범위에서 항상
+        /// null이다(PRD §2.2.1/§10, 핀패드·사인패드 미사용 — signpadCallback은 2026-09-16 사인패드
+        /// 지원 DLL 개정으로 Reader_OpenPort에 추가된 5번째 인자). 성공 여부와 무관하게
+        /// portNumber/baudRate는 항상 기억해 둔다 — 첫 시도가 실패해도(리더기 미연결 등) 이후
+        /// SendCommandSafe가 같은 값으로 재시도할 수 있어야 하기 때문이다(PRD §2.2.2 "결제 요청 시
+        /// 다시 시도").
         /// </summary>
         internal ReaderOpenResult OpenPort(int portNumber, int baudRate)
         {
@@ -83,7 +85,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             _baudRate = baudRate;
 
             int dllResult = ReaderSerialNative.Reader_OpenPort(
-                portNumber, baudRate, _nativeReaderCallback, null, IntPtr.Zero, out int newReaderId);
+                portNumber, baudRate, _nativeReaderCallback, null, null, IntPtr.Zero, out int newReaderId);
 
             bool success = dllResult == (int)ReaderResult.READER_OK;
             if (success)

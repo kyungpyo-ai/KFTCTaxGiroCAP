@@ -56,11 +56,14 @@ internal sealed class PaymentOrchestrator
     // 재요청뿐 아니라 Phase 18의 PIN 입력 단계도 같은 상수를 재사용한다).
     private static readonly TimeSpan UserInputStepExtension = TimeSpan.FromSeconds(30);
 
-    // 리더기 명령 타임아웃 하한 — 실제 만료 판정은 PaymentDeadline이 독립적으로 내린다.
-    private static readonly TimeSpan MinimumCommandTimeout = TimeSpan.FromSeconds(1);
-
     // ReaderSetupViewModel의 명령 타임아웃과 동일한 값을 쓴다(같은 0x61/0x62 시퀀스 공유).
     private static readonly TimeSpan IntegrityCommandTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>2026-09-17 사용자 지적으로 신설 — 0x60(초기화) 무효화 전송의 응답 대기 상한.
+    /// <see cref="IntegrityCommandTimeout"/>과 같은 값을 쓴다(0x60/0x61/0x62 모두 데이터 없이 짧게
+    /// 왕복하는 리더기 명령이라는 점이 같다). <see cref="FireInterruptCleanupAsync"/>와 카드 리딩
+    /// 라운드 안의 실제 무효화 지점들이 함께 쓴다.</summary>
+    private static readonly TimeSpan InvalidationTimeout = TimeSpan.FromSeconds(5);
 
     // 07/12 응답이 반복되면 무한 루프가 된다 — 최대 3라운드(최초 1 + 재요청 2)로 제한.
     private const int MaxCardReadRounds = 3;
@@ -318,6 +321,11 @@ internal sealed class PaymentOrchestrator
                 char[] cardNumber = cardData.CardNumber;
                 if (cardNumber.Length < 8)
                 {
+                    // 2026-09-17 — fillOneCapFields는 동기 델리게이트라 여기서 await할 수 없다.
+                    // 이 실패는 극히 드문 방어적 분기(카드 리딩이 이미 성공(00)했는데 카드번호가
+                    // 8자리 미만인 비정상 상황)라 기존 fire-and-forget으로 남겨 둔다 — 정상/실기로
+                    // 재현된 BUSY 경합(취소·Timeout·업무 실패 경로)과 달리 이 분기는 바로 다음
+                    // 라운드나 다음 거래로 이어지는 흔한 경로가 아니다.
                     winner.SendInvalidationInit();
                     FileLogger.Error(LogCategory.Payment, $"[PaymentOrchestrator] 카드번호가 8자리 미만이라 BIN을 추출할 수 없음: 길이={cardNumber.Length}", code: null, txId);
                     return PosResponseTelegram.Failure(request, PosResultCodeMapper.ReaderNoCardDataDefensiveCode);
@@ -683,7 +691,10 @@ internal sealed class PaymentOrchestrator
             {
                 TransactionOutcomeReason reason = scope.Gate.ClaimedReason!.Value;
                 FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩(및 PIN 입력) 완료했으나 필드 채움 전 이미 확정됨({reason}) — 미진입", code: null, txId);
-                roundResult.Winner?.SendInvalidationInit();
+                // 2026-09-17 — 여기서 직접 무효화하지 않는다. TryClaim이 실패했다는 것은 이미 다른
+                // 사유(취소/Timeout)가 scope.PendingParticipants(winner 포함) 전체에 대해
+                // FireInterruptCleanupAsync를 예약해 뒀다는 뜻이다(CollectPinAsync의 같은 패턴과
+                // 동일한 이유로 여기서 또 부르면 중복). 그 완료는 아래 finally가 기다린다.
                 return PosResponseTelegram.Failure(request, InterruptCode(reason));
             }
 
@@ -717,10 +728,20 @@ internal sealed class PaymentOrchestrator
             roundResult?.CardData?.Dispose();
             SecureClear.Clear(pin);
 
-            if (scope.Gate.TryClaim(TransactionOutcomeReason.FlowResult))
+            if (scope.Gate.TryClaim(TransactionOutcomeReason.FlowResult, () => FireInterruptCleanupAsync(TransactionOutcomeReason.FlowResult, scope)))
             {
                 FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 결과가 확정되지 않은 채 거래가 종료됨(예외 경로로 추정) — 대기 중이던 리더기를 정리한다", code: null, txId);
-                FireInterruptCleanup(TransactionOutcomeReason.FlowResult, scope);
+            }
+
+            // 2026-09-17 사용자 지적 — 취소/Timeout이 예약한 리더기 정리(0x60, FireInterruptCleanupAsync)가
+            // 이 시점에 아직 끝나지 않았을 수 있다. TransactionQueue는 이 메서드가 반환하는 Task가
+            // 완료돼야(=이 finally가 끝나야) POS 응답을 보내고 다음 거래를 큐에서 꺼낸다 — 여기서
+            // 기다리지 않으면 "직전 거래의 0x60 정리"와 "다음 거래의 0x2B 시작"이 리더기 포트에서
+            // 겹쳐 READER_ERR_BUSY가 나는 경합이 재현된다(실기 재현 확인됨). 정리가 필요 없던 정상
+            // 거래는 PendingCleanupTask가 null이라 지연이 전혀 없다.
+            if (scope.Gate.PendingCleanupTask is { } pendingCleanupTask)
+            {
+                await pendingCleanupTask.ConfigureAwait(false);
             }
         }
     }
@@ -821,8 +842,18 @@ internal sealed class PaymentOrchestrator
 
             scope.PendingParticipants = roundParticipants;
 
-            TimeSpan roundTimeout = ClampCommandTimeout(deadline.Remaining);
-            FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 라운드 {round}/{MaxCardReadRounds} 시작 — 참여 {roundParticipants.Count}대, 거래구분={transactionTypeCode}, 남은데드라인={roundTimeout.TotalSeconds:F1}s", code: null, txId);
+            // 2026-09-16 사용자 지적 — 이 라운드의 로컬 타임아웃을 deadline.Remaining으로 맞춰봐야
+            // "실제로 발동하는 순간은 항상 거래 전체 데드라인도 같이 만료되는 순간"이라 100% 중복이었다
+            // (deadline.Extend() 이후에도 다음 라운드는 그 연장된 시점의 남은 시간을 그대로 받으므로
+            // 이 관계가 항상 성립한다). 실측(2026-09-16 카드 미태그 테스트)에서 그 중복이 실제로
+            // FireInterruptCleanup과 이 라운드의 방어적 0x60가 12ms 차이로 경합해 리더기 DLL에
+            // COMMAND_NOT_ALLOWED(-1005)를 유발하는 것까지 확인했다 — 무해하지만 불필요한 트래픽이자
+            // 로그 혼선이었다. POS 응답 타이밍을 결정하는 유일한 권한은 항상 PaymentDeadline이었으므로
+            // (PaymentDeadline 클래스 요약 참고), 이 라운드 자체는 DLL 콜백 또는 상위
+            // Task.WhenAny(broadcastTask, interruptTask)의 interruptTask가 이길 때까지만 살아있으면
+            // 충분하다 — Timeout.InfiniteTimeSpan을 넘겨 이 라운드 자신의 로컬 타임아웃 발동을 없앤다.
+            TimeSpan roundTimeout = Timeout.InfiniteTimeSpan;
+            FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 라운드 {round}/{MaxCardReadRounds} 시작 — 참여 {roundParticipants.Count}대, 거래구분={transactionTypeCode}, 남은데드라인={deadline.Remaining.TotalSeconds:F1}s", code: null, txId);
 
             Task<CardReadBroadcastResult> broadcastTask = CardReadBroadcaster.SendAsync(roundParticipants, infoRequest, roundTimeout, txId);
             Task interruptTask = gate.Interrupted;
@@ -861,12 +892,14 @@ internal sealed class PaymentOrchestrator
                         if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
                         {
                             TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
-                            winner.SendInvalidationInit();
+                            // 2026-09-17 — 여기서 직접 무효화하지 않는다(TryClaim 실패 = 이미 다른
+                            // 사유가 scope.PendingParticipants 전체에 대해 정리를 예약함, 위 finally
+                            // 주석과 동일한 이유).
                             return CardReadRoundResult.Early(InterruptCode(reason));
                         }
 
                         FileLogger.Error(LogCategory.Payment, "[PaymentOrchestrator] 응답코드 00인데 CardData가 없음 — 방어적으로 실패 처리", code: null, txId);
-                        winner.SendInvalidationInit();
+                        await winner.SendInvalidationInitAsync(InvalidationTimeout).ConfigureAwait(false);
                         return CardReadRoundResult.Early(PosResultCodeMapper.ReaderNoCardDataDefensiveCode);
                     }
 
@@ -904,12 +937,11 @@ internal sealed class PaymentOrchestrator
                     if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
                     {
                         TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
-                        winner.SendInvalidationInit();
                         return CardReadRoundResult.Early(InterruptCode(reason));
                     }
 
                     FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 실패 — 응답코드={outcome.ResponseCode}", code: null, txId);
-                    winner.SendInvalidationInit();
+                    await winner.SendInvalidationInitAsync(InvalidationTimeout).ConfigureAwait(false);
                     return CardReadRoundResult.Early(PosResultCodeMapper.ToTelegramCode(outcome));
 
                 case ReaderCommandOutcomeKind.Timeout:
@@ -920,25 +952,43 @@ internal sealed class PaymentOrchestrator
                     if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
                     {
                         TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
-                        winner.SendInvalidationInit();
                         return CardReadRoundResult.Early(InterruptCode(reason));
                     }
 
                     FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] 리더기 명령 타임아웃(라운드 {round})", code: null, txId);
-                    winner.SendInvalidationInit();
+                    await winner.SendInvalidationInitAsync(InvalidationTimeout).ConfigureAwait(false);
                     return CardReadRoundResult.Early(PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.Timeout));
 
-                default: // DllCallFailure, CommunicationError
+                // 2026-09-16 사용자 지적(케이블 뽑기 실기 테스트로 발견) — DllCallFailure는
+                // SendCommandSafe 자체가 리더기에 명령을 보내지도 못한 경우다(포트 없음 등,
+                // ReaderCommandOutcomeKind.DllCallFailure 문서 참고). 무효화(0x60)할 "리더기가 응답
+                // 대기 중인 상태" 자체가 애초에 성립하지 않는데도 winner.SendInvalidationInit()을
+                // 부르면, 그 호출이 다시 SendCommandSafe를 타면서 이미 -1로 리셋된 readerId 때문에
+                // Reader_OpenPort를 한 번 더(불필요하게) 재시도한다 — 실측(포트 없음 케이스)에서
+                // Reader_OpenPort가 같은 실패로 2번 찍히는 것으로 확인됨. CommunicationError는
+                // 반대로 명령이 실제로 전달된 뒤 CALLBACK에서 통신 오류가 난 경우라(RawReaderCommandResult
+                // CommunicationError 생성 위치 참고) 리더기가 여전히 WAITING_RESPONSE일 수 있으므로
+                // 무효화가 여전히 유효하다 — 이 둘을 분리한다.
+                case ReaderCommandOutcomeKind.DllCallFailure:
+                    if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
+                    {
+                        return CardReadRoundResult.Early(InterruptCode(gate.ClaimedReason!.Value));
+                    }
+
+                    string dllCallFailureCode = PosResultCodeMapper.ToTelegramCode(outcome);
+                    FileLogger.Error(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 DLL 연동 실패(Kind={outcome.Kind}): {outcome.Detail}", dllCallFailureCode, txId);
+                    return CardReadRoundResult.Early(dllCallFailureCode);
+
+                default: // CommunicationError
                     if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
                     {
                         TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
-                        winner.SendInvalidationInit();
                         return CardReadRoundResult.Early(InterruptCode(reason));
                     }
 
                     string readerDllFailureCode = PosResultCodeMapper.ToTelegramCode(outcome);
                     FileLogger.Error(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 DLL 연동 실패(Kind={outcome.Kind}): {outcome.Detail}", readerDllFailureCode, txId);
-                    winner.SendInvalidationInit();
+                    await winner.SendInvalidationInitAsync(InvalidationTimeout).ConfigureAwait(false);
                     return CardReadRoundResult.Early(readerDllFailureCode);
             }
         }
@@ -946,14 +996,12 @@ internal sealed class PaymentOrchestrator
         if (!gate.TryClaim(TransactionOutcomeReason.FlowResult))
         {
             TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
-            foreach (IReaderEndpoint p in roundParticipants)
-                p.SendInvalidationInit();
             return CardReadRoundResult.Early(InterruptCode(reason));
         }
 
         FileLogger.Warn(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 재요청 상한({MaxCardReadRounds}) 초과", code: null, txId);
         foreach (IReaderEndpoint p in roundParticipants)
-            p.SendInvalidationInit();
+            await p.SendInvalidationInitAsync(InvalidationTimeout).ConfigureAwait(false);
         return CardReadRoundResult.Early(PosResultCodeMapper.ReaderRetryLimitExceededCode);
     }
 
@@ -986,25 +1034,35 @@ internal sealed class PaymentOrchestrator
                 return PosResponseTelegram.Relay(request.Schema, outcome.ResponseBody!);
 
             default: // CommunicationFailure
-                // 이 경로에서만 초기화한다. 다만 근거는 "리더기가 정리를 필요로 해서"가 아니라
-                // (위 Success 주석과 같은 이유로 리더기 상태는 여기서도 동일하다) PRD §4.10의 "실패 시
-                // Reader 초기화" 문구를 문자 그대로 지키고, fire-and-forget이라 비용이 없기 때문이다.
+                // 이 경로에서만 초기화한다. 근거는 "리더기가 정리를 필요로 해서"가 아니라(위 Success
+                // 주석과 같은 이유로 리더기 상태는 여기서도 동일하다) PRD §4.10의 "실패 시 Reader
+                // 초기화" 문구를 문자 그대로 지키기 위함이다. 2026-09-17 — 예전엔 "fire-and-forget이라
+                // 비용이 없다"는 이유로 결과를 기다리지 않았는데, 그 비용은 이 호출 지점이 아니라
+                // 다음 거래(리더기 정리가 덜 끝난 채로 카드 리딩을 시작)가 치른다는 게 실기로
+                // 확인돼(READER_ERR_BUSY) 응답까지 기다리는 버전으로 바꿨다.
                 string vanFailureCode = PosResultCodeMapper.ToTelegramCode(outcome.FailureKind!.Value);
                 FileLogger.Error(LogCategory.Payment, $"[PaymentOrchestrator] VAN DLL 통신 실패: {outcome.Detail}", vanFailureCode, txId);
-                cardReadWinner?.SendInvalidationInit();
+                if (cardReadWinner != null)
+                {
+                    await cardReadWinner.SendInvalidationInitAsync(InvalidationTimeout).ConfigureAwait(false);
+                }
+
                 return PosResponseTelegram.Failure(request, vanFailureCode);
         }
     }
 
     /// <summary>취소 알림 — <see cref="IPaymentNoticePresenter.Canceled"/>는 UI 스레드에서 발생한다.
-    /// 게이트 확정만 이 자리에서 동기로 하고, 실제 0x60 발사는 <see cref="FireInterruptCleanup"/>이
-    /// <c>Task.Run</c>으로 넘긴다.</summary>
+    /// 게이트 확정만 이 자리에서 동기로 하고, 실제 0x60 발사(및 응답 대기)는
+    /// <see cref="FireInterruptCleanupAsync"/>가 <c>Task.Run</c>으로 넘긴다 — 이 메서드(UI 스레드)
+    /// 자신은 그 완료를 기다리지 않는다. 그 완료를 실제로 기다리는 지점은
+    /// <c>TransactionOutcomeGate.PendingCleanupTask</c>를 소비하는 <c>RunCardTransactionAsync</c>의
+    /// <c>finally</c>다(2026-09-17 — 리더기 정리가 안 끝난 채로 다음 거래가 큐에서 꺼내지는 경합을
+    /// 막기 위해 신설).</summary>
     private void OnCanceled(TransactionScope scope)
     {
-        if (scope.Gate.TryClaim(TransactionOutcomeReason.UserCanceled))
+        if (scope.Gate.TryClaim(TransactionOutcomeReason.UserCanceled, () => FireInterruptCleanupAsync(TransactionOutcomeReason.UserCanceled, scope)))
         {
             FileLogger.Info(LogCategory.Payment, "[PaymentOrchestrator] 사용자 취소 통지 수신 — 거래 확정(UserCanceled)", code: null, scope.TransactionId);
-            FireInterruptCleanup(TransactionOutcomeReason.UserCanceled, scope);
         }
         else
         {
@@ -1020,27 +1078,38 @@ internal sealed class PaymentOrchestrator
         if (!actuallyExpired)
             return;
 
-        if (scope.Gate.TryClaim(TransactionOutcomeReason.Timeout))
+        if (scope.Gate.TryClaim(TransactionOutcomeReason.Timeout, () => FireInterruptCleanupAsync(TransactionOutcomeReason.Timeout, scope)))
         {
             FileLogger.Warn(LogCategory.Payment, "[PaymentOrchestrator] 거래 데드라인 만료 — 거래 확정(Timeout)", code: null, scope.TransactionId);
-            FireInterruptCleanup(TransactionOutcomeReason.Timeout, scope);
         }
     }
 
-    /// <summary>취소/Timeout 정리 경로를 하나로 통일한다 — 대기 중인 참여 리더기 전부에 0x60을
-    /// 백그라운드에서 발사한다.</summary>
-    private static void FireInterruptCleanup(TransactionOutcomeReason reason, TransactionScope scope)
+    /// <summary>
+    /// 취소/Timeout 정리 경로를 하나로 통일한다 — 대기 중인 참여 리더기 전부에 0x60을 보내고
+    /// **실제 0x70 응답(또는 타임아웃)까지** 기다린다(2026-09-17 — 예전엔 <c>SendInvalidationInit()</c>로
+    /// 쏘기만 하고 끝냈는데, 그 직후 다음 거래가 큐에서 곧바로 카드 리딩(0x2B)을 시작해 리더기가
+    /// 아직 0x60을 처리 중이라 <c>READER_ERR_BUSY</c>가 나는 것이 실기(902614 두 건을 거의 동시에
+    /// 보내는 시나리오)로 재현됐다).
+    ///
+    /// <b>이 메서드 자신은 이 작업의 완료를 기다리지 않는다</b> — <c>Task.Run</c>으로 시작만 하고
+    /// 그 <see cref="Task"/> 핸들을 즉시 반환한다(호출자인 <c>TransactionOutcomeGate.TryClaim</c>이
+    /// 이 반환값을 <c>PendingCleanupTask</c>에 저장). 실제로 이 완료를 기다리는 지점은
+    /// <c>RunCardTransactionAsync</c>의 <c>finally</c> 하나뿐이다 — 그래야 사용자 취소를 알린
+    /// UI 스레드나 데드라인 감시 루프 자신은 블로킹되지 않으면서도, 이 거래의 POS 응답이 실제로
+    /// 나가는 시점(=다음 거래가 큐에서 꺼내지는 시점)만큼은 이 정리가 끝난 뒤로 미뤄진다.
+    /// </summary>
+    private static Task FireInterruptCleanupAsync(TransactionOutcomeReason reason, TransactionScope scope)
     {
         IReadOnlyList<IReaderEndpoint> pending = scope.PendingParticipants;
-        FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] {reason} 확정 — 대기 중인 참여 리더기 {pending.Count}대에 초기화(0x60) 전송 예약(백그라운드)", code: null, scope.TransactionId);
+        FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] {reason} 확정 — 대기 중인 참여 리더기 {pending.Count}대에 초기화(0x60) 전송(응답 대기 포함, 백그라운드)", code: null, scope.TransactionId);
 
-        Task.Run(() =>
+        return Task.Run(async () =>
         {
             foreach (IReaderEndpoint endpoint in pending)
             {
                 try
                 {
-                    endpoint.SendInvalidationInit();
+                    await endpoint.SendInvalidationInitAsync(InvalidationTimeout).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -1058,9 +1127,6 @@ internal sealed class PaymentOrchestrator
         TransactionOutcomeReason.Timeout => PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode.Timeout),
         _ => throw new InvalidOperationException($"FlowResult은 인터럽트 코드를 만들지 않는다: {reason}"),
     };
-
-    private static TimeSpan ClampCommandTimeout(TimeSpan remaining) =>
-        remaining < MinimumCommandTimeout ? MinimumCommandTimeout : remaining;
 
     /// <summary>
     /// 로그 상관용 식별자. **SPEC `#9`(키오스크/요청기관 전문 관리 번호, AN12)를 쓴다** — SPEC이

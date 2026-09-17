@@ -223,6 +223,14 @@ namespace KFTCOneCAP.KioskSim.Preset
                         default: return string.Empty;
                     }
 
+                case TelegramSchemas.StatusInquiryTransactionType:
+                    switch (fieldNumber)
+                    {
+                        case 3: return "0200";
+                        case 4: return TelegramSchemas.StatusInquiryTransactionType;
+                        default: return string.Empty;
+                    }
+
                 default:
                     return string.Empty;
             }

@@ -141,4 +141,18 @@ internal sealed class FakeReaderEndpoint : IReaderEndpoint
 
         return 0;
     }
+
+    /// <summary>2026-09-17 신설 — <see cref="SendInvalidationInit"/>와 같은 카운터를 공유한다(검증
+    /// 하네스가 "0x60이 몇 번 나갔는가"를 확인하는 방식은 동기/비동기 버전을 구분할 이유가 없다).
+    /// 항상 즉시 성공으로 반환한다 — 이 페이크는 실제 DLL 콜백 왕복 지연을 재현할 필요가 없는
+    /// 시나리오(취소/타임아웃 시 0x60 발사 여부 확인)에만 쓰인다.</summary>
+    public Task<InitCommandOutcome> SendInvalidationInitAsync(TimeSpan timeout)
+    {
+        lock (_lock)
+        {
+            InvalidationCount++;
+        }
+
+        return Task.FromResult(InitCommandOutcome.Success("00"));
+    }
 }

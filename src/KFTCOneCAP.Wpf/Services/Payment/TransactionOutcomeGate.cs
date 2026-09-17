@@ -66,16 +66,51 @@ internal sealed class TransactionOutcomeGate
     /// 선점했으므로 항상 <c>false</c>를 반환한다(선착순). 호출자는 <c>true</c>를 받았을 때만 그 사유에
     /// 해당하는 후속 처리(리더기 정리, POS 응답 생성)를 수행해야 한다.
     /// </summary>
-    internal bool TryClaim(TransactionOutcomeReason reason)
+    internal bool TryClaim(TransactionOutcomeReason reason) => TryClaim(reason, startCleanup: null);
+
+    /// <summary>
+    /// 2026-09-17 사용자 지적으로 신설 — <paramref name="startCleanup"/>이 있으면, 확정에 성공한
+    /// 순간(<see cref="Interrupted"/>를 신호하기 <b>전에</b>) 그 콜백을 호출해 리더기 정리(0x60)
+    /// 작업을 시작하고 반환된 <see cref="Task"/>를 <see cref="PendingCleanupTask"/>에 저장한다.
+    ///
+    /// <b>순서가 중요하다</b>: 정리 시작 → <see cref="PendingCleanupTask"/> 저장 → <see cref="Interrupted"/>
+    /// 신호, 이 순서를 지키지 않으면(예: 신호를 먼저 하고 정리를 나중에 등록) <c>Interrupted</c>를
+    /// 기다리던 코드(카드 리딩 라운드 루프 등)가 깨어나 <see cref="PendingCleanupTask"/>를 아직
+    /// <c>null</c>인 상태로 읽어버리는 경합이 생긴다(2026-09-17 실기 재현 — 취소/Timeout 확정 직후
+    /// 다음 거래가 리더기 정리 완료 전에 카드 리딩을 시작해 BUSY가 남). <paramref name="startCleanup"/>
+    /// 자신은 그 작업을 <b>동기적으로 시작만</b> 하고(예: <see cref="Task.Run(Func{Task})"/>) 즉시
+    /// <see cref="Task"/> 핸들을 반환해야 한다 — 이 메서드가 그 작업의 완료까지 기다리면 안 된다
+    /// (호출자인 <c>OnCanceled</c>/<c>MonitorDeadlineAsync</c>가 블로킹되면 안 되기 때문).
+    /// </summary>
+    internal bool TryClaim(TransactionOutcomeReason reason, Func<Task>? startCleanup)
     {
         int desired = (int)reason + 1;
         bool claimed = Interlocked.CompareExchange(ref _claimedReasonPlusOne, desired, Unclaimed) == Unclaimed;
 
-        if (claimed && reason != TransactionOutcomeReason.FlowResult)
+        if (claimed)
         {
-            _interrupted.TrySetResult(true);
+            if (startCleanup != null)
+            {
+                PendingCleanupTask = startCleanup();
+            }
+
+            if (reason != TransactionOutcomeReason.FlowResult)
+            {
+                _interrupted.TrySetResult(true);
+            }
         }
 
         return claimed;
     }
+
+    /// <summary>
+    /// <see cref="TryClaim(TransactionOutcomeReason, Func{Task})"/>가 <paramref name="startCleanup"/>으로
+    /// 시작한 리더기 정리 작업. 확정에 <c>startCleanup</c>을 넘기지 않았거나(예: 정상 흐름 자체가
+    /// 실패 코드를 만드는 <see cref="TransactionOutcomeReason.FlowResult"/>) 아직 아무도 확정하지
+    /// 않았으면 <c>null</c>이다. <c>RunCardTransactionAsync</c>의 <c>finally</c>가 POS 응답을 실제로
+    /// 내보내기 전에(=이 메서드가 반환하는 <see cref="Task"/>를 소비하는 <c>_processor</c> Task가
+    /// 완료되기 전에) 이 값을 확인해 대기한다 — 정리가 안 끝난 채로 다음 거래가 큐에서 꺼내지는
+    /// 경합을 원천 차단한다(2026-09-17).
+    /// </summary>
+    internal Task? PendingCleanupTask { get; private set; }
 }

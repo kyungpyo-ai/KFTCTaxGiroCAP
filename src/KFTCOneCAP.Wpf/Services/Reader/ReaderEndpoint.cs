@@ -59,5 +59,7 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             _reader.SendCardReadCommandAsync(request, timeout);
 
         public int SendInvalidationInit() => _reader.SendInvalidationInit();
+
+        public Task<InitCommandOutcome> SendInvalidationInitAsync(TimeSpan timeout) => _reader.SendInitCommandAsync(timeout);
     }
 }
