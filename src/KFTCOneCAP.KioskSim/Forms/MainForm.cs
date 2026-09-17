@@ -361,6 +361,14 @@ namespace KFTCOneCAP.KioskSim.Forms
         {
             var headerLabel = new Label
             {
+                // 2026-09-17 사용자 지적(5차, 근본 원인) — Label.AutoSize 기본값이 true라서, 아래
+                // Height=54를 명시해도 실제로는 텍스트 내용에 맞춰 그보다 더 크게(또는 줄바꿈 방식에
+                // 따라 다르게) 스스로 재계산해 버린다. 그 결과 이 라벨이 자기 선언 높이보다 실제로
+                // 더 많은 공간을 차지하면서, 바로 아래 Dock=Fill인 scenarioScrollHost와 겹쳐 1번
+                // 시나리오 행 위쪽이 가려지는 게 진짜 원인이었다(스크롤 컨테이너를 세 가지 다른
+                // 방식으로 바꿔도 동일하게 재현된 이유 — 스크롤 로직과 무관한 문제였다). AutoSize를
+                // 명시적으로 꺼서 선언한 Height를 그대로 지키게 한다.
+                AutoSize = false,
                 Dock = DockStyle.Top,
                 Height = 54,
                 Padding = new Padding(8),
@@ -370,16 +378,38 @@ namespace KFTCOneCAP.KioskSim.Forms
                        "경로 OneCapClient는 재사용하지 않는다 — 완성된 프레임만 다루도록 설계돼 있어 여기 " +
                        "맞지 않는다).",
             };
+            // 2026-09-17 사용자 지적(2~5차) — Panel.AutoScroll 기반 시도를 네 가지 다른 조합
+            // (Dock=Top+AutoSize / 수동 Location+AutoSize / Dock=Fill+MinimumSize / 수동
+            // Location+명시적 Size)으로 바꿔봤지만 전부 동일하게 1번 행 위쪽이 잘렸다 — 심지어
+            // 창을 최대화해 콘텐츠가 표시 영역보다 작아지는 경우에도 재현됐다(스크롤 자체가 필요
+            // 없어야 하는 상황인데도 잘림). 원인이 WinForms의 AutoScroll 내부 계산 자체에 있는
+            // 것으로 보여, AutoScroll을 아예 쓰지 않고 VScrollBar를 직접 붙여 스크롤 위치를
+            // scenarioPanel.Top에 수동으로 대입하는 방식으로 바꾼다 — 애매한 자동 계산에 기대지
+            // 않는 가장 확실한 방법이다.
+            var scenarioScrollHost = new Panel { Dock = DockStyle.Fill };
+
+            // 2026-09-17 사용자 지적(6차, 근본 원인) — headerLabel(Dock=Top)을 scenarioScrollHost
+            // (Dock=Fill)보다 먼저 Controls에 추가했더니 1번 행이 계속 가려졌다. AutoSize=false로
+            // 바꿔도(5차) 소용없었던 이유가 이거였다 — WinForms Dock 레이아웃은 Controls 컬렉션에
+            // **나중에** 추가된 컨트롤을 먼저 도킹시킨다(z-order 최상단이 우선). Dock=Fill을
+            // 나중에 추가하면 Dock=Fill이 자신을 부모 전체로 채운 뒤에야 Dock=Top이 그 위에 다시
+            // 얹혀 잘리는 문제가 생긴다 — 그래서 Dock=Fill(scenarioScrollHost)을 먼저 추가하고
+            // Dock=Top(headerLabel)을 나중에 추가해야 Top이 진짜로 위쪽 공간을 먼저 차지한다.
+            _errorInjectionTab.Controls.Add(scenarioScrollHost);
             _errorInjectionTab.Controls.Add(headerLabel);
+
+            var scenarioVScroll = new VScrollBar { Dock = DockStyle.Right };
+            scenarioScrollHost.Controls.Add(scenarioVScroll);
 
             var scenarioPanel = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Location = new Point(0, 0),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 ColumnCount = 3,
                 RowCount = 10,
-                AutoScroll = true,
                 Padding = new Padding(8),
             };
+            scenarioScrollHost.Controls.Add(scenarioPanel);
             scenarioPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
             scenarioPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 480));
             scenarioPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -392,7 +422,7 @@ namespace KFTCOneCAP.KioskSim.Forms
                 () => ErrorInjectionClient.Scenario1_DeclaredLengthMismatch());
 
             AddErrorScenarioRow(scenarioPanel, 1, 2, "2. 알 수 없는 거래 구분 코드(#4)",
-                "501008 프레이밍은 정상이되 #4(거래 구분 코드)에 존재하지 않는 \"999999\"를 넣어 보낸다.\n" +
+                "501008 프레이밍은 정상이되 #4(거래 구분 코드)에 존재하지 않는 \"999900\"을 넣어 보낸다.\n" +
                 "기대: #7 응답 코드 = E41(알 수 없는 거래구분).",
                 () => ErrorInjectionClient.Scenario2_UnknownTransactionType());
 
@@ -439,7 +469,46 @@ namespace KFTCOneCAP.KioskSim.Forms
                 "이어서 같은 연결로 보낸 정상 501008 요청도 정상 처리된다(Phase 27 P27-8-f).",
                 () => ErrorInjectionClient.Scenario10_TooShortBodyMissingTransactionType());
 
-            _errorInjectionTab.Controls.Add(scenarioPanel);
+            // scenarioPanel의 실제 필요 높이 — 폭은 컬럼 정의(Absolute 220+480, 나머지는 Percent라
+            // 실제 렌더 폭은 부모 폭에 따라 달라지지만 최초 폭은 이 정도면 충분하다 — Anchor에 Right가
+            // 걸려 있어 창 크기가 바뀌면 그에 맞춰 늘어난다) 높이는 RowStyles(전부 Absolute) 합산 +
+            // 패딩으로 정확히 계산한다.
+            int totalRowsHeight = 0;
+            foreach (RowStyle rowStyle in scenarioPanel.RowStyles)
+                totalRowsHeight += (int)rowStyle.Height;
+            int requiredHeight = scenarioPanel.Padding.Top + scenarioPanel.Padding.Bottom + totalRowsHeight;
+            scenarioPanel.Size = new Size(1300, requiredHeight);
+
+            // VScrollBar 수동 배선 — scenarioPanel.Top에 음수값을 직접 대입해 스크롤한다. 뷰포트
+            // 높이(scenarioScrollHost.ClientSize.Height)는 창이 리사이즈될 때마다 바뀌므로, 스크롤
+            // 가능 범위(Maximum)도 그때마다 다시 계산한다.
+            void UpdateScrollRange()
+            {
+                int viewportHeight = scenarioScrollHost.ClientSize.Height;
+                int overflow = Math.Max(0, requiredHeight - viewportHeight);
+                scenarioVScroll.Minimum = 0;
+                scenarioVScroll.SmallChange = 30;
+                scenarioVScroll.LargeChange = Math.Max(1, viewportHeight);
+                // VScrollBar.Maximum은 "스크롤 가능한 마지막 값 + LargeChange - 1"이어야 실제로
+                // overflow까지 도달한다(WinForms ScrollBar의 잘 알려진 관례).
+                scenarioVScroll.Maximum = overflow + scenarioVScroll.LargeChange - 1;
+                scenarioVScroll.Enabled = overflow > 0;
+                if (scenarioVScroll.Value > overflow)
+                    scenarioVScroll.Value = overflow;
+                scenarioPanel.Top = -scenarioVScroll.Value;
+            }
+
+            scenarioVScroll.Scroll += (s, e) => scenarioPanel.Top = -e.NewValue;
+            scenarioScrollHost.Resize += (s, e) => UpdateScrollRange();
+            scenarioScrollHost.MouseWheel += (s, e) =>
+            {
+                int step = (e.Delta / 120) * scenarioVScroll.SmallChange;
+                int newValue = scenarioVScroll.Value - step;
+                newValue = Math.Max(scenarioVScroll.Minimum, Math.Min(scenarioVScroll.Maximum - scenarioVScroll.LargeChange + 1, newValue));
+                scenarioVScroll.Value = newValue;
+                scenarioPanel.Top = -newValue;
+            };
+            UpdateScrollRange();
         }
 
         /// <summary>오류 주입 탭 한 행(버튼 + 기대 결과 + 실제 결과 라벨)을 만들어 테이블에 추가한다.</summary>

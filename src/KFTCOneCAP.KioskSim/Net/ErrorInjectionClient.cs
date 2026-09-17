@@ -228,12 +228,21 @@ namespace KFTCOneCAP.KioskSim.Net
             }
         }
 
-        /// <summary>2) 알 수 없는 거래 구분 코드(#4="999999"). 나머지는 정상 501008 프레이밍(706바이트,
-        /// 길이 헤더도 정확) — #4만 존재하지 않는 코드로 바꾼다. 기대: E41.</summary>
+        /// <summary>2) 알 수 없는 거래 구분 코드(#4="999900"). 나머지는 정상 501008 프레이밍(706바이트,
+        /// 길이 헤더도 정확) — #4만 존재하지 않는 코드로 바꾼다. 기대: E41.
+        ///
+        /// 2026-09-17 사용자 지적으로 값 변경 — 원래 "999999"를 썼는데, Phase 26(999900 -> 999999
+        /// 임시 #4 코드값 변경)으로 999999가 "직전 거래 상태 조회"의 실제 등록된 코드가 돼버려서
+        /// 더 이상 "존재하지 않는 코드"가 아니게 됐다. 실기 재현으로 발견됨 — 서버가 999999를 정상
+        /// 인식해 스키마를 찾아버리고(TryResolve 성공), 본문은 501008 모양(706바이트)인데 찾아낸
+        /// 스키마는 999999(70바이트)라 길이가 안 맞아 E40이 먼저 나왔다(E41이 아니라). 서버 로직
+        /// 자체는 정상(E41 우선 판정 후 E40)이었고, 이 테스트가 낡은 전제를 쓰고 있었을 뿐이다.
+        /// "999900"은 999999로 바뀌기 전까지 이 자리에서 쓰이던 값이라 지금은 다시 비어 있다
+        /// (PosSchemaRegistry에 등록된 코드는 501008/800000/902614/999999 4개뿐).</summary>
         public static string Scenario2_UnknownTransactionType()
         {
             var buffer = new TelegramBuffer(TelegramSchemas.Notice501008);
-            buffer.Write(4, "999999");
+            buffer.Write(4, "999900");
             byte[] frame = TelegramCodec.Encode(buffer.ToBytes());
 
             var stopwatch = Stopwatch.StartNew();

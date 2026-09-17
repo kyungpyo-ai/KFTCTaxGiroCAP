@@ -103,6 +103,19 @@ internal static class FaultAlertJudge
                     code,
                     transactionId);
             }
+            else
+            {
+                // 2026-09-17 사용자 지적 — 임계값에 아직 못 미치면 ALERT가 안 뜨는데, 그렇다고 아무
+                // 흔적도 없으면 카운터가 실제로 집계되고 있는지 로그만으로 확인할 수 없다. 개별
+                // 발생 자체가 WARN 등급(§1.5 — "이 건만 실패 처리했다")이므로 진행 카운트도 같은
+                // 등급으로 남긴다. 이미 이번 버킷에서 알림이 뜬 뒤(count > threshold)에도 계속
+                // 남겨 발생이 멈추지 않았음을 알 수 있게 한다.
+                FileLogger.Warn(
+                    alertCategory,
+                    $"임계값 집계 중(1시간 {count.ToString(CultureInfo.InvariantCulture)}건, 임계값 {decision.Threshold.ToString(CultureInfo.InvariantCulture)}건)",
+                    code,
+                    transactionId);
+            }
         }
         catch
         {

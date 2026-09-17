@@ -266,9 +266,14 @@ internal sealed class PosSocketServer
                         // P27-8-f(fault_alert_catalog.md §2.3) — 침묵하지 않고 E41과 같은 메커니즘으로
                         // 최소 공통부 응답을 만들어 회신한 뒤 연결을 닫는다. #4를 읽을 수단이 아예
                         // 없으므로 placeholder "000000"을 싣는다(E42와 동일 근거, 아래 참고).
+                        // 2026-09-17 사용자 지적 — 에러 응답 로그에 원문이 안 남아 어떤 요청이 왜
+                        // 잘못됐는지 알 수 없었다. 프레이밍 자체가 깨진 경우라 완성된 "프레임"이라는
+                        // 개념이 없으므로, 이번 Read()로 실제 수신한 바이트(buffer[0..read))를 그대로
+                        // 남긴다(마스킹 없음 — 사용자 확정, 어차피 형식이 깨져 SPEC 필드 POSITION을
+                        // 신뢰할 수 없다).
                         FileLogger.Warn(
                             LogCategory.Pos,
-                            $"[PosSocketServer] {remote} 전문 형식 오류 — 응답 회신 후 연결 종료: {ex.Message}",
+                            $"[PosSocketServer] {remote} 전문 형식 오류 — 응답 회신 후 연결 종료: {ex.Message}. 원문={PosMessageEncoding.Value.GetString(buffer, 0, read)}",
                             "E43", transactionId: null);
                         Task.Run(() =>
                         {
@@ -351,9 +356,12 @@ internal sealed class PosSocketServer
             // "000000"을 쓴다 — 이 코드베이스가 이미 "N형 필드 값이 없으면 0으로 채운다"는 관례를
             // 갖고 있다(PosInquiryResponseTelegram.cs, PRD.md §3.4.5)는 근거로 2026-09-14 사용자
             // 확정. POS가 숫자 파싱에 실패하지 않는 값이다.
+            // 2026-09-17 사용자 지적 — 원문 없이는 무엇이 잘못 왔는지 알 수 없다. 이 프레임(frame)은
+            // 이미 길이 헤더까지는 정상적으로 프레이밍된 본문이므로 그대로 남긴다(마스킹 없음 — 사용자
+            // 확정, #4조차 못 읽을 만큼 짧아 SPEC 필드 POSITION을 신뢰할 수 없다).
             FileLogger.Warn(
                 LogCategory.Pos,
-                $"[PosSocketServer] {remote} 요청 파싱 오류 — 응답 회신(이 프레임만 실패, 연결 유지): {ex.Message}",
+                $"[PosSocketServer] {remote} 요청 파싱 오류 — 응답 회신(이 프레임만 실패, 연결 유지): {ex.Message}. 원문={PosMessageEncoding.Value.GetString(frame)}",
                 "E42", transactionId: null);
             Task.Run(() =>
             {
@@ -373,7 +381,12 @@ internal sealed class PosSocketServer
             // 개선권장 B(P22 리뷰) — 이 두 응답은 SendResponse를 거치지 않아 "응답 송신" 구조화 로그가
             // 없었다. 여기서 코드 슬롯을 채운 로그를 한 줄 남긴 뒤 WriteFrame으로 보낸다(응답 관리번호는
             // 파싱 자체가 실패한 경우가 대부분이라 알 수 없다 — txId는 null).
-            FileLogger.Warn(LogCategory.Pos, $"[PosSocketServer] {remote} 전문 오류 — 큐를 거치지 않고 즉시 응답", outcome.ErrorCode, transactionId: null);
+            // 2026-09-17 사용자 지적 — E40(길이 불일치)/E41(알 수 없는 거래구분) 둘 다 원문 없이는
+            // 어느 필드가 왜 틀렸는지 알 수 없다. frame은 이미 길이 헤더까지 정상 프레이밍된 본문이라
+            // 그대로 남긴다(마스킹 없음 — 사용자 확정. E40은 길이 자체가 스키마와 달라 POSITION을
+            // 신뢰할 수 없고, E41은 거래 구분 코드가 무엇인지조차 몰라 어느 스키마의 마스킹 규칙을
+            // 적용해야 할지 알 수 없다).
+            FileLogger.Warn(LogCategory.Pos, $"[PosSocketServer] {remote} 전문 오류 — 큐를 거치지 않고 즉시 응답. 원문={PosMessageEncoding.Value.GetString(frame)}", outcome.ErrorCode, transactionId: null);
             string? e40OrE41Code = outcome.ErrorCode;
             Task.Run(() =>
             {
