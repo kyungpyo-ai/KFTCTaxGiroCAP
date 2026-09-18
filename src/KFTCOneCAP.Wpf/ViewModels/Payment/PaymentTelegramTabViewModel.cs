@@ -292,11 +292,12 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
         }
     }
 
-    /// <summary>응답 패널 = kiosk가 없는 필드 중 원캡 담당은 제외(800000 #14 예외 포함) —
-    /// <see cref="_responseFieldNumbers"/> 주석 참고. #3/#6/#8은 kiosk 담당이라 이미 요청 패널에
-    /// 있으므로 여기 다시 나타나지 않는다 — VAN 스텁이 그 값을 덮어써도 이 화면은 더 이상 그 변화를
-    /// 나란히 보여주지 않는다(2026-09-18 단순화). 실질적으로 <c>isStubOverwritten</c>은 이제 `#7`에만
-    /// 해당한다.</summary>
+    /// <summary>응답 패널 = kiosk 외 주체가 하나라도 있는 필드 중 원캡 담당은 제외(800000 #14 예외
+    /// 포함) — <see cref="_responseFieldNumbers"/> 주석 참고. kiosk와 다른 주체가 같이 체크된 필드(예:
+    /// #3/#6/#8)는 요청 패널에도 있지만 여기 응답 패널에도 나타난다 — 그 자리에 다른 주체가 채워 돌려준
+    /// 값이 kiosk가 보낸 값과 다르기 때문이다(클래스 필드 주석 참고). VAN 스텁이 실제로 덮어쓰는 4개
+    /// 필드(#3/#6/#7/#8)를 시각적으로 구분하던 것은 2026-09-18 사용자 지시로 없앴다 — 실 VAN이 붙으면
+    /// 의미 없어질 표시라 지금부터 강조하지 않는다.</summary>
     private void RebuildResponseRows(PosTelegram responseTelegram)
     {
         ResponseRows.Clear();
@@ -305,15 +306,11 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
             if (!_responseFieldNumbers.Contains(field.Number))
                 continue;
 
-            string value = responseTelegram.Read(field.Number);
-            bool isStubOverwritten = field.Number is 3 or 6 or 7 or 8;
-
             ResponseRows.Add(new PosFieldRowViewModel(
                 field,
-                value,
+                responseTelegram.Read(field.Number),
                 isReadOnly: true,
-                isCardReadingField: _ownedByOneCap.Contains(field.Number),
-                isStubOverwritten: isStubOverwritten));
+                isCardReadingField: _ownedByOneCap.Contains(field.Number)));
         }
     }
 }

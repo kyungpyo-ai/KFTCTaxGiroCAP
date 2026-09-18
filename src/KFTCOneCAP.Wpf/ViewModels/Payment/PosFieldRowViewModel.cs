@@ -8,8 +8,8 @@ namespace KFTCOneCAP.Wpf.ViewModels.Payment;
 /// Phase 29 P29-6(docs/payment_relay/development_plan.md "P29-6", PRD.md §12.5) — 결제 화면 필드 표
 /// (요청/응답 공용) 한 행. 요청 표에서는 <see cref="Value"/>가 편집 가능하고(카드리딩 필드는 제외), 응답
 /// 표에서는 항상 읽기전용이다. 두 표가 같은 행 타입을 공유하되 <see cref="IsReadOnly"/>/
-/// <see cref="IsCardReadingField"/>/<see cref="IsStubOverwritten"/> 세 플래그만으로 표시를 구분한다
-/// (실제 시각 표현은 View의 DataGridCell <c>CellStyle</c> 트리거가 담당 — 이 클래스는 WPF 타입을 모른다).
+/// <see cref="IsCardReadingField"/> 두 플래그만으로 표시를 구분한다(실제 시각 표현은 View의 DataTrigger가
+/// 담당 — 이 클래스는 WPF 타입을 모른다).
 /// </summary>
 public sealed partial class PosFieldRowViewModel : ObservableObject
 {
@@ -20,7 +20,6 @@ public sealed partial class PosFieldRowViewModel : ObservableObject
         string initialValue,
         bool isReadOnly,
         bool isCardReadingField,
-        bool isStubOverwritten = false,
         Action<PosFieldRowViewModel>? onValueChanged = null)
     {
         Number = field.Number;
@@ -29,7 +28,6 @@ public sealed partial class PosFieldRowViewModel : ObservableObject
         Length = field.Length;
         IsReadOnly = isReadOnly;
         IsCardReadingField = isCardReadingField;
-        IsStubOverwritten = isStubOverwritten;
         _onValueChanged = onValueChanged;
         value = initialValue;
     }
@@ -61,11 +59,6 @@ public sealed partial class PosFieldRowViewModel : ObservableObject
     /// 필드가 아예 나타나지 않으므로(kiosk 담당이 아니라서 응답 표로 이동) 요청 표에서는 이 플래그가
     /// 항상 false로 전달된다.</summary>
     public bool IsCardReadingField { get; }
-
-    /// <summary>응답 표 전용 — VAN 스텁(<c>StubVanRelayService.BuildFakeSuccess</c>)이나 자체 실패 응답
-    /// (<c>PosResponseTelegram.Failure</c>)이 실제로 덮어쓰는 4개 필드(#3/#6/#7/#8)인지(PRD §12.5). 이
-    /// 4개를 뺀 나머지 응답 값은 우리가 보낸 요청 임의값의 에코일 뿐이다.</summary>
-    public bool IsStubOverwritten { get; }
 
     [ObservableProperty]
     private string value = string.Empty;

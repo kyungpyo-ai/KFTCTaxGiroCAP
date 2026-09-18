@@ -120,8 +120,9 @@
         </DataTemplate>
 
         <!-- 응답 행 1개(필드 1개) — 참고 이미지의 "거래 일시  260909110325" 행과 같은 구성(레이블 회색
-             왼쪽, 값 굵게 오른쪽 + 얇은 구분선). IsCardReadingField(원캡 카드리딩 담당)는 연한 파랑,
-             IsStubOverwritten(VAN 스텁이 실제로 덮어쓴 #3/#6/#7/#8)은 연한 초록으로 구분한다. -->
+             왼쪽, 값 굵게 오른쪽 + 얇은 구분선). IsCardReadingField(원캡 카드리딩 담당)는 연한 파랑으로
+             구분한다. VAN 스텁 경고 배너·스텁 전용 강조(IsStubOverwritten)는 2026-09-18 사용자 지시로
+             제거했다 — 실 VAN이 붙으면 어차피 의미 없어질 스텁 전용 표시라, 굳이 지금 강조하지 않는다. -->
         <DataTemplate x:Key="ResponseFieldRowTemplate" DataType="{x:Type payment:PosFieldRowViewModel}">
             <Border Padding="4,7" ToolTip="{Binding TypeAndLengthTooltip}">
                 <Border.Style>
@@ -130,9 +131,6 @@
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsCardReadingField}" Value="True">
                                 <Setter Property="Background" Value="#E8F3FF"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding IsStubOverwritten}" Value="True">
-                                <Setter Property="Background" Value="{StaticResource UpdateHoverBgBrush}"/>
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
@@ -193,7 +191,7 @@
                     <TextBlock DockPanel.Dock="Top" Text="요청 필드 — kiosk가 채워 보내는 값(값 입력)"
                                FontWeight="Bold" FontSize="13" Margin="0,0,0,10" Foreground="{StaticResource CardTitleTextBrush}"/>
 
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,10,0">
                         <ItemsControl ItemsSource="{Binding RequestRows}" ItemTemplate="{StaticResource RequestFieldCardTemplate}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -247,15 +245,6 @@
                             </Border>
                         </Grid>
 
-                        <!-- PRD §12.5 — VAN 스텁 경고는 조건 없이 항상 고정 표시(2026-09-18 확정). -->
-                        <Border DockPanel.Dock="Top" Background="{StaticResource ResultErrorBgBrush}" CornerRadius="8" Padding="10,8" Margin="0,0,0,8">
-                            <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource ResultErrorTextBrush}">
-                                <Run FontWeight="Bold" Text="VAN 스텁 — 이 응답은 요청의 에코입니다."/>
-                                <LineBreak/>
-                                <Run Text="실제로 덮어쓰는 필드는 #3/#6/#7/#8(초록 행)뿐이고, 그 외 값은 우리가 보낸 요청 임의값이 그대로 돌아온 것입니다."/>
-                            </TextBlock>
-                        </Border>
-
                         <TextBlock DockPanel.Dock="Top" Text="파란 행 = 원캡이 카드리딩으로 채운 필드(800000의 BIN 조회 결과)"
                                    Visibility="{Binding HasResponse, Converter={StaticResource BoolToVisibilityConverter}}"
                                    TextWrapping="Wrap" FontSize="10" Foreground="{StaticResource SubTextBrush}" Margin="0,0,0,8"/>
@@ -265,7 +254,7 @@
                                        Visibility="{Binding HasResponse, Converter={StaticResource InverseBoolToVisibilityConverter}}"
                                        Foreground="{StaticResource TblEmptyTextBrush}" TextWrapping="Wrap" TextAlignment="Center"
                                        HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,24,0,0"/>
-                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,10,0"
                                           Visibility="{Binding HasResponse, Converter={StaticResource BoolToVisibilityConverter}}">
                                 <ItemsControl ItemsSource="{Binding ResponseRows}" ItemTemplate="{StaticResource ResponseFieldRowTemplate}"/>
                             </ScrollViewer>
