@@ -8,11 +8,12 @@ namespace KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
 /// (SPEC에 총 길이 행이 없어 #54의 POSITION+길이로부터 계산한 값 — <see cref="PosTelegramSchema"/>의
 /// 자체 검증이 이 값을 확인해 준다).
 ///
-/// <b>원캡 담당 필드는 7개</b>: #43/#44/#45/#46/#48/#50/#53 (docs/payment_relay/development_plan.md
-/// P17-2, 2026-08-26 `pos-onecap-spec-expert` 재확인). #51(암호화된 비밀번호 정보)은 SPEC 표 원문에는
-/// kiosk로 표시돼 있으나(p.14), p.17 설명절이 #44~46과 같은 그룹("보안리더기에서 생성")으로 묶어 설명하고
-/// 있어 표와 설명절이 상충한다 — 사용자가 "설계서 오류, 원캡이 맞다"고 확정(2026-08-26)했으므로 이 스키마는
-/// <see cref="PosFieldOwner.OneCap"/>으로 등록한다(SPEC 원문의 표 자체는 kiosk임을 이 주석에 남긴다).
+/// <b>원캡 담당 필드는 8개</b>: #43/#44/#45/#46/#48/#50/#51/#53 (docs/payment_relay/development_plan.md
+/// P17-2, 2026-09-01 `pos-onecap-spec-expert` 재확인 — 최초 정리 때 7개로 잘못 캐시됐던 것을 바로잡음).
+/// #51(암호화된 비밀번호 정보)은 SPEC 표 원문에는 kiosk로 표시돼 있으나(p.14), p.17 설명절이 #44~46과
+/// 같은 그룹("보안리더기에서 생성")으로 묶어 설명하고 있어 표와 설명절이 상충한다 — 사용자가 "설계서
+/// 오류, 원캡이 맞다"고 확정(2026-08-26)했으므로 이 스키마는 <see cref="PosFieldOwner.OneCap"/>으로
+/// 등록한다(SPEC 원문의 표 자체는 kiosk임을 이 주석에 남긴다).
 /// 실제 값 채움은 Phase 17에서는 space 스텁이고, Phase 18(PIN 입력)에서 실채움된다.
 /// </summary>
 internal static class CardApprovalSchema

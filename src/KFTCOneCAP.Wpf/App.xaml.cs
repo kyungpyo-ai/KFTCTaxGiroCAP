@@ -397,6 +397,15 @@ public partial class App : Application
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
             System.Threading.Tasks.Task.Run(MemoryClearTestScenarios.RunAll);
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--random-value-generator-test")
+        {
+            // 개발/회귀 검증용(docs/payment_relay/development_plan.md P29-4 완료 조건, 최종 산출물
+            // 아님): PosRandomValueGenerator가 501008/800000/902614 실제 스키마와 합성 홀수 길이 AHN
+            // 경계 케이스에서 예외 없이 통과하는지 확인한다. 소켓·리더기 불필요, 순수 로직 테스트라
+            // SecureClearSelfTest와 같은 성격. UI는 홈 화면을 그대로 띄운다.
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+            System.Threading.Tasks.Task.Run(PosRandomValueGeneratorSelfTest.RunAll);
+        }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--log-file-reader-test")
         {
             // 개발/회귀 검증용(docs/operations/development_plan.md P27-4 완료 조건, 최종 산출물
