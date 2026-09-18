@@ -127,8 +127,8 @@
              구분한다. VAN 스텁 경고 배너·스텁 전용 강조(IsStubOverwritten)는 2026-09-18 사용자 지시로
              제거했다 — 실 VAN이 붙으면 어차피 의미 없어질 스텁 전용 표시라, 굳이 지금 강조하지 않는다. -->
         <DataTemplate x:Key="ResponseFieldRowTemplate" DataType="{x:Type payment:PosFieldRowViewModel}">
-            <!-- 2026-09-18 사용자 지시 — 행 간격을 예전처럼 좁게(세로 Padding 7→4). -->
-            <Border Padding="4,4" ToolTip="{Binding TypeAndLengthTooltip}">
+            <!-- 세로 Padding 7→4→2로 점점 좁혔다(2026-09-18, 사용자가 "여전히 넓다"고 재지적). -->
+            <Border Padding="4,2" ToolTip="{Binding TypeAndLengthTooltip}">
                 <Border.Style>
                     <Style TargetType="Border">
                         <Setter Property="Background" Value="Transparent"/>
@@ -140,7 +140,7 @@
                     </Style>
                 </Border.Style>
                 <DockPanel>
-                    <Border DockPanel.Dock="Bottom" Height="1" Background="{StaticResource FooterDividerBrush}" Margin="0,7,0,-7"/>
+                    <Border DockPanel.Dock="Bottom" Height="1" Background="{StaticResource FooterDividerBrush}" Margin="0,2,0,-2"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -245,19 +245,21 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="20"/>
-                    <!-- 440으로 넓혔다가 사용자가 "이전 버전이 낫다"고 해서 380으로 원복(2026-09-18). -->
-                    <ColumnDefinition Width="380"/>
+                    <!-- 사용자가 다시 확대 요청(2026-09-18, 10라운드) — 380→440. -->
+                    <ColumnDefinition Width="440"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- ===================== 좌측: 탭 + 요청(편집 가능) ===================== -->
                 <DockPanel Grid.Column="0">
-                    <!-- 2026-09-18 8라운드 정정(사용자가 손그림으로 재지적) — 탭을 고정폭으로 줄였더니
-                         이번엔 반대로 요청 필드 영역(3열로 넓어진 뒤)보다 짧아져 버렸다. 탭 길이를
-                         손으로 맞추려 하지 말고, 탭 줄이 다시 Grid.Column="0" 전체 폭(요청 필드 영역과
-                         동일한 폭)을 채우도록 되돌린다 — UniformGrid로 탭 3개를 그 폭 안에서 균등폭으로
-                         나누면 필드 카드가 몇 열이 되든 탭 줄과 자동으로 폭이 맞는다(하드코딩된 픽셀
-                         값끼리 맞추는 것보다 이 방식이 안정적이다). -->
-                    <Border DockPanel.Dock="Top" Background="#F1F3F5" CornerRadius="10" Padding="4">
+                    <!-- 2026-09-18 10라운드(사용자가 손그림으로 재지적) — "Grid.Column 전체 폭에 맞춘다"는
+                         6/9라운드의 접근은 요청 필드가 실제로 몇 열을 쓰는지와 무관하게 탭을 항상 컬럼
+                         전체 폭(응답 박스 바로 앞까지)으로 늘려버려, 필드가 3열(카드 160px×3+마진)만
+                         쓰고 남는 여백까지 탭이 채우는 문제가 있었다. 탭 폭을 필드 3열의 실제 콘텐츠
+                         폭(카드 174px×3=522)에 맞춰 고정값으로 준다 — 카드 폭이 바뀌면 이 값도 같이
+                         바꿔야 한다(자동 동기화 아님, 두 값이 이 파일 안에 나란히 있으니 유지보수 시
+                         같이 확인할 것). -->
+                    <Border DockPanel.Dock="Top" Background="#F1F3F5" CornerRadius="10" Padding="4"
+                            Width="522" HorizontalAlignment="Left">
                         <TabControl x:Name="TelegramTabControl" ItemsSource="{Binding Tabs}" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}"
                                     Background="Transparent" BorderThickness="0" Padding="0"
                                     ItemContainerStyle="{StaticResource PaymentTabItemStyle}">
