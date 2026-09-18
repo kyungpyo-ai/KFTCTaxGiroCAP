@@ -16,10 +16,12 @@ namespace KFTCOneCAP.Wpf.Services.Pos;
 /// (<see cref="PosMessageFramer.BuildFrame"/>/<c>Append</c>)을 그대로 재사용한다 — 새로 설계하지 않는다.
 ///
 /// <b>연결 1개당 인스턴스 1개</b>다(<see cref="PosMessageFramer"/>가 그렇듯 내부에 누적 버퍼 상태를
-/// 갖는다). <see cref="SendAsync"/>가 타임아웃되면 이 인스턴스는 더 쓸 수 없다 — 내부적으로 소켓을 강제
-/// 닫아 대기 중이던 읽기를 확실히 끝낸다(.NET Framework의 <c>NetworkStream.ReadAsync</c>는 취소 토큰만
-/// 으로는 실제 I/O를 멈추지 못하는 경우가 있다). 호출자는 새 <see cref="PosClient"/>를 만들어 다시
-/// 연결해야 한다.
+/// 갖는다). <see cref="SendAsync"/>가 <b>어떤 이유로든(타임아웃, 서버의 무응답 연결 종료 등) 예외를
+/// 던지면</b> 이 인스턴스는 더 쓸 수 없다 — 실패 경로 전체를 감싼 <c>catch</c>가 예외 종류와 무관하게
+/// 소켓을 강제로 닫는다(체크포인트 1 검증 L-1, 2026-09-18 — 처음엔 타임아웃 경로만 스스로 정리하고
+/// 무응답 종료 경로는 호출자의 <c>using</c>에 기대는 비일관성이 있었다). 타임아웃 시 소켓을 닫는 이유는
+/// .NET Framework의 <c>NetworkStream.ReadAsync</c>가 취소 토큰만으로는 실제 I/O를 멈추지 못하는 경우가
+/// 있어서다. 호출자는 실패 후 새 <see cref="PosClient"/>를 만들어 다시 연결해야 한다.
 /// </summary>
 public sealed class PosClient : IDisposable
 {
@@ -86,29 +88,41 @@ public sealed class PosClient : IDisposable
         if (_stream is null)
             throw new InvalidOperationException($"{nameof(ConnectAsync)}를 먼저 호출해야 함");
 
-        byte[] frame = PosMessageFramer.BuildFrame(bodyBytes);
-        await _stream.WriteAsync(frame, 0, frame.Length, cancellationToken).ConfigureAwait(false);
-
-        Task<byte[]> readTask = ReadUntilFrameCompleteAsync(cancellationToken);
-        Task delayTask = Task.Delay(responseTimeout, cancellationToken);
-
-        Task first = await Task.WhenAny(readTask, delayTask).ConfigureAwait(false);
-        if (first == delayTask)
+        try
         {
-            // 대기 중이던 읽기를 확실히 끝내려고 소켓을 강제로 닫는다(클래스 주석 참고). readTask가
-            // 그 뒤 예외로 완료돼도 아무도 await하지 않은 채 방치되지 않도록(unobserved task exception)
-            // 여기서 직접 소비한다.
-            Dispose();
-            _ = readTask.ContinueWith(
-                t => { _ = t.Exception; },
-                CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-                TaskScheduler.Default);
+            byte[] frame = PosMessageFramer.BuildFrame(bodyBytes);
+            await _stream.WriteAsync(frame, 0, frame.Length, cancellationToken).ConfigureAwait(false);
 
-            throw new TimeoutException($"응답을 {responseTimeout.TotalSeconds:0}초 안에 받지 못함(연결을 버림 — 새 {nameof(PosClient)}로 재시도할 것)");
+            Task<byte[]> readTask = ReadUntilFrameCompleteAsync(cancellationToken);
+            Task delayTask = Task.Delay(responseTimeout, cancellationToken);
+
+            Task first = await Task.WhenAny(readTask, delayTask).ConfigureAwait(false);
+            if (first == delayTask)
+            {
+                // 대기 중이던 읽기를 확실히 끝내려고 소켓을 강제로 닫는다(클래스 주석 참고). readTask가
+                // 그 뒤 예외로 완료돼도 아무도 await하지 않은 채 방치되지 않도록(unobserved task exception)
+                // 여기서 직접 소비한다. 실제 Dispose()는 아래 catch(finally 아님, 클래스 주석 참고)가
+                // 담당 — 이 타임아웃 예외도 그 경로를 그대로 타게 한다.
+                _ = readTask.ContinueWith(
+                    t => { _ = t.Exception; },
+                    CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+
+                throw new TimeoutException($"응답을 {responseTimeout.TotalSeconds:0}초 안에 받지 못함(연결을 버림 — 새 {nameof(PosClient)}로 재시도할 것)");
+            }
+
+            return await readTask.ConfigureAwait(false);
         }
-
-        return await readTask.ConfigureAwait(false);
+        catch
+        {
+            // 체크포인트 1 검증(L-1, 2026-09-18) — 실패 경로마다 제각각 정리하지 않고, SendAsync가
+            // 던지는 모든 예외(타임아웃/IOException/그 외)에서 공통으로 소켓을 닫는다. 클래스 계약
+            // ("실패 후 이 인스턴스는 항상 폐기 대상")을 코드로 강제해, 호출자가 using을 빠뜨려도
+            // 핸들이 살아남지 않게 한다.
+            Dispose();
+            throw;
+        }
     }
 
     private async Task<byte[]> ReadUntilFrameCompleteAsync(CancellationToken cancellationToken)

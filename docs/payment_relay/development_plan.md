@@ -7959,9 +7959,33 @@ UI 스레드 블로킹 확인은 이 Task 단계에서 UI가 아직 없어(P29-6
   기반으로 계산해 먼저 끊지 않는가, UI 스레드를 막지 않는가
 - 서버가 응답 없이 연결을 닫는 경로에서 클라이언트가 예외로 죽지 않는가
 
-### 검증 결과
+### 검증 결과 (2026-09-18, `checkpoint-reviewer` 독립 세션)
 
-*(P29-4·P29-5 구현 후 채운다.)*
+`git show f7d3ea1`/`git show d9fa2d4` diff 직접 확인 + `dotnet build` 직접 실행(경고 0/오류 0, 잠긴 산출물
+경로 문제로 `-p:BaseOutputPath` 대체 경로 사용) + `--random-value-generator-test`/
+`--pos-client-resilience-test`/`--pos-client-test` 3종을 직접 재실행해 로그로 결과 확인(구현자가 적어둔
+로그 발췌를 읽는 게 아니라 새로 실행).
+
+- 생성기 정확성: `FieldsOwnedByOneCap()` 기반 skip 정상, `CardApprovalSchema`의 8개 필드(#43/44/45/46/
+  48/50/51/53)·`CardInfoInquirySchema`의 `#14`가 실제로 `OneCap`으로 등록돼 있음을 직접 확인. `FillWithHangul`
+  경계 로직(홀수 예산은 항상 ASCII로 마감)도 코드 추적 + 100회 실측 재확인 — 초과 불가능.
+- `PosClient.SendAsync` 타임아웃 경쟁조건: `readTask`를 `ContinueWith(OnlyOnFaulted)`로 명시적으로 소비해
+  unobserved task exception 없음. `Dispose()`와 동시 진행 중인 `ReadAsync`가 충돌하는 것은 .NET Framework에서
+  흔히 쓰는 안전한 취소 패턴.
+- 회귀: Scenario9 추가가 기존 1~8 시나리오(특히 Scenario7 유휴 종료, Scenario8 단문 처리)에 영향 없음,
+  전체 실행 ERROR 0건.
+
+**L-1(경미) 1건 — 수정 완료**: 타임아웃 경로만 내부적으로 `Dispose()`를 강제하고, 서버 무응답 종료
+(`IOException`) 경로는 호출자의 `using`에 기대는 비일관성. 클래스 계약("실패 후 인스턴스는 항상 폐기
+대상")을 코드가 두 경로에서 다르게 보장하고 있었다 — `SendAsync` 본문 전체를 `try/catch`로 감싸 **모든
+실패 경로에서 공통으로 `Dispose()` 후 재throw**하도록 통일했다(클래스 XML 주석도 함께 갱신). 재빌드
+경고 0/오류 0 확인.
+
+**판정: 통과.** H/M 결함 0건. P29-6으로 진행한다.
+
+리뷰 세션이 남긴 실행 환경 메모: 리뷰 중 새로 띄운 진단 하네스 프로세스 3개(`--random-value-generator-test`/
+`--pos-client-resilience-test`/`--pos-client-test`)가 관리자 권한이라 리뷰 세션 자신도 종료하지 못했다 —
+기존에 떠 있던 인스턴스 1개(PID 43764)와 함께 **총 4개 프로세스가 사용자 정리 대기 상태**로 남았다.
 
 ## P29-6. 결제 화면 View/ViewModel (MVVM, PRD §12.5)
 
