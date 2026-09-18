@@ -25,7 +25,11 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 ///   <item>카테고리: 폭 8(<see cref="LogCategoryText.ToText"/> 결과 중 최장인 <c>SETTINGS</c> 기준,
 ///     <see cref="LogCategory"/> 8종 전수). 빈 슬롯(<c>-</c>)도 이 폭에 맞춰 패딩한다.</item>
 ///   <item>코드: 폭 3(<c>PosResultCodeMapper</c>가 만드는 <c>E0x</c>/<c>R0x</c>/<c>R2x</c>/<c>D0x</c>
-///     체계가 전부 3자리). 빈 슬롯(<c>-</c>)도 이 폭에 맞춰 패딩한다.</item>
+///     체계가 전부 3자리). 빈 슬롯(<c>-</c>)도 이 폭에 맞춰 패딩한다. 코드 설명(<see
+///     cref="LogCodeCatalog"/>)은 이 슬롯 폭 정렬 계약을 깨지 않도록 여기 붙이지 않고
+///     <see cref="FileLogSink.BuildCodeNoteBytes"/>가 별도의 다음 줄로 찍는다(2026-09-17,
+///     처음엔 코드 슬롯 안/메시지 끝 두 방식을 시도했으나 각각 정렬 계약 위반·원문 덤프와의 혼동
+///     문제가 있었다).</item>
 ///   <item>거래ID: 최소폭 12(<c>PaymentOrchestrator.LogTxId</c>가 SPEC <c>#9</c> 전문관리번호
 ///     AN(12)를 그대로 쓴다 — <c>PosCommonHeader</c> 필드 정의 참고). <b>최대폭이 아니라 최소폭이다</b>
 ///     — <c>LogTxId</c>의 fallback(<c>{전문구분}-NOID-{해시}</c>, #9가 빈 기형 요청일 때 합성)은

@@ -402,10 +402,24 @@ namespace KFTCOneCAP.Wpf.Services.Reader
             var pendingCmd = new PendingReaderCommand(myRound, expectedResponseCode);
 
             // 새 라운드를 현재 라운드로 세운다. 직전 라운드가 아직 남아 있었다면(호출자가 이전
-            // Task 완료를 기다리지 않고 곧바로 새 명령을 보낸 비정상적 사용) 그 라운드는 이 순간
-            // 자동으로 "더 이상 유효하지 않은 라운드"가 된다 — 그 라운드의 뒤늦은 CALLBACK은
+            // Task 완료를 기다리지 않고 곧바로 새 명령을 보낸 경우 — 예: 카드 리딩(0x2B) 응답을
+            // 기다리는 도중 취소/Timeout으로 초기화(0x60)를 보내는 정상적인 흐름) 그 라운드는 이
+            // 순간 자동으로 "더 이상 유효하지 않은 라운드"가 된다 — 그 라운드의 뒤늦은 CALLBACK은
             // CAS 실패로 조용히 무시된다(PendingReaderCommand.cs 클래스 주석 참고).
-            Interlocked.Exchange(ref _pending, pendingCmd);
+            //
+            // 2026-09-17 실기 확인(사용자 취소 ↔ 카드리딩 응답 경합) — 대체되는 라운드의 Tcs를 여기서
+            // 완료시키지 않으면 그 Task는 영원히 끝나지 않는다. DLL이 무효화(0x60) 이후 도착하는 옛
+            // 명령의 응답을 "stale transaction"으로 판단해 CALLBACK 자체를 주지 않기 때문에(리더기
+            // DLL 로그 실측 — "delayed/unexpected response ... ignored (no CALLBACK, unmatched/stale
+            // transaction)"), 위 주석의 "CAS 실패로 무시"할 CALLBACK 자체가 아예 오지 않는다. 그
+            // 라운드를 기다리던 호출자(예: CardReadBroadcaster.SendAsync의 Task.WhenAny)가 영원히
+            // 완료되지 않는 Task를 붙들고 있게 되는 실제 리크로 확인됐다 — 그래서 대체되는 즉시 그
+            // Task를 "대체됨"으로 완료시킨다. TrySetResult를 쓰는 이유는 이 Exchange와 거의 동시에
+            // CompletePendingIfMatches의 CAS가 먼저 이겨 이미 완료됐을 수 있어서다(그 경우 여기는
+            // 조용히 no-op).
+            PendingReaderCommand? replaced = Interlocked.Exchange(ref _pending, pendingCmd);
+            replaced?.Tcs.TrySetResult(RawReaderCommandResult.Timeout(
+                "다음 명령이 시작되어 이 라운드가 대체됨 — DLL이 이후 도착하는 응답을 전달하지 않을 수 있어 더 이상 기다리지 않음"));
 
             int dllResult = SendCommandSafe(requestCommandCode, data, dataLength);
             if (dllResult != (int)ReaderResult.READER_OK)

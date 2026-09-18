@@ -32,11 +32,44 @@ public sealed class FileLogSink : ILogSink
 
     public void Write(LogRecord record)
     {
-        byte[] bytes = RenderRecordBytes(record);
+        byte[] recordBytes = RenderRecordBytes(record);
+        byte[]? noteBytes = BuildCodeNoteBytes(record.Code);
+
         lock (SyncRoot)
         {
-            AppendLocked(record.Timestamp, bytes);
+            if (noteBytes is null)
+            {
+                AppendLocked(record.Timestamp, recordBytes);
+            }
+            else
+            {
+                AppendLocked(record.Timestamp, recordBytes, noteBytes);
+            }
         }
+    }
+
+    /// <summary>
+    /// 2026-09-17 사용자 요청 — 코드 슬롯(<c>[E41]</c>)만 봐서는 무슨 오류인지 코드 체계표를 따로
+    /// 열어봐야 알 수 있었다. 처음엔 메시지 끝에 붙였더니 원문(raw telegram) 덤프 바로 뒤라 마치
+    /// 전문의 일부처럼 보인다는 지적이 있었고, 그다음 코드 슬롯 안에 붙였더니 슬롯마다 길이가 달라져
+    /// 2026-09-01에 확립한 "네 슬롯 세로 정렬" 계약이 깨진다는 지적이 있었다 — 그래서 로그 레코드
+    /// 형식(<see cref="LogLineRenderer"/>)은 전혀 건드리지 않고, <b>다음 줄에 별도로</b> 찍는다.
+    ///
+    /// <see cref="LogLineRenderer.LineFormat"/> 정규식(<c>^\[...\] ...</c>)에 매치되지 않는 모양(들여쓰기 +
+    /// <c>└</c>)으로 시작해 파싱 대상 레코드가 아님을 코드로 보장한다 — 거래 경계선(<see
+    /// cref="WriteThenBoundary"/> 등)과 같은 원칙. <see cref="LogFileReader"/>의 날짜/거래ID 슬라이싱은
+    /// 이 줄을 별도 레코드로 매치하지 않지만, 앞 레코드와 같은 시각 범위 안에 있어 슬라이스 결과에는
+    /// 그대로 함께 포함된다(경계선이 포함되는 것과 동일).
+    /// </summary>
+    private static byte[]? BuildCodeNoteBytes(string? code)
+    {
+        string? description = LogCodeCatalog.Describe(code);
+        if (description is null)
+        {
+            return null;
+        }
+
+        return Encoding.UTF8.GetBytes($"    └ 코드 설명: {code} = {description}{Environment.NewLine}");
     }
 
     /// <summary>

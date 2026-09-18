@@ -863,6 +863,26 @@ internal sealed class PaymentOrchestrator
             {
                 TransactionOutcomeReason reason = gate.ClaimedReason!.Value;
                 FileLogger.Info(LogCategory.Payment, $"[PaymentOrchestrator] 카드 리딩 라운드 {round} 대기 중 확정됨({reason}) — 리더기 응답을 기다리지 않고 즉시 처리", code: null, txId);
+
+                // 2026-09-17 사용자 지적(실기 재현) — 위 PIN 취소 경로(788번째 줄 부근)와 대칭.
+                // ReaderService.SendAndAwaitAsync가 이제 대체되는 라운드를 즉시 완료시키므로(2026-09-17
+                // 수정) broadcastTask가 더 이상 영원히 매달리지는 않지만, 그 완료 결과가 실제 카드
+                // 데이터를 담은 성공으로 도착할 가능성(예: 이 방어를 넣기 전 시점의 DLL 응답이 "대체됨"
+                // 판정보다 먼저 도착하는 경합, 또는 장래 DLL/펌웨어 동작 변경)까지 방어한다 — 카드정보는
+                // 필드별 판단 없이 전부 SecureClear 대상이라는 기존 방침(CardReadBroadcaster.cs 96번째
+                // 줄 부근 "확정 사항 3")과 대칭을 맞춘다. 이미 완료돼 있으면 즉시 실행된다.
+                _ = broadcastTask.ContinueWith(
+                    t =>
+                    {
+                        if (t.Result.HasWinner)
+                        {
+                            t.Result.WinnerOutcome!.CardData?.Dispose();
+                        }
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+
                 return CardReadRoundResult.Early(InterruptCode(reason));
             }
 
@@ -1109,7 +1129,22 @@ internal sealed class PaymentOrchestrator
             {
                 try
                 {
-                    await endpoint.SendInvalidationInitAsync(InvalidationTimeout).ConfigureAwait(false);
+                    // 2026-09-17 사용자 지적(실기 재현) — 이전엔 이 결과를 그냥 버렸다. 카드리딩
+                    // 응답(0x2B/0x3B)과 이 초기화(0x60)가 리더기 쪽에서 겹치면 0x60 자체가 정상
+                    // 응답을 못 받고 타임아웃 나는 경우가 실기로 확인됐는데, 그 사실이 KFTCTaxCAP
+                    // 로그에는 전혀 안 남고 리더기 DLL 자체 로그(KFTCReaderLog)를 따로 열어야만
+                    // 보였다 — 이번 세션의 "로그만 보고 파악되게 하자" 방향과 맞춰 성공(00)이
+                    // 아니면 WARN으로 남긴다(재시도는 하지 않는다 — 다음 거래 시작 시 리더기가
+                    // 여전히 준비 안 됐다면 그 시점의 0x2B 자체가 READER_ERR_BUSY 등으로 실패해
+                    // 드러난다).
+                    InitCommandOutcome outcome = await endpoint.SendInvalidationInitAsync(InvalidationTimeout).ConfigureAwait(false);
+                    if (outcome.Kind != ReaderCommandOutcomeKind.Success)
+                    {
+                        FileLogger.Warn(
+                            LogCategory.Reader,
+                            $"[PaymentOrchestrator] {reason} 처리 중 리더기 초기화(0x60) 응답 이상(Kind={outcome.Kind}, Detail={outcome.Detail}) — 다음 거래에서 리더기가 아직 준비 안 됐을 수 있음",
+                            code: null, scope.TransactionId);
+                    }
                 }
                 catch (Exception ex)
                 {
