@@ -238,4 +238,13 @@
     -->
     <Thickness x:Key="ReaderBottomBtnPadding">16,8</Thickness>
 
+    <!--
+        ===================== 결제 화면 (Phase 29 P29-6, docs/payment_relay/PRD.md §12) =====================
+        요청/응답 필드 표 두 개를 나란히 두는 화면이라 리더기 설정 화면보다 넓은 폭이 필요하다.
+        원본 MFC 재현 대상이 아니므로(테스트/실사용 결제 전용 신규 화면) 스크린샷 실측 수치가 없고,
+        내용에 맞춰 임의로 정한 값이다. ResizeMode="CanResize"라 이 값은 초기 크기일 뿐이다.
+    -->
+    <sys:Double x:Key="PaymentWindowWidth">1180</sys:Double>
+    <sys:Double x:Key="PaymentWindowHeight">760</sys:Double>
+
 </ResourceDictionary>

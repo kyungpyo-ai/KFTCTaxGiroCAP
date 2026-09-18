@@ -179,4 +179,8 @@
     <!-- 확인/취소 버튼 패딩 — 상하 패딩을 8→2로 줄여 Malgun Gothic 줄 높이가 28px 안에 들어오게 함 -->
     <Thickness x:Key="ReaderBottomBtnPadding">16,2</Thickness>
 
+    <!-- ===================== 결제 화면 (Phase 29 P29-6) — Layout.xaml과 동일 취지, 저해상도용 축소값 ===================== -->
+    <sys:Double x:Key="PaymentWindowWidth">1100</sys:Double>
+    <sys:Double x:Key="PaymentWindowHeight">660</sys:Double>
+
 </ResourceDictionary>

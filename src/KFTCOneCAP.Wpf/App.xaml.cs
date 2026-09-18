@@ -424,6 +424,14 @@ public partial class App : Application
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
             System.Threading.Tasks.Task.Run(LogFileReaderTestScenarios.RunAll);
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--payment-screen-test")
+        {
+            // 개발/회귀 검증용(docs/payment_relay/development_plan.md P29-6 완료 조건, 최종 산출물
+            // 아님): 결제 화면(P29-6)을 홈 화면 없이 직접 띄운다. 이 화면은 아직 홈 카드와 배선되지
+            // 않았고(P29-7이 별도로 연결) SetupScreenGate에도 등록하지 않으므로(PRD §12.4), 이 인자는
+            // 그 두 가지를 건드리지 않고 화면 단독 동작(요청 표 임의값 채움, 전송, 응답 표시)만 확인한다.
+            StartupUri = new Uri("Views/PaymentScreenWindow.xaml", UriKind.Relative);
+        }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--notice-demo")
         {
             // 개발용 결제 알림창 실시간 애니메이션 데모(수동 실행 전용). 예전엔 인자 없는 기본

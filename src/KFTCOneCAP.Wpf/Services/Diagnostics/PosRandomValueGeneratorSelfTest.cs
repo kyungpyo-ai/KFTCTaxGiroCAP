@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
@@ -78,22 +77,42 @@ internal static class PosRandomValueGeneratorSelfTest
                 allOk = false;
             }
 
-            var ownedByOneCap = new HashSet<int>(schema.FieldsOwnedByOneCap().Select(f => f.Number));
-            foreach (int fieldNumber in ownedByOneCap)
+            // 2026-09-18 재확정 — kiosk가 없는 필드는 전부(원캡 단독이든 인터넷지로/VAN 단독이든) 공백이어야
+            // 한다. kiosk가 포함된 필드는 값이 채워져야 한다(생성기가 실제로 그 필드를 건드렸는지 확인).
+            int nonKioskCount = 0;
+            int kioskCount = 0;
+            foreach (PosField field in schema.Fields)
             {
-                string value = telegram.Read(fieldNumber);
-                if (value.Length != 0)
+                string value = telegram.Read(field.Number);
+                bool isKiosk = field.Owners.HasFlag(PosFieldOwner.Kiosk);
+
+                if (isKiosk)
                 {
-                    FileLogger.Error(LogCategory.App,
-                        $"[random-value-generator-test] ★ [{schema.TransactionTypeCode}] 원캡 담당 필드 " +
-                        $"#{fieldNumber}가 공백이 아님(값=\"{value}\") — 생성기가 제외 목록을 지키지 않음");
-                    allOk = false;
+                    kioskCount++;
+                    if (value.Length == 0)
+                    {
+                        FileLogger.Error(LogCategory.App,
+                            $"[random-value-generator-test] ★ [{schema.TransactionTypeCode}] kiosk 담당 필드 " +
+                            $"#{field.Number}가 공백임 — 생성기가 kiosk 필드를 채우지 않음");
+                        allOk = false;
+                    }
+                }
+                else
+                {
+                    nonKioskCount++;
+                    if (value.Length != 0)
+                    {
+                        FileLogger.Error(LogCategory.App,
+                            $"[random-value-generator-test] ★ [{schema.TransactionTypeCode}] kiosk 비담당 필드 " +
+                            $"#{field.Number}가 공백이 아님(값=\"{value}\") — 생성기가 kiosk 기준을 지키지 않음");
+                        allOk = false;
+                    }
                 }
             }
 
             FileLogger.Info(
-                $"[random-value-generator-test] [{schema.TransactionTypeCode}] 필드 {schema.Fields.Count}개 " +
-                $"생성 완료 — 본문 {body.Length}바이트, 원캡 담당 {ownedByOneCap.Count}개 공백 유지 확인");
+                $"[random-value-generator-test] [{schema.TransactionTypeCode}] 필드 {schema.Fields.Count}개 중 " +
+                $"kiosk 담당 {kioskCount}개 생성, 비담당 {nonKioskCount}개 공백 유지 확인 — 본문 {body.Length}바이트");
         }
 
         return allOk;

@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 
 namespace KFTCOneCAP.Wpf.Protocol.Pos;
@@ -14,8 +12,12 @@ namespace KFTCOneCAP.Wpf.Protocol.Pos;
 /// <b>길이는 바이트 기준</b>이고 인코딩은 CP949라 한글 1자 = 2바이트다. 이 클래스는 문자 수가 아니라
 /// 바이트 예산으로 값을 채워 <see cref="PosField.Pad"/>가 초과 예외를 던지지 않도록 한다.
 ///
-/// <see cref="PosTelegramSchema.FieldsOwnedByOneCap"/>에 속한 필드는 건드리지 않는다 — 원캡이 카드리딩
-/// 결과로 채울 자리이므로 <see cref="PosTelegram.CreateEmpty"/>가 채운 공백을 그대로 둔다.
+/// <b>2026-09-18 재확정(사용자 지시) — kiosk 담당 필드만 채운다.</b> 처음엔 "원캡 담당만 빼고 전부"
+/// 채웠지만, 그러면 원캡/인터넷지로/VAN 전용 필드(예: <c>#7 응답 코드</c>처럼 kiosk가 애초에 안 채우는
+/// 자리)까지 요청에 임의값이 들어가 실제 kiosk 동작과 어긋난다. 지금은 <c>field.Owners</c>에
+/// <see cref="PosFieldOwner.Kiosk"/>가 포함된 필드만 채우고, 그 외(원캡 단독/인터넷지로/VAN/디지털예산
+/// 단독, 또는 kiosk 없이 이들의 조합)는 전부 <see cref="PosTelegram.CreateEmpty"/>가 채운 공백 그대로
+/// 남긴다 — SPEC p.5 각주("요청 시 채우지 않는 필드는 space로 채운다")와도 일치한다.
 /// </summary>
 public static class PosRandomValueGenerator
 {
@@ -33,19 +35,17 @@ public static class PosRandomValueGenerator
     private const int HangulCount = 11172;
 
     /// <summary>
-    /// 스키마의 모든 필드를 임의값으로 채운 요청 전문을 만든다. 원캡 담당 필드는 공백으로 남긴다
-    /// (PRD §12.3 — "화면에서 수정 가능하게, 카드리딩 필드는 읽기전용 공백으로").
+    /// kiosk 담당 필드만 임의값으로 채운 요청 전문을 만든다. 그 외(원캡/인터넷지로/VAN/디지털예산
+    /// 담당 — kiosk가 없는 조합 포함)는 전부 공백으로 남긴다(클래스 주석 참고, 2026-09-18 재확정).
     /// </summary>
     public static PosTelegram GenerateRandomRequest(PosTelegramSchema schema, Random? random = null)
     {
         random ??= new Random();
         PosTelegram telegram = PosTelegram.CreateEmpty(schema);
 
-        var ownedByOneCap = new HashSet<int>(schema.FieldsOwnedByOneCap().Select(f => f.Number));
-
         foreach (PosField field in schema.Fields)
         {
-            if (ownedByOneCap.Contains(field.Number))
+            if (!field.Owners.HasFlag(PosFieldOwner.Kiosk))
                 continue;
 
             telegram.Write(field.Number, GenerateValue(field.Type, field.Length, random));
