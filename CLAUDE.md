@@ -41,6 +41,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 서브에이전트
 
 - `.claude/agents/csharp-wpf-developer.md` — 이 프로젝트의 WPF 개발 전담 에이전트. UX/UI(XAML)와 비즈니스 로직(ViewModel/서비스)을 통합해서 다룬다. `mcp__windows__*` 도구(스크린샷/클릭/스냅샷 등)를 갖추고 있어 빌드 후 실제 화면을 캡처해 원본과 대조하는 검증까지 책임진다 — 코드 작성만 하고 검증을 생략하지 않는다.
+- `.claude/agents/checkpoint-reviewer.md` — 각 Phase의 체크포인트(`development_plan.md`에 정의된 CP1/CP2 등)에서 그동안 구현된 코드를 처음 보는 눈으로 종합 검증하는 전담 리뷰어. 코드를 작성하지 않고(Edit/Write 없음) `Read`/`Grep`/`Bash`/`PowerShell`로 diff를 직접 읽고 빌드·회귀 하네스를 직접 재실행해 결함을 찾는다 — 구현자의 자기 보고를 그대로 믿지 않는 것이 존재 이유다. 각 Task의 구현-테스트-검증-수정 사이클 자체(빌드 확인, 단위 검증)에는 쓰지 않는다 — 그건 구현 에이전트(csharp-wpf-developer 등)가 그 자리에서 처리한다.
 - `.claude/agents/reader-pinpad-spec-expert.md` — 리더기/핀패드 SPEC 원문 및 `ReaderSerial.dll` API 계약 확인 전담(아래 "리더기 연동 DLL" 절 참고).
 - `.claude/agents/reader-dll-integration-developer.md` — `ReaderSerial.dll` P/Invoke 연동 개발 전담(아래 "리더기 연동 DLL" 절 참고).
 - `.claude/agents/pos-onecap-spec-expert.md` — POS ↔ KFTCOneCAP 간 전문(telegram) SPEC 확인 전담. 근거 문서는
