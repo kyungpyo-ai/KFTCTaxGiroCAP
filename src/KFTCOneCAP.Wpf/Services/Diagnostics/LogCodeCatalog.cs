@@ -41,6 +41,12 @@ internal static class LogCodeCatalog
         ["D01"] = "VAN DLL 로드 실패",
         ["D02"] = "VAN 통신 실패",
 
+        // 서버 응답 코드(SPEC p.21) — 원캡은 판단하지 않고 그대로 relay하는 값이라 PosResultCodeMapper가
+        // 만들지 않는다(§4.10/§4.11). SPEC 20260915 개정판에서 신설(P29-3, fault_alert_catalog.md §2.1).
+        // 로그에서 뜻을 바로 읽기 위한 설명일 뿐, 이 추가가 relay 분기나 FaultAlertJudge 판정 대상 여부를
+        // 바꾸지 않는다(둘 다 그대로 둔다는 것이 2026-09-18 확정 사항).
+        ["031"] = "전문 전송 일자 오류(서버 판정, 원캡은 relay만 함)",
+
         // 리더기 DLL(ReaderSerial.dll) 연동 레벨 실패(PosResultCodeMapper — DllCallFailure/CommunicationError).
         ["R24"] = "READER_ERR_PORT_NOT_OPEN(포트가 열려 있지 않은 상태에서 명령 시도)",
         ["R25"] = "READER_ERR_SEND_FAIL(명령 송신 자체가 실패함)",

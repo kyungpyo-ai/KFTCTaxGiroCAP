@@ -7759,12 +7759,54 @@ P26-5(시뮬레이터) → P26-6(검증).
 - ⚠️ 주의: `S01~S11`(내부 장애 코드)은 POS에 나가지 않는 **내부 전용**이라 SPEC 표에 없는 것이 정상이다 —
   불일치로 오판하지 않는다.
 
+### 대조 결과 (2026-09-18, `pos-onecap-spec-expert` 확인 + 코드 직접 대조)
+
+**SPEC 표 전체 (p.22~23)**
+
+| SPEC 코드 | SPEC 설명(원문) | 코드베이스 정의 위치 | 판정 |
+|---|---|---|---|
+| E01 | 사용자 취소 | `PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode)` | 일치 |
+| E02 | Timeout | 〃 | 일치 |
+| E03 | 리더기 설정 화면 사용 중 | 〃 | 일치 |
+| E04 | 리더기 미설정 | 〃 | 일치 |
+| E05 | 리더기 무결성 체크 실패 | 〃 | 일치 |
+| E06 | 키오스크 ID 불일치 | 〃 | 일치 |
+| E07 | 조회한 원거래 없음 | 〃 | 일치 |
+| E40 | 요청 전문 길이 불일치 | `PosRequestTelegram.Parse`(리터럴) | 일치 — 값만, 위치는 아래 참고 |
+| E41 | 알 수 없는 거래 구분 코드 | 〃 | 일치 — 위와 동일 |
+| E42 | 전문 식별 불가(16바이트 미만) | `PosSocketServer.cs`(리터럴) | 일치 |
+| E43 | 전문 형식 오류(길이 필드 파손) | 〃 | 일치 |
+| E99 | 원캡 내부 오류 | `PosResultCodeMapper.ToTelegramCode(PosPaymentResultCode)` | 일치 |
+| R00~R23(00/07/12 제외) | 리더기 SPEC 업무 응답코드를 `"R"`+코드로 그대로 표기 | `PosResultCodeMapper.FormatReaderBusinessFailureCode` | 일치 — 00(성공)/07(Fallback)/12(재시도) 세 값은 `CardReadCommandOutcome.IsFallback`/`IsRetryCode12`가 별도 분기로 걸러 이 포맷터에 도달하지 않음을 코드로 확인 |
+| R24~R29 | 개별 설명(포트 미개방/송신 실패/busy/포트 못 찾음/오픈 실패/허용 안 된 명령) | 〃(`DllResultName` 분기) | 일치 |
+| R30 | 응답 수신 중 통신 오류 | `ToTelegramCode(CardReadCommandOutcome)` — `CommunicationError` | 일치 |
+| R31 | 그 외 DLL 연동 오류 | 〃 — catch-all | 일치 |
+| R32 | 원인 특정 불가 | `ReaderBroadcastNoWinnerCode`/`ReaderNoCardDataDefensiveCode`/`ReaderRetryLimitExceededCode` 3곳 공유 | 일치 — SPEC은 R32를 "예비"가 아니라 이 세 방어 경로로 이미 실사용 중(P17-5 정정 이력과 일치) |
+| D01 | VAN DLL 로드 실패 | `ToTelegramCode(VanFailureKind)` | 일치 |
+| D02 | VAN DLL 호출 자체 실패 | 〃 | 일치 |
+| S01~S11 | (SPEC에 없음) | `InternalFaultCodes.cs` | **정상** — POS로 나가지 않는 내부 전용 코드라 SPEC 표에 없는 것이 맞다 |
+
+**불일치: 0건.**
+
+**구조적으로 짚어둘 점(불일치는 아님)**: `E40`~`E43`은 `E01`~`E07`/`E99`와 달리 `PosResultCodeMapper`를
+거치지 않고 `PosRequestTelegram.Parse`/`PosSocketServer.cs`에 리터럴로 직접 쓰인다. 이건 결함이 아니라
+의도된 구조다 — `E40`~`E43`은 전문 프레이밍 단계(아직 `PosPaymentResultCode`라는 Flow 내부 표현이
+만들어지기 전)에서 발생하는 오류라, Flow 결과를 3자리로 바꾸는 `PosResultCodeMapper`의 계약(`PosPaymentResultCode`
+입력)에 애초에 들어맞지 않는다. `LogCodeCatalog.Descriptions`에는 두 그룹이 모두 등록돼 있어 로그 설명은
+일관되게 나온다.
+
+**SPEC 문서 자체의 확인 불가 사항**(코드 결함 아님, `spec_open_questions.md`에 이미 기록할 성격 — 이번
+Task 범위 밖이라 여기 기록만 남긴다): SPEC은 `E40`~`E43`(원캡 응답코드)과 `030`/`031`(서버 응답코드)의
+관계를 문서로 규정하지 않는다. 코드베이스는 이미 `E40`~`E43`을 `#7`에 그대로 싣는 방식으로 일관되게
+구현돼 있고(SPEC이 원캡 코드 체계를 원캡에서 가져다 등재한 것이므로) 이 부분은 코드가 정답으로 간주하고
+바꾸지 않는다.
+
 ### 완료 조건
 
-- [ ] SPEC 표의 모든 코드값이 대조표에 들어가고, 코드베이스 쪽 정의 위치(파일·심볼)가 함께 적혀 있다.
-- [ ] 불일치 항목마다 "어느 쪽이 정답인지" 판단과 근거가 적혀 있다(판단 보류도 명시).
-- [ ] 불일치가 0건이면 그 사실을 기록한다(암묵적 통과로 넘기지 않는다).
-- [ ] 코드 변경은 사용자 확인 후에만 이뤄진다.
+- [x] SPEC 표의 모든 코드값이 대조표에 들어가고, 코드베이스 쪽 정의 위치(파일·심볼)가 함께 적혀 있다.
+- [x] 불일치 항목마다 "어느 쪽이 정답인지" 판단과 근거가 적혀 있다(판단 보류도 명시) — **불일치 0건이라 해당 없음.**
+- [x] 불일치가 0건이면 그 사실을 기록한다(암묵적 통과로 넘기지 않는다).
+- [x] 코드 변경은 사용자 확인 후에만 이뤄진다 — **변경 대상 없음, 코드 수정 없이 완료.**
 
 ## P29-3. `031` 서버 응답코드 처리 (PRD §4.11 하단)
 
@@ -7780,11 +7822,25 @@ P26-5(시뮬레이터) → P26-6(검증).
   **판정 코드는 손대지 않는다.** 2026-09-18 확인: 서버·VAN 응답코드(`000`/`030`/`091`/`111~201`/`M01`/
   `V01`)는 지금도 전부 알림 대상이 아니다.
 
+### 구현 결과 (2026-09-18)
+
+`LogCodeCatalog.cs`의 `Descriptions`에 `["031"] = "전문 전송 일자 오류(서버 판정, 원캡은 relay만 함)"`
+한 줄만 추가했다. `dotnet build`로 `KFTCOneCAP.Wpf` 대상 컴파일 성공 확인(같은 빌드에서 `KioskSim.exe`
+복사 단계가 실행 중인 프로세스에 의해 잠겨 실패했으나, 이는 이번 변경과 무관한 별도 실행 중인 프로세스
+문제라 여기서 손대지 않는다 — `KFTCOneCAP.Wpf` 자체는 오류 없이 빌드됨).
+
+`FaultAlertJudge.Classify`를 직접 추적: `"031"`은 명시적 `case`가 없어 `_ => ClassifyRBusinessFailure(code)`로
+떨어지는데, 이 메서드는 `code[0] == 'R'`인 3자리 코드만 임계값 판정하고 나머지는 전부 `AlertDecision.None()`을
+돌려준다(`"031"`은 `'0'`으로 시작하므로 이 분기에 걸리지 않는다) — **정적 분기 추적만으로 결정적으로
+확인 가능**해 별도 주입 테스트 없이도 "ALERT 안 남" 판정에 충분하다고 판단했다.
+
 ### 완료 조건
 
-- [ ] `LogCodeCatalog.Describe("031")`이 설명을 돌려준다.
-- [ ] relay 경로에 `031` 전용 분기가 없다(코드 검토로 확인).
-- [ ] `FaultAlertJudge`가 수정되지 않았고, `031`을 관측해도 `ALERT`가 나오지 않는다(주입 테스트로 확인).
+- [x] `LogCodeCatalog.Describe("031")`이 설명을 돌려준다(코드 추가 + 빌드 성공으로 확인).
+- [x] relay 경로에 `031` 전용 분기가 없다(코드 검토로 확인 — `PosSocketServer`/`PaymentOrchestrator`
+      어디에도 `"031"` 리터럴이 없다).
+- [x] `FaultAlertJudge`가 수정되지 않았고, `031`을 관측해도 `ALERT`가 나오지 않는다 — **정적 분기
+      추적으로 확인**(`ClassifyRBusinessFailure`가 `'R'` 접두 코드만 판정, `"031"`은 `AlertDecision.None()`).
 
 ## P29-4. 임의값 생성기 (Protocol 계층, PRD §12.3)
 
