@@ -397,6 +397,15 @@ public partial class App : Application
             StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
             System.Threading.Tasks.Task.Run(MemoryClearTestScenarios.RunAll);
         }
+        else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--pos-client-resilience-test")
+        {
+            // 개발/회귀 검증용(docs/payment_relay/development_plan.md P29-5 완료 조건, 최종 산출물
+            // 아님): PosClient(P29-5)가 902614 타임아웃 여유(구조적 확인)와 서버 무응답 종료 내성(가짜
+            // 리스너)을 갖추는지 확인한다. 실제 서버 대상 501008 왕복은 --pos-client-test의
+            // 시나리오9가 담당한다. UI는 홈 화면을 그대로 띄운다.
+            StartupUri = new Uri("Views/HomeWindow.xaml", UriKind.Relative);
+            System.Threading.Tasks.Task.Run(PosClientResilienceSelfTest.RunAll);
+        }
         else if (e.Args.Length > 0 && e.Args[0].ToLowerInvariant() == "--random-value-generator-test")
         {
             // 개발/회귀 검증용(docs/payment_relay/development_plan.md P29-4 완료 조건, 최종 산출물

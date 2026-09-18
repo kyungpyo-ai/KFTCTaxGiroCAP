@@ -36,6 +36,7 @@ internal static class PosClientTestScenarios
             Scenario6_UnresponsiveClientDoesNotBlockQueue();
             Scenario7_ServerClosesIdleConnectionAfterResponse();
             Scenario8_TooShortFrameReceivesE42();
+            Scenario9_PosClientRoundTrip();
             FileLogger.Info("[pos-client-test] 전체 완료 — 로그 파일에서 [TransactionQueue] 처리 시작/종료 순서와 각 시나리오 결과를 대조할 것");
         }
         catch (Exception ex)
@@ -328,6 +329,42 @@ internal static class PosClientTestScenarios
         FileLogger.Info(closed
             ? "[pos-client-test][7] 완료 — 서버가 유휴 연결을 먼저 닫음(기대한 동작)"
             : "[pos-client-test][7] 완료 — ★ 실패: 12초가 지나도 서버가 연결을 닫지 않음");
+    }
+
+    /// <summary>
+    /// Phase 29 P29-5 완료 조건 — 이 파일이 원시 소켓으로 직접 재현해 온 프레이밍을 이제
+    /// <see cref="Services.Pos.PosClient"/>(P29-5가 만든 재사용 클라이언트, 이 파일과 같은 패턴을
+    /// 클래스로 뽑은 것)로도 그대로 왕복하는지 그 클래스 자체를 실제 서버에 대고 확인한다. 501008은
+    /// 카드리딩이 없어 리더기 하드웨어 여부와 무관하게 결정적으로 끝난다.
+    /// </summary>
+    private static void Scenario9_PosClientRoundTrip()
+    {
+        FileLogger.Info("[pos-client-test][9] 시작 — Services.Pos.PosClient로 501008 왕복 확인(P29-5)");
+
+        if (!PosSchemaRegistry.TryResolve("501008", out PosTelegramSchema? schema) || schema is null)
+        {
+            FileLogger.Error("[pos-client-test][9] ★ 501008 스키마를 찾지 못함");
+            return;
+        }
+
+        var random = new Random();
+        PosTelegram telegram = PosRandomValueGenerator.GenerateRandomRequest(schema, random);
+        telegram.Write(4, "501008");
+
+        using var client = new KFTCOneCAP.Wpf.Services.Pos.PosClient();
+        try
+        {
+            client.ConnectAsync().GetAwaiter().GetResult();
+            byte[] responseBody = client.SendAsync(telegram.ToBody(), KFTCOneCAP.Wpf.Services.Pos.PosClient.DefaultResponseTimeout)
+                .GetAwaiter().GetResult();
+
+            FileLogger.Info($"[pos-client-test][9] 완료 — 응답 수신(길이={responseBody.Length}바이트, " +
+                $"기대={schema.TotalLength}바이트){(responseBody.Length == schema.TotalLength ? string.Empty : " — ★ 길이 불일치")}");
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"[pos-client-test][9] ★ PosClient 왕복 실패: {ex.Message}");
+        }
     }
 
     /// <summary>P22-8(PRD.md §1.5 금지 항목 — "전문 본문 전체") 대응: 응답 원문을 로그에 그대로
