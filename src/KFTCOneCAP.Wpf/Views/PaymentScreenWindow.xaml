@@ -59,11 +59,15 @@
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="Padding" Value="16,8"/>
             <Setter Property="Margin" Value="0,0,4,0"/>
+            <!-- 2026-09-18 7라운드 — 탭을 Grid.Column="0" 전체 폭으로 늘리지 않고 고정 폭으로 짧게
+                 유지한다(사용자 지적: "탭쪽 길이는 줄이고"). 탭 라벨을 숫자 없이 한글만으로 줄인 뒤라
+                 "국고 신용카드 승인요청"(가장 긴 라벨) 기준으로 여유 있게 잡은 값이다. -->
+            <Setter Property="Width" Value="200"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
                         <Border x:Name="Bd" CornerRadius="8" Background="Transparent" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
@@ -108,9 +112,11 @@
             </Style.Triggers>
         </Style>
 
-        <!-- 요청 카드 1개(필드 1개) — 참고 이미지의 "공급가액 / [1,000  원]" 카드와 같은 구성. -->
+        <!-- 요청 카드 1개(필드 1개) — 참고 이미지의 "공급가액 / [1,000  원]" 카드와 같은 구성.
+             2026-09-18 7라운드 — 폭을 256→220으로 줄여 한 줄에 3개가 들어가게 했다(사용자 지적: 탭을
+             줄이는 대신 요청 필드 쪽이 가용 폭을 더 채워야 한다). -->
         <DataTemplate x:Key="RequestFieldCardTemplate" DataType="{x:Type payment:PosFieldRowViewModel}">
-            <StackPanel Width="256" Margin="0,0,14,14" ToolTip="{Binding TypeAndLengthTooltip}">
+            <StackPanel Width="205" Margin="0,0,14,14" ToolTip="{Binding TypeAndLengthTooltip}">
                 <TextBlock Text="{Binding NumberAndName}" FontSize="12" Foreground="{StaticResource SubTextBrush}"
                            TextTrimming="CharacterEllipsis" Margin="2,0,0,6"/>
                 <Border Style="{StaticResource RequestFieldBoxStyle}">
@@ -242,11 +248,14 @@
 
                 <!-- ===================== 좌측: 탭 + 요청(편집 가능) ===================== -->
                 <DockPanel Grid.Column="0">
-                    <!-- UniformGrid로 탭을 균등폭으로 나눈다(2026-09-18 3라운드 — 전문 이름 길이가
-                         제각각이라 예전엔 탭마다 폭이 달라 정돈되지 않아 보였다). Border가
-                         Grid.Column="0"의 전체 폭(요청 필드 영역과 동일)을 그대로 채우므로 탭 줄의
-                         가로 범위가 그 아래 필드 카드 목록의 범위와 정확히 일치한다. -->
-                    <Border DockPanel.Dock="Top" Background="#F1F3F5" CornerRadius="10" Padding="4">
+                    <!-- 2026-09-18 7라운드(사용자 재지시) — 탭을 Grid.Column="0" 전체 폭으로 늘리지
+                         않는다("탭쪽 길이는 줄이고"). HorizontalAlignment="Left"로 되돌려 탭 3개가 각자
+                         고정폭(PaymentTabItemStyle Width=200)만큼만 차지하는 짧은 묶음으로 왼쪽에
+                         붙는다 — 균등폭 자체는 스타일의 고정 Width로 유지되므로 3라운드의 "탭 크기를
+                         똑같이" 요구와 충돌하지 않는다. 그 대신 아래 요청 필드 카드 폭을 줄여(256→220,
+                         RequestFieldCardTemplate) 한 줄에 3개가 들어가게 해서 가용 폭을 필드 쪽이 더
+                         채우게 했다. -->
+                    <Border DockPanel.Dock="Top" Background="#F1F3F5" CornerRadius="10" Padding="4" HorizontalAlignment="Left">
                         <TabControl x:Name="TelegramTabControl" ItemsSource="{Binding Tabs}" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}"
                                     Background="Transparent" BorderThickness="0" Padding="0"
                                     ItemContainerStyle="{StaticResource PaymentTabItemStyle}">
@@ -257,7 +266,7 @@
                             </TabControl.ItemTemplate>
                             <TabControl.Template>
                                 <ControlTemplate TargetType="TabControl">
-                                    <UniformGrid Rows="1" IsItemsHost="True" Background="Transparent"/>
+                                    <TabPanel IsItemsHost="True" Background="Transparent"/>
                                 </ControlTemplate>
                             </TabControl.Template>
                         </TabControl>
