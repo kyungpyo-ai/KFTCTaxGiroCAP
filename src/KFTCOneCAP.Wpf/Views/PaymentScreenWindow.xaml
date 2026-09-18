@@ -113,7 +113,9 @@
              줄이는 대신 요청 필드 쪽이 가용 폭을 더 채워야 한다). -->
         <DataTemplate x:Key="RequestFieldCardTemplate" DataType="{x:Type payment:PosFieldRowViewModel}">
             <!-- 205에서는 실측 결과 2열까지만 들어가 160으로 더 줄였다(2026-09-18, 실제 화면으로 재확인). -->
-            <StackPanel Width="160" Margin="0,0,14,14" ToolTip="{Binding TypeAndLengthTooltip}">
+            <!-- 160→180(2026-09-18 11라운드) — 탭 글씨가 잘려 탭 폭을 늘려야 했고, 탭 폭이 이 3열
+                 콘텐츠 폭에 고정으로 맞춰져 있어(아래 탭 Border 참고) 같이 늘렸다. -->
+            <StackPanel Width="180" Margin="0,0,14,14" ToolTip="{Binding TypeAndLengthTooltip}">
                 <TextBlock Text="{Binding NumberAndName}" FontSize="12" Foreground="{StaticResource SubTextBrush}"
                            TextTrimming="CharacterEllipsis" Margin="2,0,0,6"/>
                 <Border Style="{StaticResource RequestFieldBoxStyle}">
@@ -127,8 +129,9 @@
              구분한다. VAN 스텁 경고 배너·스텁 전용 강조(IsStubOverwritten)는 2026-09-18 사용자 지시로
              제거했다 — 실 VAN이 붙으면 어차피 의미 없어질 스텁 전용 표시라, 굳이 지금 강조하지 않는다. -->
         <DataTemplate x:Key="ResponseFieldRowTemplate" DataType="{x:Type payment:PosFieldRowViewModel}">
-            <!-- 세로 Padding 7→4→2로 점점 좁혔다(2026-09-18, 사용자가 "여전히 넓다"고 재지적). -->
-            <Border Padding="4,2" ToolTip="{Binding TypeAndLengthTooltip}">
+            <!-- 세로 Padding 7→4→2→0으로 점점 좁혔다(2026-09-18, 사용자가 "더 줄여달라"고 재지적).
+                 0이라도 위아래 TextBlock 자체의 줄높이(line-height)가 있어 완전히 붙지는 않는다. -->
+            <Border Padding="4,0" ToolTip="{Binding TypeAndLengthTooltip}">
                 <Border.Style>
                     <Style TargetType="Border">
                         <Setter Property="Background" Value="Transparent"/>
@@ -140,7 +143,7 @@
                     </Style>
                 </Border.Style>
                 <DockPanel>
-                    <Border DockPanel.Dock="Bottom" Height="1" Background="{StaticResource FooterDividerBrush}" Margin="0,2,0,-2"/>
+                    <Border DockPanel.Dock="Bottom" Height="1" Background="{StaticResource FooterDividerBrush}" Margin="0,0,0,0"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -251,15 +254,15 @@
 
                 <!-- ===================== 좌측: 탭 + 요청(편집 가능) ===================== -->
                 <DockPanel Grid.Column="0">
-                    <!-- 2026-09-18 10라운드(사용자가 손그림으로 재지적) — "Grid.Column 전체 폭에 맞춘다"는
-                         6/9라운드의 접근은 요청 필드가 실제로 몇 열을 쓰는지와 무관하게 탭을 항상 컬럼
-                         전체 폭(응답 박스 바로 앞까지)으로 늘려버려, 필드가 3열(카드 160px×3+마진)만
-                         쓰고 남는 여백까지 탭이 채우는 문제가 있었다. 탭 폭을 필드 3열의 실제 콘텐츠
-                         폭(카드 174px×3=522)에 맞춰 고정값으로 준다 — 카드 폭이 바뀌면 이 값도 같이
-                         바꿔야 한다(자동 동기화 아님, 두 값이 이 파일 안에 나란히 있으니 유지보수 시
-                         같이 확인할 것). -->
+                    <!-- 2026-09-18 10라운드 — "Grid.Column 전체 폭에 맞춘다"는 6/9라운드의 접근은 요청
+                         필드가 실제로 몇 열을 쓰는지와 무관하게 탭을 항상 컬럼 전체 폭(응답 박스 바로
+                         앞까지)으로 늘려버려, 필드가 3열만 쓰고 남는 여백까지 탭이 채우는 문제가
+                         있었다. 탭 폭을 필드 3열의 실제 콘텐츠 폭에 맞춰 고정값으로 준다 — 카드 폭이
+                         바뀌면 이 값도 같이 바꿔야 한다(자동 동기화 아님, 두 값이 이 파일 안에 나란히
+                         있으니 유지보수 시 같이 확인할 것). 11라운드에서 탭 글씨가 잘려 카드 폭을
+                         160→180으로, 이 값도 522(174×3)→582(194×3)로 같이 늘렸다. -->
                     <Border DockPanel.Dock="Top" Background="#F1F3F5" CornerRadius="10" Padding="4"
-                            Width="522" HorizontalAlignment="Left">
+                            Width="582" HorizontalAlignment="Left">
                         <TabControl x:Name="TelegramTabControl" ItemsSource="{Binding Tabs}" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}"
                                     Background="Transparent" BorderThickness="0" Padding="0"
                                     ItemContainerStyle="{StaticResource PaymentTabItemStyle}">
