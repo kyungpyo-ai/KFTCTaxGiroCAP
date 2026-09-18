@@ -8132,6 +8132,33 @@ UI 스레드 블로킹 확인은 이 Task 단계에서 UI가 아직 없어(P29-6
 제거했다. **색 강조 자체(파란 배경)는 유지** — PRD §12.5에 남긴 대로, 이건 스텁과 무관하게 실 VAN이
 붙어도 계속 의미 있는 구분이라 배경색은 남기고 설명 문구만 없앴다. 재빌드 경고 0/오류 0 확인.
 
+**6라운드 — 사용자가 화면 실행을 요청한 뒤 레이아웃 지적**: "탭 크기를 똑같이 맞추고, 그 아래 필드
+위치와 탭 위치가 일치해야 한다(지금은 탭이 삐죽 튀어나와 있다), 오른쪽 응답 필드 박스는 탭 높이까지
+와야 한다"는 지적이었다 — 참고 이미지(`docs/home_reader_setup/screenshots/pay_screen.png`)와 다시
+대조해보니 근본 원인은 **구조적**이었다: 응답 패널(초록 박스)이 `TelegramTabContentTemplate`(탭
+콘텐츠) **안에** 있어서 탭 줄 높이만큼 아래로 밀려 시작했고, 탭 줄을 감싼 `Border`는
+`HorizontalAlignment="Left"`로 자기 콘텐츠(전문 이름 길이가 제각각인 탭 3개)만큼만 폭을 차지해
+아래 요청 필드 영역(`Grid.Column="0"`의 `"*"` 폭)보다 좁거나 어긋났다.
+
+구조를 다시 짰다:
+- `TelegramTabContentTemplate`을 `TelegramTabRequestContentTemplate`으로 이름을 바꾸고 **요청 콘텐츠만**
+  담게 했다(응답 패널 제거).
+- 탭 줄(`Border`)과 응답 패널(`Border`)을 **같은 Grid 행의 형제**로 옮겼다 — 탭+요청은
+  `Grid.Column="0"`(DockPanel로 탭 Dock=Top, 요청 콘텐츠 ContentControl이 나머지 채움), 응답은
+  `Grid.Column="2"`. 같은 Grid 행이라 위쪽이 자동으로 맞는다.
+- 응답 패널은 더 이상 탭 콘텐츠 템플릿 안에 있지 않으므로 `DataContext="{Binding ElementName=
+  TelegramTabControl, Path=SelectedItem}"`을 직접 걸어 바인딩(`HasResponse`/`ResponseRows` 등)이
+  이어지게 했다.
+- 탭 줄을 감싼 `Border`에서 `HorizontalAlignment="Left"`를 없애 `Grid.Column="0"`(요청 필드와 동일한
+  폭)을 그대로 채우게 했다. `TabControl.Template`의 `TabPanel`을 `UniformGrid Rows="1"`로 바꿔 탭 3개가
+  그 폭을 정확히 3등분하게 했다(전문 이름 길이와 무관하게 균등폭). 긴 탭 이름은 `TextTrimming=
+  CharacterEllipsis`로 말줄임 처리(`ContentPresenter`를 `HorizontalAlignment="Stretch"`로 바꿔야 말줄임이
+  실제로 작동함 — 기존 `Center`였다면 잘리지 않고 옆 탭을 침범했을 것).
+
+재빌드(`dotnet build` 경고 0/오류 0) 후 `--payment-screen-test`로 재확인 — 탭 줄 오른쪽 끝과 요청 필드
+영역 오른쪽 끝이 정확히 일치, 응답 패널 상단이 탭 줄 상단과 같은 높이에서 시작함을 스크린샷으로
+확인(`payment_screen_layout_fix.png`).
+
 ### 완료 조건
 
 - [x] 창이 열리고 3전문 전부에서 요청 필드 표가 임의값으로 채워져 보인다 — 스크린샷으로 확인(501008,

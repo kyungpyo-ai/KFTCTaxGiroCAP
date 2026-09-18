@@ -63,7 +63,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
                         <Border x:Name="Bd" CornerRadius="8" Background="Transparent" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
@@ -154,9 +154,85 @@
             </Border>
         </DataTemplate>
 
-        <!-- 탭 콘텐츠 하나(전문 1종)의 공용 DataTemplate. Tabs 컬렉션 아이템(PaymentTelegramTabViewModel)
-             전부가 이 템플릿을 공유한다 — 탭이 3개라고 XAML을 3번 반복하지 않는다. -->
-        <DataTemplate x:Key="TelegramTabContentTemplate" DataType="{x:Type payment:PaymentTelegramTabViewModel}">
+        <!-- 요청 콘텐츠(탭 아래, 필드 카드 목록)의 공용 DataTemplate. Tabs 컬렉션 아이템
+             (PaymentTelegramTabViewModel) 전부가 이 템플릿을 공유한다 — 탭이 3개라고 XAML을 3번
+             반복하지 않는다. 응답 패널은 별도 Border로 분리했다(2026-09-18 3라운드 — 참고 이미지처럼
+             탭 상단과 응답 패널 상단이 같은 높이에서 시작해야 하는데, 응답 패널이 이 템플릿(탭 콘텐츠)
+             안에 있으면 탭 줄만큼 아래로 밀려 어긋난다). -->
+        <DataTemplate x:Key="TelegramTabRequestContentTemplate" DataType="{x:Type payment:PaymentTelegramTabViewModel}">
+            <DockPanel Margin="0,14,0,0">
+                <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                    <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,0,0,8" FontSize="12">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{StaticResource ResultOkTextBrush}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                        <Setter Property="Foreground" Value="{StaticResource ResultErrorTextBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="전송" Command="{Binding SendCommand}" Style="{StaticResource PrimaryButtonStyle}"
+                                Width="140" Margin="0,0,8,0"
+                                IsEnabled="{Binding IsSending, Converter={StaticResource InverseBoolConverter}}"/>
+                        <Button Content="임의값 재생성" Command="{Binding RegenerateCommand}" Style="{StaticResource ReaderSecondaryButtonStyle}"
+                                IsEnabled="{Binding IsSending, Converter={StaticResource InverseBoolConverter}}"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <TextBlock DockPanel.Dock="Top" Text="요청 필드 — kiosk가 채워 보내는 값(값 입력)"
+                           FontWeight="Bold" FontSize="13" Margin="0,0,0,10" Foreground="{StaticResource CardTitleTextBrush}"/>
+
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,10,0">
+                    <ItemsControl ItemsSource="{Binding RequestRows}" ItemTemplate="{StaticResource RequestFieldCardTemplate}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Border CornerRadius="{StaticResource ReaderMainCardCornerRadius}"
+            Background="{StaticResource CardBgBrush}"
+            Padding="{StaticResource ReaderMainCardPadding}"
+            Margin="16">
+        <Border.Effect>
+            <DropShadowEffect Color="#1A202C" Opacity="0.12" BlurRadius="24" ShadowDepth="4"/>
+        </Border.Effect>
+
+        <DockPanel>
+            <!-- ===================== 헤더 ===================== -->
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" VerticalAlignment="Top">
+                <Border Width="{StaticResource ReaderHeaderIconBoxSize}" Height="{StaticResource ReaderHeaderIconBoxSize}"
+                        Background="{StaticResource Blue500Brush}"
+                        CornerRadius="{StaticResource ReaderHeaderIconCornerRadius}"
+                        VerticalAlignment="Top">
+                    <Viewbox Width="26" Height="26">
+                        <Canvas Width="24" Height="24">
+                            <Path Fill="White" Data="M4,6 L20,6 20,18 4,18 Z M4,9 L20,9 M7,13 L9,13 M7,15.5 L11,15.5"
+                                  Stroke="White" StrokeThickness="1.4" StrokeLineJoin="Round"/>
+                        </Canvas>
+                    </Viewbox>
+                </Border>
+                <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="결제" Style="{StaticResource ReaderHeaderTitleTextStyle}"/>
+                    <TextBlock Text="국세 결제 3전문(501008/800000/902614)을 직접 전송하고 왕복을 확인합니다"
+                               Style="{StaticResource ReaderHeaderSubtitleTextStyle}" Margin="0,4,0,0"/>
+                </StackPanel>
+            </StackPanel>
+
+            <Border DockPanel.Dock="Top" Height="1" Background="{StaticResource FooterDividerBrush}" Margin="0,14,0,0"/>
+
+            <!-- ===================== 탭+요청(좌) / 응답(우) — 같은 Grid 행에 나란히 둬서 탭 상단과
+                 응답 패널 상단이 정확히 같은 높이에서 시작하게 한다(2026-09-18 3라운드 사용자 지적 —
+                 참고 이미지처럼 탭 줄과 응답 카드 상단이 맞아야 한다). ===================== -->
             <Grid Margin="0,14,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -164,47 +240,43 @@
                     <ColumnDefinition Width="380"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- ===================== 좌측: 요청(편집 가능) ===================== -->
+                <!-- ===================== 좌측: 탭 + 요청(편집 가능) ===================== -->
                 <DockPanel Grid.Column="0">
-                    <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
-                        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Margin="0,0,0,8" FontSize="12">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="{StaticResource ResultOkTextBrush}"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                            <Setter Property="Foreground" Value="{StaticResource ResultErrorTextBrush}"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
-                        <StackPanel Orientation="Horizontal">
-                            <Button Content="전송" Command="{Binding SendCommand}" Style="{StaticResource PrimaryButtonStyle}"
-                                    Width="140" Margin="0,0,8,0"
-                                    IsEnabled="{Binding IsSending, Converter={StaticResource InverseBoolConverter}}"/>
-                            <Button Content="임의값 재생성" Command="{Binding RegenerateCommand}" Style="{StaticResource ReaderSecondaryButtonStyle}"
-                                    IsEnabled="{Binding IsSending, Converter={StaticResource InverseBoolConverter}}"/>
-                        </StackPanel>
-                    </StackPanel>
+                    <!-- UniformGrid로 탭을 균등폭으로 나눈다(2026-09-18 3라운드 — 전문 이름 길이가
+                         제각각이라 예전엔 탭마다 폭이 달라 정돈되지 않아 보였다). Border가
+                         Grid.Column="0"의 전체 폭(요청 필드 영역과 동일)을 그대로 채우므로 탭 줄의
+                         가로 범위가 그 아래 필드 카드 목록의 범위와 정확히 일치한다. -->
+                    <Border DockPanel.Dock="Top" Background="#F1F3F5" CornerRadius="10" Padding="4">
+                        <TabControl x:Name="TelegramTabControl" ItemsSource="{Binding Tabs}" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}"
+                                    Background="Transparent" BorderThickness="0" Padding="0"
+                                    ItemContainerStyle="{StaticResource PaymentTabItemStyle}">
+                            <TabControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type payment:PaymentTelegramTabViewModel}">
+                                    <TextBlock Text="{Binding TabTitle}" TextTrimming="CharacterEllipsis" TextAlignment="Center"/>
+                                </DataTemplate>
+                            </TabControl.ItemTemplate>
+                            <TabControl.Template>
+                                <ControlTemplate TargetType="TabControl">
+                                    <UniformGrid Rows="1" IsItemsHost="True" Background="Transparent"/>
+                                </ControlTemplate>
+                            </TabControl.Template>
+                        </TabControl>
+                    </Border>
 
-                    <TextBlock DockPanel.Dock="Top" Text="요청 필드 — kiosk가 채워 보내는 값(값 입력)"
-                               FontWeight="Bold" FontSize="13" Margin="0,0,0,10" Foreground="{StaticResource CardTitleTextBrush}"/>
-
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,10,0">
-                        <ItemsControl ItemsSource="{Binding RequestRows}" ItemTemplate="{StaticResource RequestFieldCardTemplate}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <WrapPanel Orientation="Horizontal"/>
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                        </ItemsControl>
-                    </ScrollViewer>
+                    <!-- TabControl.Template을 UniformGrid(헤더)만 남기도록 덮어썼으므로(위) 콘텐츠는 이
+                         별도 ContentControl이 SelectedItem을 직접 참조해 그린다 — SelectedItem/
+                         SelectedIndex는 Selector 레벨 속성이라 헤더 전용 템플릿으로 바꿔도 그대로
+                         동작한다. -->
+                    <ContentControl Content="{Binding ElementName=TelegramTabControl, Path=SelectedItem}"
+                                     ContentTemplate="{StaticResource TelegramTabRequestContentTemplate}"/>
                 </DockPanel>
 
                 <!-- ===================== 우측: 응답(읽기전용, 초록 테두리 카드) ===================== -->
+                <!-- DataContext를 선택된 탭으로 직접 맞춘다 — 더 이상 탭 콘텐츠 템플릿 안에 있지 않으므로
+                     (위 주석 참고) 응답 바인딩(HasResponse/ResponseRows 등)이 자동으로 이어지지 않는다. -->
                 <Border Grid.Column="2" BorderBrush="{StaticResource UpdateHoverTextBrush}" BorderThickness="1.5"
-                        CornerRadius="16" Background="{StaticResource CardBgBrush}" Padding="18">
+                        CornerRadius="16" Background="{StaticResource CardBgBrush}" Padding="18"
+                        DataContext="{Binding ElementName=TelegramTabControl, Path=SelectedItem}">
                     <DockPanel>
                         <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
                             <StackPanel Orientation="Horizontal">
@@ -258,64 +330,6 @@
                     </DockPanel>
                 </Border>
             </Grid>
-        </DataTemplate>
-    </Window.Resources>
-
-    <Border CornerRadius="{StaticResource ReaderMainCardCornerRadius}"
-            Background="{StaticResource CardBgBrush}"
-            Padding="{StaticResource ReaderMainCardPadding}"
-            Margin="16">
-        <Border.Effect>
-            <DropShadowEffect Color="#1A202C" Opacity="0.12" BlurRadius="24" ShadowDepth="4"/>
-        </Border.Effect>
-
-        <DockPanel>
-            <!-- ===================== 헤더 ===================== -->
-            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" VerticalAlignment="Top">
-                <Border Width="{StaticResource ReaderHeaderIconBoxSize}" Height="{StaticResource ReaderHeaderIconBoxSize}"
-                        Background="{StaticResource Blue500Brush}"
-                        CornerRadius="{StaticResource ReaderHeaderIconCornerRadius}"
-                        VerticalAlignment="Top">
-                    <Viewbox Width="26" Height="26">
-                        <Canvas Width="24" Height="24">
-                            <Path Fill="White" Data="M4,6 L20,6 20,18 4,18 Z M4,9 L20,9 M7,13 L9,13 M7,15.5 L11,15.5"
-                                  Stroke="White" StrokeThickness="1.4" StrokeLineJoin="Round"/>
-                        </Canvas>
-                    </Viewbox>
-                </Border>
-                <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
-                    <TextBlock Text="결제" Style="{StaticResource ReaderHeaderTitleTextStyle}"/>
-                    <TextBlock Text="국세 결제 3전문(501008/800000/902614)을 직접 전송하고 왕복을 확인합니다"
-                               Style="{StaticResource ReaderHeaderSubtitleTextStyle}" Margin="0,4,0,0"/>
-                </StackPanel>
-            </StackPanel>
-
-            <Border DockPanel.Dock="Top" Height="1" Background="{StaticResource FooterDividerBrush}" Margin="0,14,0,0"/>
-
-            <!-- ===================== 탭(헤더+콘텐츠) ===================== -->
-            <Border DockPanel.Dock="Top" Background="#F1F3F5" CornerRadius="10" Padding="4" Margin="0,14,0,0" HorizontalAlignment="Left">
-                <TabControl x:Name="TelegramTabControl" ItemsSource="{Binding Tabs}" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}"
-                            Background="Transparent" BorderThickness="0" Padding="0"
-                            ItemContainerStyle="{StaticResource PaymentTabItemStyle}">
-                    <TabControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type payment:PaymentTelegramTabViewModel}">
-                            <TextBlock Text="{Binding TabTitle}"/>
-                        </DataTemplate>
-                    </TabControl.ItemTemplate>
-                    <TabControl.Template>
-                        <ControlTemplate TargetType="TabControl">
-                            <TabPanel IsItemsHost="True" Background="Transparent"/>
-                        </ControlTemplate>
-                    </TabControl.Template>
-                </TabControl>
-            </Border>
-
-            <!-- ===================== 선택된 탭 콘텐츠 ===================== -->
-            <!-- TabControl.Template을 TabPanel(헤더)만 남기도록 덮어썼으므로(위) 콘텐츠는 이 별도
-                 ContentControl이 SelectedItem을 직접 참조해 그린다 — SelectedItem/SelectedIndex는
-                 Selector 레벨 속성이라 헤더 전용 템플릿으로 바꿔도 그대로 동작한다. -->
-            <ContentControl Content="{Binding ElementName=TelegramTabControl, Path=SelectedItem}"
-                             ContentTemplate="{StaticResource TelegramTabContentTemplate}"/>
         </DockPanel>
     </Border>
 </Window>
