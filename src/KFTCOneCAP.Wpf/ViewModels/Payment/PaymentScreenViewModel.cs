@@ -20,11 +20,14 @@ public sealed partial class PaymentScreenViewModel : ObservableObject
     {
         var shopSettingsService = new ShopSettingsService();
 
+        // 탭 라벨에서 거래 구분 코드(501008/800000/902614) 숫자를 뺐다(2026-09-18 사용자 지시 — 균등폭
+        // 탭에서 말줄임이 나던 것을 한글 문구만 남겨 줄여서 해결). 코드값 자체는 각 탭의
+        // TransactionTypeCode 프로퍼티(PaymentTelegramTabViewModel)로 여전히 확인 가능하다.
         Tabs = new ObservableCollection<PaymentTelegramTabViewModel>
         {
-            new("501008 국고 상세 고지내역 조회", NoticeInquirySchema.Create(), () => PosClient.DefaultResponseTimeout),
-            new("800000 카드 정보 조회", CardInfoInquirySchema.Create(), () => PosClient.DefaultResponseTimeout),
-            new("902614 국고 신용카드 승인요청", CardApprovalSchema.Create(),
+            new("국고 상세 고지내역 조회", NoticeInquirySchema.Create(), () => PosClient.DefaultResponseTimeout),
+            new("카드 정보 조회", CardInfoInquirySchema.Create(), () => PosClient.DefaultResponseTimeout),
+            new("국고 신용카드 승인요청", CardApprovalSchema.Create(),
                 () => PosClient.ComputeCardApprovalResponseTimeout(shopSettingsService.Load())),
         };
     }
