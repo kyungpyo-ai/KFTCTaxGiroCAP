@@ -44,10 +44,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `.claude/agents/reader-pinpad-spec-expert.md` — 리더기/핀패드 SPEC 원문 및 `ReaderSerial.dll` API 계약 확인 전담(아래 "리더기 연동 DLL" 절 참고).
 - `.claude/agents/reader-dll-integration-developer.md` — `ReaderSerial.dll` P/Invoke 연동 개발 전담(아래 "리더기 연동 DLL" 절 참고).
 - `.claude/agents/pos-onecap-spec-expert.md` — POS ↔ KFTCOneCAP 간 전문(telegram) SPEC 확인 전담. 근거 문서는
-  `docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260831.pdf`(hwp 원본은 DRM
-  배포용 문서 래퍼라 열 수 없음, PDF가 유일하게 파싱 가능 — **2026-08-31 개정판이 최신 정본**, 이전
-  20260826판은 저장소에 더는 없다. 개정 내용: 800000 전문에 `#26 납부대행 수수료율`(N4) 신규 삽입,
-  기존 #26/#27이 #27/#28로 밀림) — 501008(국고 상세 고지내역 조회), 800000(카드
+  `docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260915 (1).pdf`(hwp 원본은 DRM
+  배포용 문서 래퍼라 열 수 없음, PDF가 유일하게 파싱 가능 — **2026-09-15 개정판의 2026-09-18 재배포본이
+  최신 정본**이며 파일명의 ` (1)`이 그 재배포본이다. 20260831·20260826판은 저장소에 더는 없다. 개정 내용은
+  `docs/payment_relay/PRD.md` §3.3.1 참고 — 3전문 필드 구성은 불변이고, 999999 전문 정식 등재 / 원캡
+  응답코드(E·R·D) 섹션 신설 / 서버 응답코드 `031` 추가 / 902614 `#38`에 kiosk SET ○ 추가가 달라졌다.
+  **전문 간 필드 연쇄는 아직 SPEC 근거가 확정되지 않았다** — 조사 기록과 발주처 질의는
+  `docs/payment_relay/spec_open_questions.md`가 정본이며, 연쇄 필드를 코드에 넣기 전에 그 문서를 먼저
+  확인한다) — 501008(국고 상세 고지내역 조회), 800000(카드
   정보 조회), 902614(국고 신용카드 승인요청) 3종 전문의 필드/POSITION/길이, kiosk가 채우는 필드와 원캡이
   카드리딩으로 채워야 하는 필드(501008은 0개, 800000은 #14 BIN 1개, 902614는
   `#43/#44/#45/#46/#48/#50/#51/#53` **8개** — `#51 암호화된 비밀번호 정보`도 원캡 담당)의 구분,
