@@ -52,10 +52,15 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
     /// 이 확정으로 대체됐다.</summary>
     private readonly HashSet<int> _kioskFieldNumbers;
 
-    /// <summary>응답 패널에 보여줄 필드 번호 — kiosk가 없는 필드 중 원캡 담당은 제외한다(원캡이 채운
-    /// 카드번호/PIN 등은 화면에 노출할 이유가 없다). <b>예외: 800000의 `#14`(BIN)</b>는 원캡 담당이어도
-    /// 보여준다 — 카드 정보 조회 전문의 유일한 목적이 그 조회 결과이기 때문이다(2026-09-18 사용자 확정).
-    /// 902614의 원캡 담당 8개(카드번호/PIN 등 민감정보)는 이 예외에 해당하지 않아 응답에도 나타나지 않는다.
+    /// <summary>
+    /// 응답 패널에 보여줄 필드 번호 — <b>kiosk 외의 주체가 하나라도 SET 장소에 있으면</b> 포함한다(2026-09-18
+    /// 2차 재확정). 요청·응답은 배타적 분리가 아니다 — 같은 필드라도 "전문을 송신하는 기관에서 SET"하는
+    /// 방향성 필드(예: `#6`/`#8`)는 kiosk가 요청에 값을 실어 보내고, 그 응답에서는 다른 주체(인터넷지로 등)가
+    /// 다른 값으로 채워 돌려준다(SPEC p.6 각주) — 그래서 kiosk+다른 주체 조합 필드는 요청·응답 양쪽에 다
+    /// 나타난다. 원캡 단독 담당 필드만 예외적으로 제외한다(원캡이 채운 카드번호/PIN 등은 화면에 노출할
+    /// 이유가 없다) — <b>단 800000의 `#14`(BIN)</b>는 원캡 담당이어도 보여준다(카드 정보 조회 전문의
+    /// 유일한 목적이 그 조회 결과이기 때문). 902614의 원캡 담당 8개(카드번호/PIN 등 민감정보)는 이 예외에
+    /// 해당하지 않아 응답에도 나타나지 않는다.
     /// </summary>
     private readonly HashSet<int> _responseFieldNumbers;
 
@@ -74,7 +79,7 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
 
         bool isCardInfoInquiry = schema.TransactionTypeCode == "800000";
         _responseFieldNumbers = new HashSet<int>(schema.Fields
-            .Where(f => !_kioskFieldNumbers.Contains(f.Number)
+            .Where(f => HasNonKioskOwner(f)
                 && (!_ownedByOneCap.Contains(f.Number) || (isCardInfoInquiry && f.Number == 14)))
             .Select(f => f.Number));
 
@@ -87,6 +92,11 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
         Regenerate();
         RefreshStatusBadge();
     }
+
+    /// <summary>SET 장소에 kiosk 외의 주체(원캡/인터넷지로/VAN/디지털예산)가 하나라도 있는지 —
+    /// kiosk 단독 필드만 이 조건을 만족하지 않는다.</summary>
+    private static bool HasNonKioskOwner(PosField field) =>
+        (field.Owners & ~PosFieldOwner.Kiosk) != PosFieldOwner.None;
 
     public string TabTitle { get; }
 

@@ -25,7 +25,10 @@ internal static class NoticeInquirySchema
             PosFieldOwner.Kiosk, // 2 요청기관 코드
             PosFieldOwner.DigitalBudget | PosFieldOwner.InternetGiro | PosFieldOwner.Kiosk, // 3 전문 종별 코드
             PosFieldOwner.Kiosk, // 4 거래 구분 코드
-            PosFieldOwner.DigitalBudget | PosFieldOwner.InternetGiro | PosFieldOwner.Kiosk, // 5 상태 코드
+            PosFieldOwner.DigitalBudget | PosFieldOwner.InternetGiro, // 5 상태 코드(2026-09-18 정정 —
+                // kiosk 오기재. SPEC p.8 전용표에서 kiosk 칸은 빈칸. p.5의 공통부분 "일반표"(인터넷지로/
+                // kiosk 2열짜리, 이 전문 전용표와는 다른 표)와 혼동해 옮겨 적었던 것으로 추정
+                // — pos-onecap-spec-expert 재확인).
             PosFieldOwner.DigitalBudget | PosFieldOwner.InternetGiro | PosFieldOwner.Kiosk, // 6 송·수신 FLAG
             PosFieldOwner.DigitalBudget | PosFieldOwner.InternetGiro, // 7 응답 코드
             PosFieldOwner.DigitalBudget | PosFieldOwner.InternetGiro | PosFieldOwner.Kiosk, // 8 전송 일시
@@ -33,7 +36,8 @@ internal static class NoticeInquirySchema
             PosFieldOwner.DigitalBudget, // 10 이용기관/센터 전문 관리 번호
             PosFieldOwner.DigitalBudget | PosFieldOwner.Kiosk, // 11 지로 이용기관 분류코드
             PosFieldOwner.DigitalBudget | PosFieldOwner.Kiosk, // 12 지로 이용기관 지로번호
-            PosFieldOwner.DigitalBudget | PosFieldOwner.InternetGiro | PosFieldOwner.Kiosk, // 13 FILLER
+            PosFieldOwner.DigitalBudget | PosFieldOwner.InternetGiro, // 13 FILLER(2026-09-18 정정 — 위 #5와
+                // 같은 이유로 kiosk 오기재였다. p.8 전용표에서 kiosk 칸 빈칸).
         };
 
         IEnumerable<PosField> header = PosCommonHeader.Create(CommonHeaderNameVariant.NoticeInquiry501008, headerOwners);
