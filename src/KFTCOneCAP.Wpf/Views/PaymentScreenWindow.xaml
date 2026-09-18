@@ -245,10 +245,6 @@
                             </Border>
                         </Grid>
 
-                        <TextBlock DockPanel.Dock="Top" Text="파란 행 = 원캡이 카드리딩으로 채운 필드(800000의 BIN 조회 결과)"
-                                   Visibility="{Binding HasResponse, Converter={StaticResource BoolToVisibilityConverter}}"
-                                   TextWrapping="Wrap" FontSize="10" Foreground="{StaticResource SubTextBrush}" Margin="0,0,0,8"/>
-
                         <Grid>
                             <TextBlock Text="아직 전송하지 않았습니다.&#x0a;좌측 '전송' 버튼을 누르면 응답이 여기에 채워집니다."
                                        Visibility="{Binding HasResponse, Converter={StaticResource InverseBoolToVisibilityConverter}}"
