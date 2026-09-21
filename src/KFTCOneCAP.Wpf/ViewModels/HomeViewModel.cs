@@ -24,8 +24,12 @@ public sealed partial class HomeViewModel : ObservableObject
     /// "준비 중" 안내에서 실제 화면 오픈으로 바뀌었다.</summary>
     public event EventHandler? ShopSetupRequested;
 
-    /// <summary>범위 밖 카드(결제/전표 설정) 클릭 — 카드 이름을 실어 알린다.</summary>
+    /// <summary>범위 밖 카드(전표 설정) 클릭 — 카드 이름을 실어 알린다.</summary>
     public event EventHandler<string>? NotImplementedCardRequested;
+
+    /// <summary>결제 카드 클릭(Phase 29, docs/payment_relay/development_plan.md P29-7, PRD.md §12.1) —
+    /// 실제 창 생성/오픈은 View가 담당한다.</summary>
+    public event EventHandler? PaymentScreenRequested;
 
     [RelayCommand]
     private void OpenReaderSetup() => ReaderSetupRequested?.Invoke(this, EventArgs.Empty);
@@ -34,7 +38,7 @@ public sealed partial class HomeViewModel : ObservableObject
     private void OpenShopSetup() => ShopSetupRequested?.Invoke(this, EventArgs.Empty);
 
     [RelayCommand]
-    private void OpenTrans() => NotImplementedCardRequested?.Invoke(this, "결제");
+    private void OpenTrans() => PaymentScreenRequested?.Invoke(this, EventArgs.Empty);
 
     [RelayCommand]
     private void OpenReceiptSetup() => NotImplementedCardRequested?.Invoke(this, "전표 설정");

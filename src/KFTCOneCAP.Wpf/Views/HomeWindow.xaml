@@ -274,7 +274,7 @@
                     <StackPanel Grid.Row="2" HorizontalAlignment="Left">
                         <TextBlock Text="결제" Style="{StaticResource HomeCardTitleTextStyle}"/>
                     </StackPanel>
-                    <TextBlock Grid.Row="3" Text="결제 화면을 실행하고&#x0a;결제을 진행합니다." Style="{StaticResource HomeCardDescriptionTextStyle}" Margin="0,8,0,0"/>
+                    <TextBlock Grid.Row="3" Text="결제 화면을 실행하고&#x0a;결제를 진행합니다." Style="{StaticResource HomeCardDescriptionTextStyle}" Margin="0,8,0,0"/>
                 </Grid>
             </Button>
 

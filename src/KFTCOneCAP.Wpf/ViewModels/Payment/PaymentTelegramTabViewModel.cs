@@ -144,15 +144,15 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
 
     private void RefreshStatusBadge()
     {
+        // 2026-09-21 체크포인트 2 L-4 수정 — 원래는 !HasResponse를 IsStatusError보다 먼저 봐서, 전송
+        // 계층 실패(연결 실패/타임아웃 등 SendAsync의 catch(Exception) 경로, HasResponse=false·
+        // IsStatusError=true)와 필드 길이 초과(OnRequestRowValueChanged) 둘 다 배지가 "미전송"으로
+        // 뜨고 좌측의 빨간 "전송 실패: ..." StatusMessage와 모순됐다. IsStatusError를 먼저 봐서 두
+        // 경로 다 "오류" 배지가 뜨게 한다 — "미전송"은 이제 IsStatusError 없이 그냥 한 번도 안 보낸
+        // 초기 상태(Regenerate 직후)에만 해당한다.
         if (IsSending)
         {
             StatusBadgeText = "전송 중";
-            StatusBadgeIsPositive = false;
-            StatusBadgeIsError = false;
-        }
-        else if (!HasResponse)
-        {
-            StatusBadgeText = "미전송";
             StatusBadgeIsPositive = false;
             StatusBadgeIsError = false;
         }
@@ -161,6 +161,12 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
             StatusBadgeText = "오류";
             StatusBadgeIsPositive = false;
             StatusBadgeIsError = true;
+        }
+        else if (!HasResponse)
+        {
+            StatusBadgeText = "미전송";
+            StatusBadgeIsPositive = false;
+            StatusBadgeIsError = false;
         }
         else
         {

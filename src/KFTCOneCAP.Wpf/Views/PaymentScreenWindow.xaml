@@ -18,8 +18,8 @@
         결제 화면(Phase 29 P29-6, docs/payment_relay/PRD.md §12/§12.5, development_plan.md "P29-6") —
         원캡이 스스로 국세 결제 3전문(501008/800000/902614)을 시작하는 화면. 이번 단계는 전문 간 필드
         연쇄를 구현하지 않고 임의값으로 전문 왕복 자체(프레이밍/POSITION/CP949/카드리딩 필드)를 검증한다
-        (PRD §12.2). 이 창은 아직 홈 화면과 배선되지 않는다(P29-7이 별도로 연결) — App.xaml.cs의
-        payment-screen-test 진단 인자, 또는 직접 인스턴스화로 연다.
+        (PRD §12.2). 홈 화면 "결제" 카드(P29-7)에서 연다 — App.xaml.cs의 payment-screen-test 진단 인자는
+        Owner 없이 단독으로 열 때 쓴다.
 
         2026-09-18 사용자 지적으로 UI 재작업(2라운드) — 처음엔 DataGrid 표 + hex/CP949 원문 패널까지
         보여주는 "엔지니어 진단 화면"이었으나, 참고 이미지(docs/home_reader_setup/screenshots/pay_screen.png
@@ -287,8 +287,11 @@
                          582를 PaymentTabStripWidth 리소스로 뺐다(컴팩트 모드 492). -->
                     <Border DockPanel.Dock="Top" Background="#F1F3F5" CornerRadius="10" Padding="4"
                             Width="{StaticResource PaymentTabStripWidth}" HorizontalAlignment="Left">
+                        <!-- 2026-09-21 체크포인트 2 M-2 수정 — 탭 중 하나라도 전송 중이면 탭 전환
+                             자체를 막는다(PaymentScreenViewModel.IsAnyTabSending 주석 참고). -->
                         <TabControl x:Name="TelegramTabControl" ItemsSource="{Binding Tabs}" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}"
                                     Background="Transparent" BorderThickness="0" Padding="0"
+                                    IsEnabled="{Binding IsAnyTabSending, Converter={StaticResource InverseBoolConverter}}"
                                     ItemContainerStyle="{StaticResource PaymentTabItemStyle}">
                             <TabControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type payment:PaymentTelegramTabViewModel}">

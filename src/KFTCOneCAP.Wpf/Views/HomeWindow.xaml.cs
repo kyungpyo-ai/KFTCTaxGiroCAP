@@ -26,6 +26,11 @@ public partial class HomeWindow : Window
     /// </summary>
     private System.Windows.Forms.NotifyIcon? _trayIcon;
 
+    /// <summary>Phase 29(P29-7) — 결제 화면 중복 실행 방지용 캐시. 이미 열려 있으면 새로 만들지 않고
+    /// 기존 창을 Activate()한다(ReaderSetupWindow/ShopSetupWindow는 모달(ShowDialog)이라 이 캐시가
+    /// 필요 없지만, 결제 화면은 비모달(Show)이라 여러 번 클릭하면 인스턴스가 계속 쌓일 수 있다).</summary>
+    private PaymentScreenWindow? _paymentScreenWindow;
+
     public HomeViewModel ViewModel { get; } = new();
 
     public HomeWindow()
@@ -35,6 +40,7 @@ public partial class HomeWindow : Window
         ViewModel.ReaderSetupRequested += OnReaderSetupRequested;
         ViewModel.ShopSetupRequested += OnShopSetupRequested;
         ViewModel.NotImplementedCardRequested += OnNotImplementedCardRequested;
+        ViewModel.PaymentScreenRequested += OnPaymentScreenRequested;
         SourceInitialized += HomeWindow_SourceInitialized;
     }
 
@@ -101,10 +107,19 @@ public partial class HomeWindow : Window
         Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(OpenShopSetup));
 
     /// <summary>
-    /// 결제/전표 설정 카드는 본 프로젝트 범위 밖 화면(PRD 1.3 비범위, PRD 6장 미확정
-    /// 사항 #5)이다. 임의로 실동작을 만들지 않고 "준비 중" 안내만 표시한다(카드 자체를 비활성화하지
-    /// 않은 이유: 원본 화면에서 카드가 눌리지 않는 것처럼 보이는 것도 임의 판단이라 UX상 더 이상하다고
-    /// 판단 — PM 확인 시 이 처리 방식은 재검토 필요).
+    /// 결제 카드(Phase 29, docs/payment_relay/development_plan.md P29-7, PRD.md §12.1). 리더기/가맹점
+    /// 설정 카드와 같은 이유로 한 프레임 뒤(Input 우선순위)로 미뤄 눌림 애니메이션이 먼저 렌더링을
+    /// 마치도록 한다.
+    /// </summary>
+    private void OnPaymentScreenRequested(object? sender, EventArgs e) =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(OpenPaymentScreen));
+
+    /// <summary>
+    /// 전표 설정 카드는 여전히 본 프로젝트 범위 밖 화면이다(PRD 1.3 비범위, PRD 6장 미확정 사항 #5).
+    /// "결제" 카드는 Phase 29(P29-7)부터 <see cref="OnPaymentScreenRequested"/>로 분리됐다. 임의로
+    /// 실동작을 만들지 않고 "준비 중" 안내만 표시한다(카드 자체를 비활성화하지 않은 이유: 원본 화면에서
+    /// 카드가 눌리지 않는 것처럼 보이는 것도 임의 판단이라 UX상 더 이상하다고 판단 — PM 확인 시 이
+    /// 처리 방식은 재검토 필요).
     /// </summary>
     private void OnNotImplementedCardRequested(object? sender, string cardName) => ShowNotImplementedCard(cardName);
 
@@ -154,6 +169,41 @@ public partial class HomeWindow : Window
 
         var dialog = new ShopSetupWindow { Owner = this };
         dialog.ShowDialog();
+    }
+
+    /// <summary>
+    /// Phase 29(P29-7, PRD.md §12.1/§12.4) — 결제 화면. 리더기/가맹점 설정 화면과 달리 <b>모달로 열지
+    /// 않는다</b>(<c>Show()</c>, <c>ShowDialog()</c> 아님) — 결제 화면이 떠 있는 동안에도 홈 화면과
+    /// 다른 창이 계속 반응해야 한다.
+    ///
+    /// 이 화면은 <see cref="App.SetupScreenGate"/>에 등록하지 않는다 — 단일 워커 <c>TransactionQueue</c>가
+    /// 결제 요청을 순차 처리하므로 리더기/VAN 동시 접근이 발생하지 않는다(PRD §12.4). 리더기 설정/가맹점
+    /// 설정 화면이 그 게이트에 등록하는 것과 의도적으로 다르다 — 등록하면 이 화면 자신이 연 상태에서 이
+    /// 화면이 보내는 요청조차 자기 자신 때문에 E03으로 거절되는 모순이 생긴다.
+    ///
+    /// 중복 실행 방지: 이미 열려 있으면 새 인스턴스를 만들지 않고 기존 창을 <c>Activate()</c>한다(비모달
+    /// 이라 리더기/가맹점 설정 화면과 달리 이 창은 여러 번 클릭하면 인스턴스가 계속 쌓일 수 있어 별도
+    /// 캐시(<see cref="_paymentScreenWindow"/>)로 관리한다).
+    ///
+    /// 2026-09-21 체크포인트 2 M-1 수정 — <c>Activate()</c>만으로는 창이 최소화(<c>WindowState.Minimized</c>)
+    /// 되어 있을 때 복원되지 않는다(WPF 동작). 그 상태에서 카드를 다시 누르면 작업표시줄만 깜박이고
+    /// 화면상 무반응이라 카드가 고장 난 것처럼 보였다 — <see cref="RestoreFromTray"/>가 이미 쓰는
+    /// <c>Show(); WindowState = Normal; Activate();</c> 순서를 그대로 맞춘다.
+    /// </summary>
+    private void OpenPaymentScreen()
+    {
+        if (_paymentScreenWindow != null)
+        {
+            _paymentScreenWindow.Show();
+            _paymentScreenWindow.WindowState = WindowState.Normal;
+            _paymentScreenWindow.Activate();
+            return;
+        }
+
+        var window = new PaymentScreenWindow(this);
+        window.Closed += (_, _) => _paymentScreenWindow = null;
+        _paymentScreenWindow = window;
+        window.Show();
     }
 
     /// <summary>
