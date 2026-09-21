@@ -45,11 +45,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `.claude/agents/reader-pinpad-spec-expert.md` — 리더기/핀패드 SPEC 원문 및 `ReaderSerial.dll` API 계약 확인 전담(아래 "리더기 연동 DLL" 절 참고).
 - `.claude/agents/reader-dll-integration-developer.md` — `ReaderSerial.dll` P/Invoke 연동 개발 전담(아래 "리더기 연동 DLL" 절 참고).
 - `.claude/agents/pos-onecap-spec-expert.md` — POS ↔ KFTCOneCAP 간 전문(telegram) SPEC 확인 전담. 근거 문서는
-  `docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260915 (1).pdf`(hwp 원본은 DRM
-  배포용 문서 래퍼라 열 수 없음, PDF가 유일하게 파싱 가능 — **2026-09-15 개정판의 2026-09-18 재배포본이
-  최신 정본**이며 파일명의 ` (1)`이 그 재배포본이다. 20260831·20260826판은 저장소에 더는 없다. 개정 내용은
-  `docs/payment_relay/PRD.md` §3.3.1 참고 — 3전문 필드 구성은 불변이고, 999999 전문 정식 등재 / 원캡
-  응답코드(E·R·D) 섹션 신설 / 서버 응답코드 `031` 추가 / 902614 `#38`에 kiosk SET ○ 추가가 달라졌다.
+  `docs/payment_relay/spec/국세 베리어프리 키오스크용 전산설계서(POS-원캡)_20260921.pdf`(hwp 원본은 DRM
+  배포용 문서 래퍼라 열 수 없음, PDF가 유일하게 파싱 가능 — **2026-09-21판이 최신 정본**이며, 그 이전
+  20260915(재배포본 포함)·20260831·20260826판은 저장소에 더는 없다. 개정 내용은
+  `docs/payment_relay/PRD.md` §3.3.1 참고 — 3전문 필드 구성·POSITION·길이는 불변이고, 902614의
+  `#38`(카드소유주 주민/사업자등록번호) SET 장소가 kiosk→인터넷지로로, `#51`(암호화된 비밀번호 정보)이
+  표 원문 자체가 원캡으로 바뀌었다(둘 다 2026-09-21 반영 완료). 그 이전 20260915판에서는 999999 전문
+  정식 등재 / 원캡 응답코드(E·R·D) 섹션 신설 / 서버 응답코드 `031` 추가가 있었다.
   **전문 간 필드 연쇄는 아직 SPEC 근거가 확정되지 않았다** — 조사 기록과 발주처 질의는
   `docs/payment_relay/spec_open_questions.md`가 정본이며, 연쇄 필드를 코드에 넣기 전에 그 문서를 먼저
   확인한다) — 501008(국고 상세 고지내역 조회), 800000(카드
