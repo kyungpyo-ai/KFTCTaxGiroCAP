@@ -247,4 +247,29 @@
     <sys:Double x:Key="PaymentWindowWidth">1180</sys:Double>
     <sys:Double x:Key="PaymentWindowHeight">760</sys:Double>
 
+    <!--
+        2026-09-18 컴팩트 모드 대응(사용자 지적 — 다른 화면과 달리 이 화면만 저해상도 모니터에서
+        레이아웃이 정상적으로 안 맞음): 탭 폭/요청 카드 폭/응답 패널 폭이 XAML에 리터럴로 박혀
+        있어 컴팩트 모드에서도 줄지 않고, 그 결과 컴팩트 창 폭(1100)에서 카드 콘텐츠 폭이 필요
+        폭(582+20+440=1042)보다 좁아 응답 패널이 잘렸다. 홈/리더기 설정 화면과 같은 방식으로
+        리소스 키로 빼서 Layout.Compact.xaml에서 축소값을 제공한다.
+        요청 카드 폭(180)은 RequestFieldCardTemplate 3열 배치(WrapPanel)의 실측값이고, 탭 폭(582)은
+        그 3열의 실제 콘텐츠 폭(180+14 마진)×3과 고정으로 맞춰야 한다(PaymentScreenWindow.xaml
+        해당 주석 참고, 자동 동기화 아님).
+    -->
+    <sys:Double x:Key="PaymentRequestCardWidth">180</sys:Double>
+    <Thickness x:Key="PaymentRequestCardMargin">0,0,14,14</Thickness>
+    <Thickness x:Key="PaymentRequestScrollPadding">0,0,20,0</Thickness>
+    <sys:Double x:Key="PaymentTabStripWidth">582</sys:Double>
+    <GridLength x:Key="PaymentColumnGapGridLength">20</GridLength>
+    <sys:Double x:Key="PaymentResponsePanelWidth">440</sys:Double>
+    <GridLength x:Key="PaymentResponsePanelWidthGridLength">440</GridLength>
+
+    <!--
+        2026-09-18 컴팩트 대응 2차 — 컴팩트 모드에서 탭 글씨가 잘려(탭 폭은 줄었는데 폰트/패딩은
+        그대로) 폰트 크기/패딩도 리소스로 뺐다. 일반 모드는 기존 리터럴(13pt, 16,8) 그대로 유지.
+    -->
+    <sys:Double x:Key="PaymentTabFontSize">13</sys:Double>
+    <Thickness x:Key="PaymentTabPadding">16,8</Thickness>
+
 </ResourceDictionary>

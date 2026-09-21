@@ -25,6 +25,16 @@ public partial class PaymentScreenWindow : Window
     {
         InitializeComponent();
         DataContext = ViewModel;
+
+        // 2026-09-18 발견(사용자가 1024×768 컴팩트 해상도로 확인 중 발견) — XAML의
+        // WindowStartupLocation="CenterOwner"는 Owner가 있을 때(P29-7이 홈 화면에서 이 창을 열 때)를
+        // 겨냥한 값이다. --payment-screen-test 진단 인자처럼 Owner 없이 이 창이 StartupUri로 단독
+        // 실행되면 WPF가 CenterOwner를 화면 중앙이 아니라 OS 기본 캐스케이드 위치(예: 104,104)로
+        // 처리해, 컴팩트 창 폭(1000)이 1024 화면 폭을 넘어 오른쪽이 잘렸다. Owner가 없을 때만
+        // CenterScreen으로 대체한다(HomeWindow.xaml과 동일 값) — Owner가 있는 정상 경로는 그대로
+        // CenterOwner를 쓴다.
+        if (Owner == null)
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
     }
 
     /// <summary>흰색(라이트) 타이틀바 강제 적용 — HomeWindow/ReaderSetupWindow와 동일 로직.</summary>

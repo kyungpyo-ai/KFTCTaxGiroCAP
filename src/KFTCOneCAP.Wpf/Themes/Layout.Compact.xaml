@@ -180,7 +180,55 @@
     <Thickness x:Key="ReaderBottomBtnPadding">16,2</Thickness>
 
     <!-- ===================== 결제 화면 (Phase 29 P29-6) — Layout.xaml과 동일 취지, 저해상도용 축소값 ===================== -->
-    <sys:Double x:Key="PaymentWindowWidth">1100</sys:Double>
+    <!-- 2026-09-18 실측(사용자가 1024×768로 해상도 변경 후 스크린샷 확인) — 컴팩트 창 폭을 기존
+         Layout.xaml값 그대로 1100으로 뒀던 건 그 자체가 버그였다(1024×768 화면보다 넓어 오른쪽이
+         화면 밖으로 잘림, 홈/리더기 설정 컴팩트 창은 840/722로 이미 1024보다 작음). 1000으로
+         줄였다(1024 대비 여유 24px). -->
+    <sys:Double x:Key="PaymentWindowWidth">1000</sys:Double>
     <sys:Double x:Key="PaymentWindowHeight">660</sys:Double>
+
+    <!--
+        2026-09-18 컴팩트 모드 대응 — 카드 콘텐츠 폭 실측: 컴팩트 창 폭 1000에서 바깥
+        Margin(32)+ReaderMainCardPadding 좌우(48)를 빼면 920px 가용. 요청 카드 폭 비율은 리더기
+        콤보 폭 비율(178→152≈0.854)에 근접한 150(=180×0.833)으로 잡아 탭 폭도 3열 실측(150+14)×3
+        =492로 맞췄다. 응답 패널은 440×0.818≈360. 합계 492+20+360=872로 가용 폭(920) 안에 들어간다
+        (48px 여유 — 다른 요소 대비 과도하게 빡빡하지 않도록 정확한 비율 대신 여유를 더 뒀다).
+    -->
+    <!-- 2026-09-18 4차(3차 시도가 카드 폭을 150→160으로 같이 올렸다가 요청 필드 3열이 2열로
+         깨짐 — 사용자 지적 "요청필드를 2칸으로 만들었어?"). 카드 폭/탭 폭은 3열 배치를 만드는
+         실측값이라 건드리지 않고 되돌린다. 탭 글씨 확보는 폰트/패딩만으로 처리한다. -->
+    <!-- 2026-09-21(사용자 재지적 — 응답 패널을 380으로 키운 뒤에도 요청 필드가 여전히 2열).
+         ScrollViewer Padding(20)+세로 스크롤바(~17~20)까지 감안하면 실제 가용폭이 예상(520)보다
+         작아 150도 빠듯했던 것으로 보인다. 140으로 더 줄이고 탭 폭도 3열 실측(140+14)×3=462로 맞춘다.
+         2026-09-21 추가(사용자 제안 "왼쪽 간격을 줄이면") — 카드 간격(14→8)과 ScrollViewer 오른쪽
+         패딩(20→10)도 컴팩트에서 줄여 그만큼을 응답 패널로 돌린다. 탭/카드 3열 폭도
+         (140+8)×3=444로 재계산. -->
+    <!-- 2026-09-21 — 카드 155/간격 12 시도는 사용자가 "이전버전이 나은것같아"로 반려, 되돌림. -->
+    <sys:Double x:Key="PaymentRequestCardWidth">140</sys:Double>
+    <Thickness x:Key="PaymentRequestCardMargin">0,0,8,14</Thickness>
+    <Thickness x:Key="PaymentRequestScrollPadding">0,0,10,0</Thickness>
+    <sys:Double x:Key="PaymentTabStripWidth">444</sys:Double>
+    <GridLength x:Key="PaymentColumnGapGridLength">20</GridLength>
+    <!-- 2026-09-21(사용자 지적 — 컴팩트 모드 응답 레이블이 TextTrimming으로 잘려 보임). 360→400으로
+         키웠다가 요청 필드 3열이 2열로 깨지고 탭도 살짝 잘리는 회귀 발생(재지적) — 왼쪽
+         ScrollViewer의 세로 스크롤바 폭(~17px)이 계산에서 빠져 있었던 것으로 보인다. 여유를 절반만
+         (360→380) 써서 재확인한다. -->
+    <!-- 2026-09-21 — 카드 간격/스크롤 패딩까지 줄여 탭/카드 폭을 444로 더 절약(462→444, 18px 추가
+         확보)한 만큼 응답 패널을 390→410으로 확대. -->
+    <sys:Double x:Key="PaymentResponsePanelWidth">410</sys:Double>
+    <GridLength x:Key="PaymentResponsePanelWidthGridLength">410</GridLength>
+
+    <!--
+        2026-09-18 컴팩트 대응 2차(사용자 지적 — 컴팩트 모드에서 탭 글씨가 잘림) → 폰트 10pt로
+        줄여 해결했으나 3차 피드백("탭글씨도 너무 작아져서 이상해졌어")으로 너무 작다는 지적을
+        받았다. 탭 폭(492, 카드 폭에 고정 종속이라 위 3열 배치 유지를 위해 그대로 둠)에서 폰트만
+        10→11, 패딩만 10,8→8,8로 조정 — 탭 1개당 가용폭 164-8*2-4≈144px, 11pt에서 "국고 상세
+        고지내역 조회"가 잘리지 않는다(10pt보다 커 보이면서 카드 폭은 안 건드림).
+        2026-09-21 — 요청 3열 확보를 위해 탭 폭이 492→462로 줄어(위 PaymentTabStripWidth) 가용폭이
+        144→134px로 다시 좁아졌다. 잘림 재발을 막기 위해 패딩을 8,8→6,8로 선제 조정(가용폭
+        ≈142px로 회복).
+    -->
+    <sys:Double x:Key="PaymentTabFontSize">11</sys:Double>
+    <Thickness x:Key="PaymentTabPadding">6,8</Thickness>
 
 </ResourceDictionary>

@@ -56,8 +56,10 @@
         <Style x:Key="PaymentTabItemStyle" TargetType="TabItem">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Padding" Value="16,8"/>
+            <!-- 2026-09-18 컴팩트 대응 2차 — 컴팩트 모드에서 탭 글씨가 잘려 리터럴(13, 16,8)을
+                 Themes/Layout.xaml의 PaymentTabFontSize/PaymentTabPadding으로 뺐다(컴팩트 10pt/10,8). -->
+            <Setter Property="FontSize" Value="{StaticResource PaymentTabFontSize}"/>
+            <Setter Property="Padding" Value="{StaticResource PaymentTabPadding}"/>
             <Setter Property="Margin" Value="0,0,4,0"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -115,7 +117,11 @@
             <!-- 205에서는 실측 결과 2열까지만 들어가 160으로 더 줄였다(2026-09-18, 실제 화면으로 재확인). -->
             <!-- 160→180(2026-09-18 11라운드) — 탭 글씨가 잘려 탭 폭을 늘려야 했고, 탭 폭이 이 3열
                  콘텐츠 폭에 고정으로 맞춰져 있어(아래 탭 Border 참고) 같이 늘렸다. -->
-            <StackPanel Width="180" Margin="0,0,14,14" ToolTip="{Binding TypeAndLengthTooltip}">
+            <!-- 2026-09-18 컴팩트 대응 — 리터럴 180을 Themes/Layout.xaml의 PaymentRequestCardWidth로
+                 뺐다(컴팩트 모드에서 150으로 축소, Layout.Compact.xaml 참고).
+                 2026-09-21 — 카드 사이 간격(14)도 PaymentRequestCardMargin으로 빼서 컴팩트에서 줄일 수
+                 있게 했다(사용자 제안 "왼쪽 간격을 줄이면" — 그만큼 응답 패널에 더 배정). -->
+            <StackPanel Width="{StaticResource PaymentRequestCardWidth}" Margin="{StaticResource PaymentRequestCardMargin}" ToolTip="{Binding TypeAndLengthTooltip}">
                 <TextBlock Text="{Binding NumberAndName}" FontSize="12" Foreground="{StaticResource SubTextBrush}"
                            TextTrimming="CharacterEllipsis" Margin="2,0,0,6"/>
                 <Border Style="{StaticResource RequestFieldBoxStyle}">
@@ -130,7 +136,12 @@
              제거했다 — 실 VAN이 붙으면 어차피 의미 없어질 스텁 전용 표시라, 굳이 지금 강조하지 않는다. -->
         <DataTemplate x:Key="ResponseFieldRowTemplate" DataType="{x:Type payment:PosFieldRowViewModel}">
             <!-- 세로 Padding 7→4→2→0으로 점점 좁혔다(2026-09-18, 사용자가 "더 줄여달라"고 재지적).
-                 0이라도 위아래 TextBlock 자체의 줄높이(line-height)가 있어 완전히 붙지는 않는다. -->
+                 그래도 줄간격이 넓어 보인다는 재지적 끝에 진짜 원인을 찾았다: 아래 TextBox(값)가
+                 Style을 지정하지 않아 Themes/TextBox.xaml의 전역 기본 TextBox 스타일(키 없는
+                 <Style TargetType="TextBox">, MinHeight=44)을 그대로 상속받고 있었다 — Grid
+                 Height/Padding을 아무리 줄여도 이 MinHeight=44 바닥 때문에 무효했다. 아래 TextBox에
+                 MinHeight을 명시해 이 전역 기본값을 덮어썼다(원인 확정, 2026-09-18). 0→24→30 순으로
+                 조정(이제 진짜 원인이 없어져 Grid/TextBox에 준 값이 그대로 반영된다). -->
             <Border Padding="4,0" ToolTip="{Binding TypeAndLengthTooltip}">
                 <Border.Style>
                     <Style TargetType="Border">
@@ -144,6 +155,11 @@
                 </Border.Style>
                 <DockPanel>
                     <Border DockPanel.Dock="Bottom" Height="1" Background="{StaticResource FooterDividerBrush}" Margin="0,0,0,0"/>
+                    <!-- 2026-09-18 시행착오 기록 — Height를 18/22/26으로 명시적으로 줘 봤지만, 이 값들이
+                         전부 Padding=0 상태의 자연 줄높이(FontSize 12 기준 약 16~19px)보다 커서 실제로는
+                         간격을 "줄이는" 게 아니라 "늘리는" 결과였다(사용자 지적으로 확인). 가장 타이트한
+                         상태는 Height를 아예 지정하지 않고 자연 크기에 맡기는 것 — 아래에 Height 속성을
+                         두지 않는다. -->
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -159,7 +175,7 @@
                         <TextBox Grid.Column="2" Text="{Binding Value, Mode=OneWay}" FontSize="12" FontWeight="Bold"
                                  Foreground="{StaticResource TitleTextBrush}" TextAlignment="Right" TextWrapping="Wrap"
                                  VerticalAlignment="Center" IsReadOnly="True" IsReadOnlyCaretVisible="True"
-                                 BorderThickness="0" Background="Transparent" Padding="0" Cursor="IBeam"/>
+                                 BorderThickness="0" Background="Transparent" Padding="0" MinHeight="30" Cursor="IBeam"/>
                     </Grid>
                 </DockPanel>
             </Border>
@@ -197,7 +213,9 @@
                 <TextBlock DockPanel.Dock="Top" Text="요청 필드 — kiosk가 채워 보내는 값(값 입력)"
                            FontWeight="Bold" FontSize="13" Margin="0,0,0,10" Foreground="{StaticResource CardTitleTextBrush}"/>
 
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,20,0">
+                <!-- 2026-09-21 — 오른쪽 패딩(20)도 PaymentRequestScrollPadding으로 빼서 컴팩트에서
+                     줄일 수 있게 했다(카드 간격과 같은 이유). -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="{StaticResource PaymentRequestScrollPadding}">
                     <ItemsControl ItemsSource="{Binding RequestRows}" ItemTemplate="{StaticResource RequestFieldCardTemplate}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -247,9 +265,13 @@
             <Grid Margin="0,14,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="20"/>
-                    <!-- 사용자가 다시 확대 요청(2026-09-18, 10라운드) — 380→440. -->
-                    <ColumnDefinition Width="440"/>
+                    <!-- 2026-09-21 — 요청 라벨 잘림 해결을 위해 가운데 간격도 리소스로 빼서 컴팩트에서
+                         줄일 수 있게 했다(사용자 제안 "가운데 간격을 줄이고"). -->
+                    <ColumnDefinition Width="{StaticResource PaymentColumnGapGridLength}"/>
+                    <!-- 사용자가 다시 확대 요청(2026-09-18, 10라운드) — 380→440. 2026-09-18 컴팩트
+                         대응으로 리터럴을 Themes/Layout.xaml의 PaymentResponsePanelWidthGridLength로
+                         뺐다(컴팩트 모드 360, Layout.Compact.xaml 참고). -->
+                    <ColumnDefinition Width="{StaticResource PaymentResponsePanelWidthGridLength}"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- ===================== 좌측: 탭 + 요청(편집 가능) ===================== -->
@@ -258,11 +280,13 @@
                          필드가 실제로 몇 열을 쓰는지와 무관하게 탭을 항상 컬럼 전체 폭(응답 박스 바로
                          앞까지)으로 늘려버려, 필드가 3열만 쓰고 남는 여백까지 탭이 채우는 문제가
                          있었다. 탭 폭을 필드 3열의 실제 콘텐츠 폭에 맞춰 고정값으로 준다 — 카드 폭이
-                         바뀌면 이 값도 같이 바꿔야 한다(자동 동기화 아님, 두 값이 이 파일 안에 나란히
-                         있으니 유지보수 시 같이 확인할 것). 11라운드에서 탭 글씨가 잘려 카드 폭을
-                         160→180으로, 이 값도 522(174×3)→582(194×3)로 같이 늘렸다. -->
+                         바뀌면 이 값도 같이 바꿔야 한다(자동 동기화 아님, Themes/Layout.xaml의
+                         PaymentRequestCardWidth/PaymentTabStripWidth 두 키가 나란히 있으니 유지보수
+                         시 같이 확인할 것). 11라운드에서 탭 글씨가 잘려 카드 폭을 160→180으로, 이
+                         값도 522(174×3)→582(194×3)로 같이 늘렸다. 2026-09-18 컴팩트 대응으로 리터럴
+                         582를 PaymentTabStripWidth 리소스로 뺐다(컴팩트 모드 492). -->
                     <Border DockPanel.Dock="Top" Background="#F1F3F5" CornerRadius="10" Padding="4"
-                            Width="582" HorizontalAlignment="Left">
+                            Width="{StaticResource PaymentTabStripWidth}" HorizontalAlignment="Left">
                         <TabControl x:Name="TelegramTabControl" ItemsSource="{Binding Tabs}" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}"
                                     Background="Transparent" BorderThickness="0" Padding="0"
                                     ItemContainerStyle="{StaticResource PaymentTabItemStyle}">
