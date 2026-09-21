@@ -112,6 +112,19 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
     [ObservableProperty]
     private bool isSending;
 
+    /// <summary>체크포인트 2 M-2 수정(2026-09-21) — 다른 탭이 전송 중일 때 true. 이 탭 자신의
+    /// <see cref="IsSending"/>과는 별개다(자기 자신이 전송 중일 땐 이 값은 false로 유지된다 —
+    /// <see cref="PaymentScreenViewModel"/>이 "나를 제외한 나머지 중 하나라도 전송 중"으로 계산해서
+    /// 대입한다). <see cref="IsSendBlocked"/>가 두 값을 합쳐 전송/재생성 버튼을 막는다.</summary>
+    [ObservableProperty]
+    private bool isBlockedByOtherTab;
+
+    /// <summary>전송/재생성 버튼을 막아야 하는지 — 자기 자신이 전송 중이거나 다른 탭이 전송 중일 때.
+    /// XAML이 이 값 하나만 보고 두 버튼의 IsEnabled를 결정한다(Views/PaymentScreenWindow.xaml).</summary>
+    public bool IsSendBlocked => IsSending || IsBlockedByOtherTab;
+
+    partial void OnIsBlockedByOtherTabChanged(bool value) => OnPropertyChanged(nameof(IsSendBlocked));
+
     [ObservableProperty]
     private string statusMessage = string.Empty;
 
@@ -140,7 +153,11 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
 
     partial void OnIsStatusErrorChanged(bool value) => RefreshStatusBadge();
 
-    partial void OnIsSendingChanged(bool value) => RefreshStatusBadge();
+    partial void OnIsSendingChanged(bool value)
+    {
+        RefreshStatusBadge();
+        OnPropertyChanged(nameof(IsSendBlocked));
+    }
 
     private void RefreshStatusBadge()
     {

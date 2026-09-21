@@ -54,7 +54,6 @@
             텍스트, 비선택 시 회색 텍스트로 재현한다.
         -->
         <Style x:Key="PaymentTabItemStyle" TargetType="TabItem">
-            <Setter Property="Focusable" Value="False"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <!-- 2026-09-18 컴팩트 대응 2차 — 컴팩트 모드에서 탭 글씨가 잘려 리터럴(13, 16,8)을
                  Themes/Layout.xaml의 PaymentTabFontSize/PaymentTabPadding으로 뺐다(컴팩트 10pt/10,8). -->
@@ -201,12 +200,17 @@
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
+                    <!-- 2026-09-21 체크포인트 2 M-2 수정 — 자기 탭 전송 중(IsSending)뿐 아니라 다른 탭이
+                         전송 중일 때도(IsBlockedByOtherTab) 이 버튼들을 막는다. 처음엔 TabControl 자체를
+                         비활성화했다가 탭 전환 자체가 안 되는 부작용(다른 탭이 아예 안 눌림)이 나서, 탭
+                         전환은 항상 되게 두고 버튼만 개별적으로 막는 방식으로 바꿨다 — 실제 위험은
+                         "다른 탭에서 또 전송 버튼을 누르는 것"뿐이고 탭을 구경하는 것 자체는 무해하다. -->
                     <StackPanel Orientation="Horizontal">
                         <Button Content="전송" Command="{Binding SendCommand}" Style="{StaticResource PrimaryButtonStyle}"
                                 Width="140" Margin="0,0,8,0"
-                                IsEnabled="{Binding IsSending, Converter={StaticResource InverseBoolConverter}}"/>
+                                IsEnabled="{Binding IsSendBlocked, Converter={StaticResource InverseBoolConverter}}"/>
                         <Button Content="임의값 재생성" Command="{Binding RegenerateCommand}" Style="{StaticResource ReaderSecondaryButtonStyle}"
-                                IsEnabled="{Binding IsSending, Converter={StaticResource InverseBoolConverter}}"/>
+                                IsEnabled="{Binding IsSendBlocked, Converter={StaticResource InverseBoolConverter}}"/>
                     </StackPanel>
                 </StackPanel>
 
@@ -287,11 +291,8 @@
                          582를 PaymentTabStripWidth 리소스로 뺐다(컴팩트 모드 492). -->
                     <Border DockPanel.Dock="Top" Background="#F1F3F5" CornerRadius="10" Padding="4"
                             Width="{StaticResource PaymentTabStripWidth}" HorizontalAlignment="Left">
-                        <!-- 2026-09-21 체크포인트 2 M-2 수정 — 탭 중 하나라도 전송 중이면 탭 전환
-                             자체를 막는다(PaymentScreenViewModel.IsAnyTabSending 주석 참고). -->
                         <TabControl x:Name="TelegramTabControl" ItemsSource="{Binding Tabs}" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}"
                                     Background="Transparent" BorderThickness="0" Padding="0"
-                                    IsEnabled="{Binding IsAnyTabSending, Converter={StaticResource InverseBoolConverter}}"
                                     ItemContainerStyle="{StaticResource PaymentTabItemStyle}">
                             <TabControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type payment:PaymentTelegramTabViewModel}">

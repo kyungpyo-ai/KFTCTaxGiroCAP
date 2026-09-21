@@ -231,6 +231,23 @@
   이미 점유 중인 별도 프로세스(KFTCOneCAP.exe, PID 5304 — 원본 MFC 참고 앱, 이 작업과 무관하며 건드리지
   않음)와 충돌해 소켓 바인딩 자체가 실패(AccessDenied)해 이번 세션에서는 재실행하지 못했다(환경
   제약, 코드 변경과 무관). 확인 즉시 requireAdministrator로 되돌렸다.
+
+  [한시적, 2026-09-21] Phase 29 체크포인트 2 M-2 재작업 검증 - TabControl.IsEnabled를 통째로 막는
+  최초 구현이 탭 전환 자체를 막아버리는 부작용을 냈다(사용자 실측 발견: "카드 정보 조회"/"국고
+  신용카드 승인요청" 탭이 안 눌림). 각 탭의 전송/재생성 버튼만 개별로 막는 방식으로 고친 뒤,
+  mcp__windows__* 클릭 자동화로 3개 탭이 전부 눌리는지 직접 확인하기 위해 한시적으로 asInvoker로
+  낮췄다. 3개 탭(501008/800000/902614) 전부 클릭으로 정상 전환됨을 실측 확인(mcp__windows__windows_click,
+  windows_snapshot으로 매번 요청 필드 목록이 해당 스키마로 바뀌는 것까지 확인)한 즉시
+  requireAdministrator로 되돌렸다.
+
+  [한시적, 2026-09-21] 사용자가 지켜보는 가운데 재현 테스트를 위해 다시 asInvoker로 낮췄다. SendInput
+  기반 합성 클릭으로 실제 물리 클릭과 동일한 경로를 재현해, 탭 클릭이 TabControl까지는 도달하지만
+  선택은 안 되는 것을 디버그 로그로 확인했다(원인은 `PaymentTabItemStyle`의 `Focusable="False"` —
+  별도로 제거). 확인 즉시 requireAdministrator로 되돌렸다.
+
+  [한시적, 2026-09-21] Phase 29 SPEC 20260921 반영(902614 #38 InternetGiro 전환) 직접 테스트를
+  위해 asInvoker로 낮췄다. #38 요청 필드 제외/응답 필드 노출과 3열 레이아웃 복구(PaymentRequestCardWidth 180->168)를
+  mcp__windows__windows_click/screenshot으로 직접 확인한 즉시 requireAdministrator로 되돌렸다.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">

@@ -31,38 +31,42 @@ public sealed partial class PaymentScreenViewModel : ObservableObject
         };
 
         // 체크포인트 2 M-2 수정(2026-09-21, 사용자 확정 "통신중일때는 다른 걸 못하게 하는게 맞아") —
-        // 탭별 IsSending은 자기 탭의 전송/재생성 버튼만 막고 다른 탭으로의 전환은 막지 않았다. 그래서
-        // 한 탭(예: 902614, 카드 대기 최대 120초)이 전송 중일 때 다른 탭으로 넘어가 그 탭의 전송을 또
-        // 누를 수 있었다 — TransactionQueue가 순차 처리하므로 안전(리더기/VAN 동시 접근)에는 문제가
-        // 없지만, 두 번째 요청이 응답 타임아웃에 먼저 걸려 화면엔 "실패"로 보이는데 실제로는 서버에서
-        // 정상 처리되는 상황이 생겨 사용자가 오인 재전송할 위험이 있었다. 탭 중 하나라도 전송 중이면
-        // TabControl 자체를 비활성화해(PaymentScreenWindow.xaml TelegramTabControl.IsEnabled) 탭 전환을
-        // 막는다 — 전송 중인 탭의 버튼은 기존 IsSending 바인딩으로 이미 막혀 있으므로 이거 하나로 충분.
+        // 탭별 IsSending은 자기 탭의 전송/재생성 버튼만 막고 다른 탭에서 또 전송 버튼을 누르는 것은
+        // 막지 않았다. 그래서 한 탭(예: 902614, 카드 대기 최대 120초)이 전송 중일 때 다른 탭으로 넘어가
+        // 그 탭의 전송을 또 누를 수 있었다 — TransactionQueue가 순차 처리하므로 안전(리더기/VAN 동시
+        // 접근)에는 문제가 없지만, 두 번째 요청이 응답 타임아웃에 먼저 걸려 화면엔 "실패"로 보이는데
+        // 실제로는 서버에서 정상 처리되는 상황이 생겨 사용자가 오인 재전송할 위험이 있었다.
+        //
+        // 최초 구현(TabControl 자체를 IsEnabled=false로 비활성화)은 탭 전환 자체가 막혀 버려 "다른 두
+        // 탭이 아예 안 눌리는" 부작용이 났다(2026-09-21 사용자 실측 발견) — TabControl.IsEnabled=false는
+        // 자식 전체(헤더 포함)의 입력을 막는데, 그 시각적 신호가 없어(PaymentTabItemStyle에 비활성 트
+        // 리거가 없음) 고장처럼 보였다. 탭 전환 자체는 무해하므로(구경만 하는 것) 항상 열어 두고, 각
+        // 탭의 전송/재생성 버튼만 개별적으로 막는 방식(PaymentTelegramTabViewModel.IsBlockedByOtherTab)
+        // 으로 바꿨다.
         foreach (PaymentTelegramTabViewModel tab in Tabs)
             tab.PropertyChanged += OnTabPropertyChanged;
-
-        RecomputeIsAnyTabSending();
     }
 
     private void OnTabPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(PaymentTelegramTabViewModel.IsSending))
-            RecomputeIsAnyTabSending();
+            RecomputeBlockedFlags();
     }
 
-    private void RecomputeIsAnyTabSending()
+    private void RecomputeBlockedFlags()
     {
-        bool any = false;
+        bool anySending = false;
         foreach (PaymentTelegramTabViewModel tab in Tabs)
         {
             if (tab.IsSending)
             {
-                any = true;
+                anySending = true;
                 break;
             }
         }
 
-        IsAnyTabSending = any;
+        foreach (PaymentTelegramTabViewModel tab in Tabs)
+            tab.IsBlockedByOtherTab = anySending && !tab.IsSending;
     }
 
     /// <summary>탭 3개(501008/800000/902614) 고정 목록 — 전문 종류가 늘어날 계획이 없어(PRD §12) 동적
@@ -71,9 +75,4 @@ public sealed partial class PaymentScreenViewModel : ObservableObject
 
     [ObservableProperty]
     private int selectedTabIndex;
-
-    /// <summary>탭 중 하나라도 전송 중이면 true — <see cref="Views.PaymentScreenWindow"/>가 이 값으로
-    /// TabControl을 비활성화해 탭 전환(과 그로 인한 중복 전송)을 막는다.</summary>
-    [ObservableProperty]
-    private bool isAnyTabSending;
 }

@@ -257,7 +257,11 @@
         그 3열의 실제 콘텐츠 폭(180+14 마진)×3과 고정으로 맞춰야 한다(PaymentScreenWindow.xaml
         해당 주석 참고, 자동 동기화 아님).
     -->
-    <sys:Double x:Key="PaymentRequestCardWidth">180</sys:Double>
+    <!-- 2026-09-21 — 902614(필드 40여개)는 세로 스크롤이 항상 뜨는데, 스크롤바 폭(~17px)을 계산에
+         넣지 않고 튜닝됐던 180 값이 딱 3열 경계에 걸쳐 있어 902614에서만 2열로 떨어졌다(501008/800000은
+         필드가 적어 스크롤이 안 뜨는 덕에 우연히 3열이 유지됐던 것). 스크롤바가 뜨는 최악의 경우에도
+         3열이 유지되도록 168로 살짝 줄였다. -->
+    <sys:Double x:Key="PaymentRequestCardWidth">168</sys:Double>
     <Thickness x:Key="PaymentRequestCardMargin">0,0,14,14</Thickness>
     <Thickness x:Key="PaymentRequestScrollPadding">0,0,20,0</Thickness>
     <sys:Double x:Key="PaymentTabStripWidth">582</sys:Double>
