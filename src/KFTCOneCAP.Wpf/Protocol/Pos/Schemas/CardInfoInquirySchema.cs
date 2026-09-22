@@ -43,8 +43,14 @@ internal static class CardInfoInquirySchema
             PosFieldOwner.InternetGiro | PosFieldOwner.Kiosk, // 8 전송 일시(정정: VAN이 아니라 kiosk)
             PosFieldOwner.Kiosk, // 9 은행/센터 전문 관리 번호
             PosFieldOwner.None, // 10 이용기관/센터 전문 관리 번호 — SPEC 표시 없음
-            PosFieldOwner.Kiosk, // 11 이용기관 발행기관 분류코드
-            PosFieldOwner.Kiosk, // 12 이용기관 지로 번호
+            // 11/12: SPEC 20260922 개정(pos-onecap-spec-expert 재확인, 2026-09-22)으로 SET 장소 표시가
+            // 인터넷지로/VAN/kiosk/원캡 4개 열 전부 삭제됐다 — 이전엔 kiosk ○였다. kiosk가 더 이상
+            // 채우지 않고 공백으로 보낸다(발주처 확인: 이용기관 식별은 #2로 충분, 수수료율 등은 #14
+            // BIN 기반 서버 조회라 이 값이 없어도 지장 없음, docs/payment_relay/spec_open_questions.md
+            // Q9). 501008/902614의 #11/#12는 이번 개정에서 변경 없음(각 스키마 파일의 headerOwners는
+            // 전문별로 독립이라 이 변경은 800000에만 적용된다).
+            PosFieldOwner.None, // 11 이용기관 발행기관 분류코드
+            PosFieldOwner.None, // 12 이용기관 지로 번호
             PosFieldOwner.None, // 13 FILLER(응답 코드 구분) — SPEC 표시 없음
         };
 
