@@ -219,8 +219,18 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
         // RequestRows가 통째로 교체되기 전(RebuildRequestRows가 Clear 후 다시 채운다) 현재 연쇄 값을
         // 스냅샷으로 떠 두고, 재생성 뒤 기존 ApplyChainedValue 파이프라인으로 그대로 복원한다 — 902614
         // #29 자기참조 합산 재계산도 이 경로를 타고 자동으로 다시 일어난다.
+        // 체크포인트 2 M-2 수정(2026-09-23) — 자기참조 연쇄의 대상 필드(현재 902614 #29 1건)는
+        // 스냅샷에서 제외한다. 복원 루프가 필드번호 오름차순으로 돌면서 #27→#28을 되돌릴 때마다
+        // RecomputeSelfReferencingChainTargets가 #29를 자동으로 정확히 재계산하는데, #29 자신도
+        // IsChainedField라 스냅샷에 포함되면 그 정확한 재계산 결과를 재생성 전의 낡은 값으로 다시
+        // 덮어써 버린다(§13.7). #27/#28 복원 과정에서 알아서 다시 채워지므로 별도 복원이 필요 없다.
+        var selfReferencingTargets = new HashSet<int>(
+            TelegramFieldChainMap.Entries
+                .Where(e => e.SourceTelegram == _schema.TransactionTypeCode && e.SourceTelegram == e.TargetTelegram)
+                .Select(e => e.TargetFieldNumber));
+
         Dictionary<int, string> chainedSnapshot = RequestRows
-            .Where(row => row.IsChainedField)
+            .Where(row => row.IsChainedField && !selfReferencingTargets.Contains(row.Number))
             .ToDictionary(row => row.Number, row => row.Value);
 
         _requestTelegram = PosRandomValueGenerator.GenerateRandomRequest(_schema);
@@ -344,19 +354,29 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
                 StatusMessage = string.Empty;
                 IsStatusError = false;
             }
-
-            // Phase 30 P30-4(PRD §13.7) — 같은 전문 안의 자기참조 합산(902614 #29 = #27+#28)을 재계산한다.
-            // ApplyChainedValue가 대상 행의 Value를 세팅하면 이 메서드를 통해 재귀적으로 다시 호출되지만
-            // #29는 다른 항목의 소스가 아니므로(TelegramFieldChainMap에 그런 항목 없음) 1단계에서 멈춘다.
-            // TelegramFieldChainConverter.Convert가 던질 수 있는 PosProtocolException(합산 자리수 초과/
-            // 비숫자 입력)은 아래 catch가 그대로 잡는다 — 새 catch를 따로 두지 않는다.
-            RecomputeSelfReferencingChainTargets(row.Number);
         }
         catch (PosProtocolException ex)
         {
             // 필드 길이 초과 — Write가 부분 실패해도 _requestTelegram의 다른 필드는 이미 반영된 상태
             // 그대로 유지된다(PosField.Pad가 예외를 던지는 시점엔 아직 바이트를 옮겨 적지 않는다).
             StatusMessage = $"필드 #{row.Number}({row.Name}) 값이 길이({row.Length}바이트)를 초과합니다: {ex.Message}";
+            IsStatusError = true;
+            return;
+        }
+
+        // 체크포인트 2 L-1 수정(2026-09-23) — Phase 30 P30-4(PRD §13.7) 같은 전문 안의 자기참조 합산
+        // (902614 #29 = #27+#28) 재계산은 위 Write 성공과 별개의 try/catch로 감싼다. 원래는 같은 try
+        // 블록 안에서 호출했는데, 이 재계산이 던지는 PosProtocolException(예: #29 합산 자리수 초과/
+        // 비숫자)이 위 catch에 잡혀 "실제로 값이 바뀐 필드(row)가 길이를 초과했다"는 부정확한 메시지를
+        // 보여줬다 — 실제 원인은 row가 아니라 row 때문에 재계산된 다른 필드(#29)의 실패다. Write 자체는
+        // 이미 성공했으므로 그 부분과 혼동되지 않게 구분한다.
+        try
+        {
+            RecomputeSelfReferencingChainTargets(row.Number);
+        }
+        catch (PosProtocolException ex)
+        {
+            StatusMessage = $"연쇄 재계산 실패(필드 #{row.Number} 변경으로 유발됨): {ex.Message}";
             IsStatusError = true;
         }
     }
@@ -388,6 +408,16 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
         IsSending = true;
         StatusMessage = "전송 중...";
         IsStatusError = false;
+
+        // 체크포인트 2 M-1 수정(2026-09-23) — [ObservableProperty] setter는 값이 실제로 바뀔 때만
+        // PropertyChanged를 발생시킨다. 이전 전송이 이미 성공해 HasResponse가 true로 남아 있으면,
+        // 이번 전송이 다시 true를 대입해도 값이 안 바뀌어 PropertyChanged가 안 뜨고
+        // PaymentScreenViewModel.OnTabPropertyChanged가 호출되지 않아 연쇄가 재적용되지 않는다
+        // (PRD §13.3 "앞 전문을 재전송하면 덮어쓴다"). 여기서 미리 false로 떨어뜨려 응답 도착 시
+        // false→true 전이를 보장한다. Regenerate()와 같은 이유로 _lastResponseTelegram도 같이 비운다
+        // — 전송 중에는 "아직 이번 전송의 새 응답이 없다"는 상태가 맞다.
+        HasResponse = false;
+        _lastResponseTelegram = null;
 
         try
         {
