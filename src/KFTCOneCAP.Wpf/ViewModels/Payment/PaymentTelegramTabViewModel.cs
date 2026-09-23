@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -43,6 +44,15 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
     /// </summary>
     private const int TransactionTypeFieldNumber = 4;
 
+    /// <summary>Regenerate()의 902614 #27/#28 축소 난수 상한 — Services/Van/StubVanRelayService.cs의
+    /// 같은 이름 상수와 스케일을 맞췄다(체크포인트 1 M-2 수정과 같은 성격, 2026-09-23 사용자 승인).
+    /// 이 클래스는 Services 계층을 참조하지 않으므로(계층 규칙) 상수를 직접 여기 복제한다.</summary>
+    private const int RealisticAmountMaxExclusive8Digits = 100_000_000; // 0~99,999,999
+
+    private const int RealisticFeeMaxExclusive6Digits = 1_000_000; // 0~999,999
+
+    private static readonly Random RandomAmountSource = new();
+
     private readonly PosTelegramSchema _schema;
     private readonly HashSet<int> _ownedByOneCap;
 
@@ -68,6 +78,12 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
 
     private PosTelegram _requestTelegram;
     private bool _suppressRowChangeHandling;
+
+    /// <summary>Phase 30 P30-4(PRD §13.6) — 전송 성공 시 저장하는 마지막 응답 전문. 이 화면 창(정확히는
+    /// 이 탭 VM 인스턴스) 생존 기간 동안만 메모리에 유지한다 — SQLite 등 영속 저장소에 쓰지 않는다.
+    /// <see cref="Regenerate"/>가 호출되면 즉시 비운다: <see cref="HasResponse"/>가 false인데 이전 응답이
+    /// 캐시에 남아 있으면 다른 탭이 그 값을 계속 읽어가는 모순이 생기기 때문이다.</summary>
+    private PosTelegram? _lastResponseTelegram;
 
     public PaymentTelegramTabViewModel(string tabTitle, PosTelegramSchema schema, Func<TimeSpan> responseTimeoutProvider)
     {
@@ -203,13 +219,73 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
         // TransactionTypeFieldNumber 주석 참고 — 라우팅이 성립하도록 고정값으로 되돌린다.
         _requestTelegram.Write(TransactionTypeFieldNumber, _schema.TransactionTypeCode);
 
+        // 체크포인트 1 M-2와 같은 성격의 사전 조치(2026-09-23 사용자 승인) — 902614 #27(납부 세액)과
+        // #28(수수료)은 #29=#27+#28 자기참조 합산(RecomputeSelfReferencingChainTargets 아래)의 소스다.
+        // PosRandomValueGenerator가 채우는 전 자리 N15 난수를 그대로 두면, 501008만 먼저 보내 #27이
+        // 연쇄로 현실적인 값으로 바뀌는 순간(#28은 아직 연쇄 전이라 여전히 거대 난수) #29 재계산이
+        // 자리수 초과로 거의 항상 실패한다. StubVanRelayService의 금액 필드 특별 취급과 같은 스케일로
+        // 맞춰 여기서도 작은 범위로 다시 채운다.
+        if (_schema.TransactionTypeCode == TelegramFieldChainMap.CardApproval902614)
+        {
+            _requestTelegram.Write(27,
+                RandomAmountSource.Next(0, RealisticAmountMaxExclusive8Digits).ToString(CultureInfo.InvariantCulture));
+            _requestTelegram.Write(28,
+                RandomAmountSource.Next(0, RealisticFeeMaxExclusive6Digits).ToString(CultureInfo.InvariantCulture));
+        }
+
         RebuildRequestRows();
+        ApplyFixedChainValues();
+
+        // _lastResponseTelegram을 비운다 — HasResponse=false인데 이전 응답이 캐시에 남아 있으면 다른
+        // 탭이 그 값을 계속 읽어가는 모순이 생긴다(PRD §13.6).
+        _lastResponseTelegram = null;
 
         ResponseRows.Clear();
         HasResponse = false;
         StatusMessage = string.Empty;
         IsStatusError = false;
     }
+
+    /// <summary>Phase 30 P30-4(PRD §13.3 "902614 #34 = 고정 '00'") — 출처 전문이 없는 고정값 연쇄를
+    /// 적용한다. 어느 전문을 보냈는지와 무관하게 <see cref="Regenerate"/> 직후 항상 적용된다.</summary>
+    private void ApplyFixedChainValues()
+    {
+        foreach (TelegramFieldChainMap.ChainEntry entry in TelegramFieldChainMap.Entries)
+        {
+            if (entry.Conversion != FieldChainConversion.Fixed || entry.TargetTelegram != _schema.TransactionTypeCode)
+                continue;
+
+            string computed = TelegramFieldChainConverter.Convert(
+                entry.Conversion, Array.Empty<string>(), _schema[entry.TargetFieldNumber].Length, entry.FixedValue);
+            ApplyChainedValue(entry.TargetFieldNumber, computed);
+        }
+    }
+
+    /// <summary>Phase 30 P30-4(PRD §13.3) — <see cref="PaymentScreenViewModel"/>(다른 탭 응답 연쇄) 및
+    /// <see cref="RecomputeSelfReferencingChainTargets"/>(같은 탭 내부 자기참조 합산)가 공유하는 값 적용
+    /// 경로. 기존 <see cref="OnRequestRowValueChanged"/> 파이프라인(Value setter → _requestTelegram.Write)을
+    /// 그대로 재사용한다 — 새 파이프라인을 만들지 않는다.</summary>
+    internal void ApplyChainedValue(int fieldNumber, string value)
+    {
+        PosFieldRowViewModel? row = RequestRows.FirstOrDefault(r => r.Number == fieldNumber);
+        if (row is null)
+            return; // 현재 연쇄 대상은 전부 kiosk 소유 필드라 RequestRows에 항상 있어야 정상 — 방어적 처리.
+
+        row.IsChainedField = true;
+        row.Value = value; // Value setter가 OnRequestRowValueChanged를 통해 _requestTelegram.Write까지 반영.
+    }
+
+    /// <summary>Phase 30 P30-4(PRD §13.6) — 다른 탭(<see cref="PaymentScreenViewModel"/>)이 이 응답을
+    /// 읽어 연쇄를 적용할 때 쓴다. 선행 응답이 없으면 null을 돌려주고, 호출자는 그 필드를 건드리지 않는다
+    /// (PRD §13.4 — 순서를 강제하지 않는다).</summary>
+    internal string? TryReadResponseField(int fieldNumber) => _lastResponseTelegram?.Read(fieldNumber);
+
+    /// <summary>Phase 30 P30-4 — 같은 전문 내부 자기참조 합산(현재 902614 #29 = #27+#28 1건)에 쓴다.</summary>
+    internal string ReadRequestField(int fieldNumber) => _requestTelegram.Read(fieldNumber);
+
+    /// <summary>Phase 30 P30-4 — 연쇄 값 변환(<see cref="TelegramFieldChainConverter.Convert"/>) 호출 시
+    /// 대상 필드의 CP949 바이트 길이 한도를 넘긴다(절삭 변환에 필요).</summary>
+    internal int GetFieldLength(int fieldNumber) => _schema[fieldNumber].Length;
 
     /// <summary>요청 패널 = kiosk 담당 필드만(클래스 필드 <see cref="_kioskFieldNumbers"/> 주석 참고).
     /// 전부 kiosk가 실제로 채워 보내는 값이므로 항상 편집 가능하다 — "카드리딩 필드를 회색으로 섞어
@@ -255,6 +331,13 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
                 StatusMessage = string.Empty;
                 IsStatusError = false;
             }
+
+            // Phase 30 P30-4(PRD §13.7) — 같은 전문 안의 자기참조 합산(902614 #29 = #27+#28)을 재계산한다.
+            // ApplyChainedValue가 대상 행의 Value를 세팅하면 이 메서드를 통해 재귀적으로 다시 호출되지만
+            // #29는 다른 항목의 소스가 아니므로(TelegramFieldChainMap에 그런 항목 없음) 1단계에서 멈춘다.
+            // TelegramFieldChainConverter.Convert가 던질 수 있는 PosProtocolException(합산 자리수 초과/
+            // 비숫자 입력)은 아래 catch가 그대로 잡는다 — 새 catch를 따로 두지 않는다.
+            RecomputeSelfReferencingChainTargets(row.Number);
         }
         catch (PosProtocolException ex)
         {
@@ -262,6 +345,25 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
             // 그대로 유지된다(PosField.Pad가 예외를 던지는 시점엔 아직 바이트를 옮겨 적지 않는다).
             StatusMessage = $"필드 #{row.Number}({row.Name}) 값이 길이({row.Length}바이트)를 초과합니다: {ex.Message}";
             IsStatusError = true;
+        }
+    }
+
+    /// <summary>같은 전문(현재는 902614뿐) 안에서 방금 바뀐 필드를 출처로 삼는 연쇄를 재계산한다
+    /// (PRD §13.7 — 현재 #29 = #27+#28 1건). 다른 전문에서 오는 연쇄는 <see cref="PaymentScreenViewModel"/>
+    /// 이 처리하므로 여기서는 <c>SourceTelegram == TargetTelegram</c>인 항목만 본다.</summary>
+    private void RecomputeSelfReferencingChainTargets(int changedFieldNumber)
+    {
+        foreach (TelegramFieldChainMap.ChainEntry entry in TelegramFieldChainMap.Entries)
+        {
+            if (entry.SourceTelegram != _schema.TransactionTypeCode || entry.TargetTelegram != _schema.TransactionTypeCode)
+                continue; // 자기참조 항목만(다른 전문에서 오는 건 PaymentScreenViewModel이 처리).
+            if (!entry.SourceFieldNumbers.Contains(changedFieldNumber))
+                continue;
+
+            var sourceValues = entry.SourceFieldNumbers.Select(ReadRequestField).ToList();
+            string computed = TelegramFieldChainConverter.Convert(
+                entry.Conversion, sourceValues, GetFieldLength(entry.TargetFieldNumber), entry.FixedValue);
+            ApplyChainedValue(entry.TargetFieldNumber, computed);
         }
     }
 
@@ -286,11 +388,16 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
                 responseBody = await client.SendAsync(requestBody, timeout).ConfigureAwait(true);
             }
 
-            HasResponse = true;
-
+            // Phase 30 P30-4(PRD §13.6) — _lastResponseTelegram을 HasResponse=true보다 먼저 채운다.
+            // HasResponse setter가 PropertyChanged를 동기적으로 발생시키고, PaymentScreenViewModel이
+            // 그 이벤트를 받아 곧장 TryReadResponseField로 캐시를 읽어 연쇄를 적용하므로(OnTabPropertyChanged
+            // → ApplyChainMappingsFrom), 순서가 바뀌면 캐시가 아직 비어 있는 시점에 읽혀 연쇄가 조용히
+            // 스킵된다(실제로 이 순서 오류로 501008→902614 #14 연쇄가 적용되지 않는 것을 화면 검증 중
+            // 발견해 이 순서로 고쳤다).
             try
             {
                 PosTelegram responseTelegram = PosTelegram.FromBytes(_schema, responseBody);
+                _lastResponseTelegram = responseTelegram; // PRD §13.6 — 창 생존 기간 동안만 메모리 캐시.
                 RebuildResponseRows(responseTelegram);
                 StatusMessage = "전송 완료 — 응답 수신됨";
                 IsStatusError = false;
@@ -299,10 +406,14 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
             {
                 // 이번 단계(P29-6)는 스텁 VAN이 요청을 clone하는 경로만 쓰므로 실제로는 항상 스키마
                 // 총 길이와 일치해야 정상이다 — 그래도 예외를 화면 밖으로 흘려 창을 죽이지 않는다.
+                // _lastResponseTelegram은 비어 있는 채로 남는다 — 파싱에 실패한 응답으로 연쇄를 적용하면
+                // 안 되므로 의도된 동작이다.
                 ResponseRows.Clear();
                 StatusMessage = $"응답 필드 파싱 실패(길이 불일치): {ex.Message}";
                 IsStatusError = true;
             }
+
+            HasResponse = true;
         }
         catch (Exception ex)
         {

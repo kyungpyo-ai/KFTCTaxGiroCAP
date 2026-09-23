@@ -1,5 +1,8 @@
+using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using KFTCOneCAP.Wpf.Protocol.Pos;
 using KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
 using KFTCOneCAP.Wpf.Services.Pos;
 using KFTCOneCAP.Wpf.Services.Settings;
@@ -51,6 +54,66 @@ public sealed partial class PaymentScreenViewModel : ObservableObject
     {
         if (e.PropertyName == nameof(PaymentTelegramTabViewModel.IsSending))
             RecomputeBlockedFlags();
+        else if (e.PropertyName == nameof(PaymentTelegramTabViewModel.HasResponse)
+                 && sender is PaymentTelegramTabViewModel { HasResponse: true } sourceTab)
+            ApplyChainMappingsFrom(sourceTab);
+    }
+
+    /// <summary>Phase 30 P30-4(PRD §13.3 "501008/800000 전송 성공 → 뒤 전문 탭 갱신") — <paramref
+    /// name="sourceTab"/>에서 다른 전문(자기 자신 제외)으로 가는 연쇄 항목만 처리한다. 자기참조 항목
+    /// (902614 #29 = #27+#28)은 <see cref="PaymentTelegramTabViewModel.RecomputeSelfReferencingChainTargets"/>
+    /// 가 그 탭 내부에서 자동으로 처리하므로 여기서 건드릴 필요가 없다.
+    ///
+    /// <b>값을 직접 고친 뒤 앞 전문을 재전송하면 덮어쓴다</b>(2026-09-22 확정, PRD §13.3) — 연쇄가 최신
+    /// 응답을 반영하는 것이 이 기능의 목적이라 의도된 동작이다.</summary>
+    private void ApplyChainMappingsFrom(PaymentTelegramTabViewModel sourceTab)
+    {
+        foreach (TelegramFieldChainMap.ChainEntry entry in TelegramFieldChainMap.Entries)
+        {
+            if (entry.SourceTelegram != sourceTab.TransactionTypeCode || entry.SourceTelegram == entry.TargetTelegram)
+                continue;
+
+            PaymentTelegramTabViewModel? targetTab = FindTab(entry.TargetTelegram);
+            if (targetTab is null)
+                continue;
+
+            var sourceValues = new List<string>(entry.SourceFieldNumbers.Count);
+            bool allAvailable = true;
+            foreach (int sourceFieldNumber in entry.SourceFieldNumbers)
+            {
+                string? value = sourceTab.TryReadResponseField(sourceFieldNumber);
+                if (value is null) { allAvailable = false; break; }
+                sourceValues.Add(value);
+            }
+            if (!allAvailable)
+                continue;
+
+            // TelegramFieldChainConverter.Convert(값 계산)는 ApplyChainedValue 호출보다 먼저 일어나므로,
+            // 합산 자리수 초과 등으로 던지는 PosProtocolException이 ApplyChainedValue 내부의 기존
+            // try/catch(OnRequestRowValueChanged)를 거치지 못하고 이 메서드 밖으로 그대로 전파될 수
+            // 있다 — 이벤트 핸들러(OnTabPropertyChanged) 안에서 잡히지 않으면 창이 죽으므로 여기서
+            // 직접 감싼다. 실패한 필드는 건너뛰고 다음 항목을 계속 처리한다.
+            string computed;
+            try
+            {
+                computed = TelegramFieldChainConverter.Convert(
+                    entry.Conversion, sourceValues, targetTab.GetFieldLength(entry.TargetFieldNumber), entry.FixedValue);
+            }
+            catch (PosProtocolException)
+            {
+                continue;
+            }
+
+            targetTab.ApplyChainedValue(entry.TargetFieldNumber, computed);
+        }
+    }
+
+    private PaymentTelegramTabViewModel? FindTab(string transactionTypeCode)
+    {
+        foreach (PaymentTelegramTabViewModel tab in Tabs)
+            if (tab.TransactionTypeCode == transactionTypeCode)
+                return tab;
+        return null;
     }
 
     private void RecomputeBlockedFlags()

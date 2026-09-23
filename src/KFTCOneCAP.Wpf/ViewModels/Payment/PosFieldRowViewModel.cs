@@ -63,5 +63,12 @@ public sealed partial class PosFieldRowViewModel : ObservableObject
     [ObservableProperty]
     private string value = string.Empty;
 
+    /// <summary>Phase 30 P30-4(PRD §13.3) — 앞 전문 응답값으로 자동 채워진 필드인지. 생성자로만 정해지는
+    /// <see cref="IsCardReadingField"/>와 달리 이 값은 전송 이후 런타임에 바뀔 수 있어 관찰 가능한
+    /// 프로퍼티다. 값 자체는 여전히 편집 가능하다(PRD §13.3 — 읽기전용으로 잠그지 않는다). P30-5(재생성
+    /// 제외)와 P30-6(색 구분)이 이 값을 쓴다 — 이 Task 범위는 값을 정확히 세팅하는 것까지다.</summary>
+    [ObservableProperty]
+    private bool isChainedField;
+
     partial void OnValueChanged(string value) => _onValueChanged?.Invoke(this);
 }
