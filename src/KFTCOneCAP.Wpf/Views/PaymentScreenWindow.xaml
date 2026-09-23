@@ -82,7 +82,10 @@
 
         <!-- 요청 카드 값 입력 박스(참고 이미지의 둥근 테두리 입력창). 2026-09-18 확정 이후 요청 패널에는
              kiosk 담당 필드만 들어오므로 IsReadOnly는 항상 false다 — 아래 트리거는 형식상 남겨 둔다
-             (다른 성격의 읽기전용 필드가 요청 패널에 들어오게 되면 재사용). -->
+             (다른 성격의 읽기전용 필드가 요청 패널에 들어오게 되면 재사용).
+             2026-09-23 Phase 30 P30-6(PRD §13.3) — IsChainedField(앞 전문 응답값으로 자동 채워진 필드)
+             트리거 추가. 값은 여전히 편집 가능하다(테두리/배경만 바뀐다, TextBox의 IsReadOnly는 그대로
+             false) — 색으로만 구분하고 설명 캡션은 두지 않는 §12.5 기조(P29-6 4차 재확정)를 따른다. -->
         <Style x:Key="RequestFieldBoxStyle" TargetType="Border">
             <Setter Property="CornerRadius" Value="8"/>
             <Setter Property="BorderBrush" Value="{StaticResource TblBorderBrush}"/>
@@ -92,6 +95,10 @@
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsReadOnly}" Value="True">
                     <Setter Property="Background" Value="{StaticResource TblAltRowBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsChainedField}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource ChainedFieldBgBrush}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource ChainedFieldBorderBrush}"/>
                 </DataTrigger>
             </Style.Triggers>
         </Style>

@@ -8779,9 +8779,18 @@ PRD §13.7의 4가지 변환. 핵심은 **반글자 방지 절삭**이다.
 
 ### 완료 조건
 
-- [ ] 연쇄 필드가 카드리딩 필드와 다른 색으로 보이고, 스크린샷으로 두 색이 구분된다.
-- [ ] 일반 모드·compact 모드 양쪽에서 레이아웃이 깨지지 않는다(열 수가 줄어들지 않는다).
-- [ ] 색 값이 `Themes/` 리소스에 정의돼 있다(XAML에 리터럴 색상 없음).
+- [x] 연쇄 필드가 카드리딩 필드와 다른 색으로 보이고, 스크린샷으로 두 색이 구분된다 — `Themes/Colors.xaml`에
+      `ChainedFieldBgBrush`(#F3E8FF)/`ChainedFieldBorderBrush`(#C4B5FD) 보라 계열 신설, 기존 카드리딩
+      파랑(#E8F3FF)·성공 초록·오류 빨강과 겹치지 않게 선택. `--payment-screen-test`로 501008 전송 →
+      902614 탭 확인 — `#14`/`#15`/`#16`/`#18`~`#21` 등이 연한 보라 배경+테두리로 뚜렷이 구분됨
+      (`p30-6_902614_chained_color.png`).
+- [x] 일반 모드·compact 모드 양쪽에서 레이아웃이 깨지지 않는다(열 수가 줄어들지 않는다) — 색만
+      바꾸는 변경이라(`Layout.xaml`/`Layout.Compact.xaml`의 폭 리소스는 손대지 않음) 구조적으로
+      레이아웃에 영향이 없다(코드 리뷰로 확인, 2026-09-23).
+- [x] 색 값이 `Themes/` 리소스에 정의돼 있다(XAML에 리터럴 색상 없음) — `PaymentScreenWindow.xaml`의
+      `RequestFieldBoxStyle`은 `{StaticResource ...}`만 참조.
+- `dotnet build` 경고 0/오류 0, 기존 회귀 4종 전부 통과 확인(2026-09-23, 메인 세션이 직접 실행 —
+  `app.manifest` 일시 `asInvoker` → 검증 → `requireAdministrator` 원복, `git diff` 클린 확인).
 
 ---
 

@@ -106,4 +106,13 @@
     <Color x:Key="ResultErrorTextColor">#DC2626</Color>
     <SolidColorBrush x:Key="ResultErrorTextBrush" Color="{StaticResource ResultErrorTextColor}"/>
 
+    <!-- 결제 화면 — 전문 간 필드 연쇄(Phase 30 P30-6, PRD §13.3) — 요청 카드 중 앞 전문 응답값으로 자동
+         채워진 필드를 표시한다. 응답 패널의 카드리딩 강조(원캡 담당, #E8F3FF 파랑 계열)와 헷갈리면
+         "원캡이 채운 것"과 "앞 전문에서 온 것"을 착각하므로, 기존 파랑(카드리딩)·초록(성공 배지)·빨강
+         (오류)과 겹치지 않는 보라 계열을 썼다. -->
+    <Color x:Key="ChainedFieldBgColor">#F3E8FF</Color>
+    <SolidColorBrush x:Key="ChainedFieldBgBrush" Color="{StaticResource ChainedFieldBgColor}"/>
+    <Color x:Key="ChainedFieldBorderColor">#C4B5FD</Color>
+    <SolidColorBrush x:Key="ChainedFieldBorderBrush" Color="{StaticResource ChainedFieldBorderColor}"/>
+
 </ResourceDictionary>
