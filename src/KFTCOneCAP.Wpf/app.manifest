@@ -248,6 +248,12 @@
   [한시적, 2026-09-21] Phase 29 SPEC 20260921 반영(902614 #38 InternetGiro 전환) 직접 테스트를
   위해 asInvoker로 낮췄다. #38 요청 필드 제외/응답 필드 노출과 3열 레이아웃 복구(PaymentRequestCardWidth 180->168)를
   mcp__windows__windows_click/screenshot으로 직접 확인한 즉시 requireAdministrator로 되돌렸다.
+
+  [원복 완료, 2026-09-23] Phase 30 P30-3(TelegramFieldChainConverter 절삭/합산 경계 셀프테스트) 완료
+  조건 확인을 위해 field chain converter test(하이픈 두 개 인자, 표기 생략 — 매니페스트 XML 주석에
+  하이픈 연속 금지) 하네스를 실행해야 해서 한시적으로 asInvoker로 낮췄다. 절삭 경계 6케이스, 합산
+  3케이스(정상/빈 소스 혼합/전부 빈 소스), 합산→Pad 오버플로 예외까지 전부 통과(10:26:27)를 로그로
+  확인한 즉시 requireAdministrator로 되돌렸다.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
