@@ -214,6 +214,15 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
         if (IsSending)
             return;
 
+        // P30-5(PRD §13.5) — 연쇄로 채워진 필드는 재생성 대상이 아니다. 재생성이 연쇄 값을 덮으면
+        // 연쇄 결과를 화면에서 확인할 방법이 없어져 Phase 30 기능 자체가 검증 불가가 된다. 재생성으로
+        // RequestRows가 통째로 교체되기 전(RebuildRequestRows가 Clear 후 다시 채운다) 현재 연쇄 값을
+        // 스냅샷으로 떠 두고, 재생성 뒤 기존 ApplyChainedValue 파이프라인으로 그대로 복원한다 — 902614
+        // #29 자기참조 합산 재계산도 이 경로를 타고 자동으로 다시 일어난다.
+        Dictionary<int, string> chainedSnapshot = RequestRows
+            .Where(row => row.IsChainedField)
+            .ToDictionary(row => row.Number, row => row.Value);
+
         _requestTelegram = PosRandomValueGenerator.GenerateRandomRequest(_schema);
 
         // TransactionTypeFieldNumber 주석 참고 — 라우팅이 성립하도록 고정값으로 되돌린다.
@@ -234,6 +243,10 @@ public sealed partial class PaymentTelegramTabViewModel : ObservableObject
         }
 
         RebuildRequestRows();
+
+        foreach (KeyValuePair<int, string> entry in chainedSnapshot)
+            ApplyChainedValue(entry.Key, entry.Value);
+
         ApplyFixedChainValues();
 
         // _lastResponseTelegram을 비운다 — HasResponse=false인데 이전 응답이 캐시에 남아 있으면 다른
