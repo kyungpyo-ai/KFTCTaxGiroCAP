@@ -93,10 +93,34 @@ internal sealed class StubVanRelayService : IVanRelayService
     /// 이 클래스를 감싸는 시점에 902614 응답이면 항상 지운다(Phase 26 P26-1) — 이 스텁이 개별적으로
     /// 지울 필요가 없어졌다. Phase 20이 실제 호출로 교체되면 실제 VAN 응답에 어떤 값이 오는지 별도로
     /// 확인해야 한다(development_plan.md Phase 18 "남은 미확정" #4).
+    ///
+    /// <b>Phase 30 P30-1 확장(PRD §13.8, 2026-09-23) — 개발용 장치.</b> 원래는 공통부 4개만 덮고 나머지는
+    /// 요청 바이트를 그대로 돌려줬다 — kiosk가 채우지 않는 업무 필드(디지털예산/인터넷지로 담당)는
+    /// 요청에서부터 공백이므로 응답도 공백이었고, 그러면 전문 간 필드 연쇄(Phase 30 본 목적)를 검증할
+    /// "받아올 값" 자체가 없었다(2026-09-21 P29-8 실기 로그로 실제 확인). 그래서 지금은
+    /// <b>kiosk 소유도 아니고 원캡 소유도 아닌 필드</b>를 <see cref="PosRandomValueGenerator"/>로 채워
+    /// 돌려준다 — kiosk 소유 필드는 요청에 이미 값이 있어 손댈 필요가 없고, 원캡 소유 필드(예:
+    /// <c>800000 #14</c> BIN, <c>902614</c>의 원캡 담당 8개)는 원캡이 실제 카드리딩으로 채운 진짜 값이라
+    /// 스텁이 덮으면 그 검증(Phase 29에서 실기로 이미 끝난 것)이 무의미해진다. <b>이건 스텁의 한계를
+    /// 메우는 개발용 장치일 뿐이다</b> — 실 VAN이 붙으면 `App.xaml.cs` 한 줄 교체(PRD §10)로 이 클래스
+    /// 전체가 함께 사라진다.
     /// </summary>
     private static VanRelayOutcome BuildFakeSuccess(PosRequestTelegram request)
     {
         PosTelegram cloned = request.Telegram.Clone();
+
+        // kiosk 소유도 아니고 원캡 소유도 아닌 필드(디지털예산/인터넷지로 담당)만 임의값으로 채운다.
+        // 공통부 #3/#6/#7/#8도 이 조건에 걸릴 수 있으므로(예: #7 응답 코드는 kiosk 소유가 아님) 반드시
+        // 아래 성공값 덮어쓰기보다 먼저 실행한다 — 순서를 바꾸면 "000" 등이 임의값에 덮여 사라진다.
+        var random = new Random();
+        foreach (PosField field in cloned.Schema.Fields)
+        {
+            if (field.Owners.HasFlag(PosFieldOwner.Kiosk) || field.Owners.HasFlag(PosFieldOwner.OneCap))
+                continue;
+
+            cloned.Write(field.Number, PosRandomValueGenerator.GenerateValue(field.Type, field.Length, random));
+        }
+
         cloned.Write(3, "0210");
         cloned.Write(6, "C");
         cloned.Write(7, "000");
