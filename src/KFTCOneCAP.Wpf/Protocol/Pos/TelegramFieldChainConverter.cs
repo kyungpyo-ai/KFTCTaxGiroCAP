@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace KFTCOneCAP.Wpf.Protocol.Pos;
 
@@ -89,20 +90,35 @@ public static class TelegramFieldChainConverter
 
     /// <summary>
     /// <paramref name="sourceValues"/>를 정수로 파싱해 합산한다. 빈 문자열(공백만 있던 필드)은 0으로
-    /// 취급한다 — 소스 필드가 아직 채워지지 않은 상태(연쇄 전 임의값 단계 등)에서 예외로 죽지 않게 하기
-    /// 위한 방어적 처리다. 합산 결과 자체의 자리수 초과는 여기서 검사하지 않는다 — 그건 나중에
+    /// 취급한다 — <b>실 VAN이 해당 업무부를 공백으로 돌려줄 수 있어서</b>다(P30 체크포인트 지적 L-5,
+    /// 2026-09-23 정정 — 예전엔 "연쇄 전 임의값 단계 등에서 아직 채워지지 않은 소스 필드"를 근거로
+    /// 들었으나, P30-1 스텁 확장 이후 스텁 경로에서는 소스가 항상 채워지므로 그 근거는 더는 유효하지
+    /// 않다). 합산 결과 자체의 자리수 초과는 여기서 검사하지 않는다 — 그건 나중에
     /// <see cref="PosField.Pad"/>가 예외로 드러낸다(PRD §13.7 — 조용히 잘리지 않게 하는 게 의도적 설계).
+    /// 반면 소스 값이 숫자로 파싱조차 안 되는 경우(사용자가 연쇄로 채워진 필드를 직접 문자로 편집한 뒤
+    /// 재계산되는 경로, PRD §13.3)는 <see cref="FormatException"/>을 그대로 흘리지 않고 이 프로젝트의
+    /// 형식 오류 관례(<see cref="PosProtocolException"/>)로 감싸 던진다(P30 체크포인트 지적 M-3).
     /// </summary>
     private static string SumAsInteger(IReadOnlyList<string> sourceValues)
     {
         long total = 0;
         foreach (string source in sourceValues)
         {
-            // 빈 문자열은 0으로 취급(위 요약 참고). N 필드 값은 앞자리 0을 포함할 수 있으나
-            // long.Parse는 앞자리 0을 그대로 숫자로 해석하므로 문제없다.
-            total += source.Length == 0 ? 0 : long.Parse(source);
+            if (source.Length == 0)
+                continue; // 빈 문자열은 0으로 취급(위 요약 참고).
+
+            // N 필드 값은 앞자리 0을 포함할 수 있으나 long.Parse는 앞자리 0을 그대로 숫자로 해석하므로
+            // 문제없다. CultureInfo.InvariantCulture 명시는 이 저장소 관례(PosMessageFramer.cs 참고).
+            try
+            {
+                total += long.Parse(source, NumberStyles.Integer, CultureInfo.InvariantCulture);
+            }
+            catch (FormatException ex)
+            {
+                throw new PosProtocolException($"연쇄 합산 소스 값이 숫자가 아님: '{source}'", ex);
+            }
         }
 
-        return total.ToString();
+        return total.ToString(CultureInfo.InvariantCulture);
     }
 }

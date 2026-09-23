@@ -14,4 +14,12 @@ public sealed class PosProtocolException : Exception
     public PosProtocolException(string message) : base(message)
     {
     }
+
+    /// <summary>원본 예외를 <see cref="Exception.InnerException"/>으로 보존하는 오버로드(.NET 표준
+    /// 패턴). P30 체크포인트 지적(M-3, 2026-09-23) — <see cref="TelegramFieldChainConverter"/>의
+    /// 합산 변환이 비숫자 입력에 <see cref="FormatException"/>을 그대로 전파하던 것을, 이 프로젝트의
+    /// 형식 오류 관례(<see cref="PosProtocolException"/>)로 감싸 던지기 위해 추가했다.</summary>
+    public PosProtocolException(string message, Exception innerException) : base(message, innerException)
+    {
+    }
 }

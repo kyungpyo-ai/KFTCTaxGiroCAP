@@ -1,5 +1,7 @@
 using System;
 using KFTCOneCAP.Wpf.Protocol.Pos;
+using KFTCOneCAP.Wpf.Protocol.Pos.Schemas;
+using KFTCOneCAP.Wpf.Services.Van;
 
 namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 
@@ -21,11 +23,15 @@ internal static class TelegramFieldChainConverterSelfTest
             bool truncateOk = RunTruncateBoundaryCases();
             bool sumOk = RunSumCases();
             bool sumOverflowOk = RunSumOverflowThrowsOnPad();
+            bool sumNonNumericOk = RunSumNonNumericThrowsPosProtocolException();
+            bool stubAmountRangeOk = RunStubAmountFieldRangeRegression();
 
-            bool allPassed = truncateOk && sumOk && sumOverflowOk;
+            bool allPassed = truncateOk && sumOk && sumOverflowOk && sumNonNumericOk && stubAmountRangeOk;
             FileLogger.Info(
                 $"[field-chain-converter-test] 완료 — 절삭 경계={(truncateOk ? "통과" : "실패")}, " +
                 $"합산={(sumOk ? "통과" : "실패")}, 합산 오버플로={(sumOverflowOk ? "통과" : "실패")}, " +
+                $"합산 비숫자={(sumNonNumericOk ? "통과" : "실패")}, " +
+                $"스텁 금액 범위 회귀={(stubAmountRangeOk ? "통과" : "실패")}, " +
                 $"종합={(allPassed ? "통과" : "실패")}");
         }
         catch (Exception ex)
@@ -128,8 +134,9 @@ internal static class TelegramFieldChainConverterSelfTest
             allOk = false;
         }
 
-        // 빈 문자열(공백만 있던 필드)은 0으로 취급 — 연쇄 전 임의값 단계 등에서 아직 채워지지 않은
-        // 소스 필드가 있어도 예외로 죽지 않아야 한다.
+        // 빈 문자열(공백만 있던 필드)은 0으로 취급 — 실 VAN이 해당 업무부를 공백으로 돌려줄 수 있어도
+        // 예외로 죽지 않아야 한다(P30 체크포인트 지적 L-5, 2026-09-23 정정 — TelegramFieldChainConverter
+        // XML 문서 주석 참고).
         string sum2 = TelegramFieldChainConverter.Convert(
             FieldChainConversion.Sum, new[] { "100", string.Empty, "50" }, targetLengthBytes: 15);
         if (sum2 != "150")
@@ -221,5 +228,132 @@ internal static class TelegramFieldChainConverterSelfTest
         }
 
         return ok;
+    }
+
+    /// <summary>
+    /// M-3(2026-09-23 P30 체크포인트) — 합산 소스 중 하나가 숫자로 파싱되지 않으면 <see
+    /// cref="FormatException"/>이 그대로 새지 않고 <see cref="PosProtocolException"/>으로 감싸져 나오는지
+    /// 확인한다(PRD §13.3 — 연쇄로 채워진 필드도 사용자가 계속 편집 가능해야 하고, 그 편집값이 숫자가
+    /// 아닐 수 있다).
+    /// </summary>
+    private static bool RunSumNonNumericThrowsPosProtocolException()
+    {
+        bool ok;
+        try
+        {
+            TelegramFieldChainConverter.Convert(
+                FieldChainConversion.Sum, new[] { "100", "사용자가입력한문자" }, targetLengthBytes: 15);
+            FileLogger.Error(LogCategory.App,
+                "[field-chain-converter-test] ★ [합산 비숫자 소스] 예외가 나야 하는데 나지 않음");
+            ok = false;
+        }
+        catch (PosProtocolException ex) when (ex.InnerException is FormatException)
+        {
+            ok = true;
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error(LogCategory.App,
+                $"[field-chain-converter-test] ★ [합산 비숫자 소스] 예상과 다른 예외 발생: {ex.GetType().Name}: {ex.Message}");
+            ok = false;
+        }
+
+        if (ok)
+            FileLogger.Info("[field-chain-converter-test] 합산 비숫자 소스 — PosProtocolException(inner=FormatException) 발생 확인");
+
+        return ok;
+    }
+
+    /// <summary>
+    /// M-2(2026-09-23 P30 체크포인트) — <c>StubVanRelayService</c>가 501008/800000 응답의 금액 필드
+    /// (<c>#30/#31/#32</c>, <c>#24</c>)를 반복 생성할 때, 그 값들을 합산한 결과가 N15/N12 한도를 넘지
+    /// 않고 <see cref="PosField.Pad"/>를 예외 없이 통과하는지 반복 검증한다(스텁이 전 자리 난수를 쓰던
+    /// 예전 버전은 약 83% 확률로 자리수 초과 예외가 났었다). 501008/800000 요청을 임의값으로 채워
+    /// <see cref="StubVanRelayService"/>에 실제로 태우고, 그 응답을 다시 파싱해 <see
+    /// cref="TelegramFieldChainMap"/>의 합산 연쇄(902614 #27, #29, 800000 #15)를 재현한다.
+    /// </summary>
+    private static bool RunStubAmountFieldRangeRegression()
+    {
+        // StubVanRelayService.RelayAsync가 매 호출 1초 고정 지연을 두므로(FixedDelay), 반복마다 501008+
+        // 800000 두 번 호출해 약 2초씩 걸린다 — 30회면 약 1분. 예전 버그는 단일 시도당 약 83% 확률로
+        // 실패했으므로 30회 반복이면 놓칠 확률이 사실상 0(0.17^30)이다.
+        const int iterations = 30;
+
+        var random = new Random();
+        var stub = new StubVanRelayService();
+        PosTelegramSchema noticeSchema = NoticeInquirySchema.Create();
+        PosTelegramSchema cardInfoSchema = CardInfoInquirySchema.Create();
+
+        // 합산 결과를 실제로 담을 대상 필드와 같은 크기의 합성 스키마(Pad 예외 여부만 확인하면 되므로
+        // 실제 902614/800000 스키마 전체를 만들 필요는 없다).
+        var sum902614Field = new PosField(1, "합성 902614 #27/#29(N15)", PosFieldType.N, length: 15, position: 0, PosFieldOwner.Kiosk);
+        var sum902614Schema = new PosTelegramSchema("TEST-902614-SUM", new[] { sum902614Field }, totalLength: 15);
+        var sum800000Field = new PosField(1, "합성 800000 #15(N15)", PosFieldType.N, length: 15, position: 0, PosFieldOwner.Kiosk);
+        var sum800000Schema = new PosTelegramSchema("TEST-800000-SUM", new[] { sum800000Field }, totalLength: 15);
+
+        for (int i = 0; i < iterations; i++)
+        {
+            try
+            {
+                PosTelegram noticeRequestTelegram = PosRandomValueGenerator.GenerateRandomRequest(noticeSchema, random);
+                // GenerateRandomRequest는 #4(거래 구분 코드)도 kiosk 소유라 임의 숫자로 채운다 —
+                // Parse는 #4로 스키마를 역추적하므로, 실제 거래 구분 코드로 덮어써야 501008 스키마로
+                // 정상 식별된다(PosRequestTelegram.TransactionTypeFieldNumber/Position/Length 참고).
+                noticeRequestTelegram.Write(PosRequestTelegram.TransactionTypeFieldNumber, NoticeInquirySchema.FixedTransactionType);
+                PosRequestParseOutcome noticeOutcome = PosRequestTelegram.Parse(noticeRequestTelegram.ToBody());
+                if (!noticeOutcome.IsSuccess || noticeOutcome.Telegram is null)
+                {
+                    FileLogger.Error(LogCategory.App,
+                        $"[field-chain-converter-test] ★ [스텁 금액 범위 회귀 #{i}] 501008 요청 파싱 실패");
+                    return false;
+                }
+
+                VanRelayOutcome noticeVanOutcome = stub.RelayAsync(noticeOutcome.Telegram).GetAwaiter().GetResult();
+                PosTelegram noticeResponse = PosTelegram.FromBytes(noticeSchema, noticeVanOutcome.ResponseBody!);
+                string field30 = noticeResponse.Read(30);
+                string field31 = noticeResponse.Read(31);
+                string field32 = noticeResponse.Read(32);
+
+                PosTelegram cardInfoRequestTelegram = PosRandomValueGenerator.GenerateRandomRequest(cardInfoSchema, random);
+                cardInfoRequestTelegram.Write(PosRequestTelegram.TransactionTypeFieldNumber, CardInfoInquirySchema.FixedTransactionType);
+                PosRequestParseOutcome cardInfoOutcome = PosRequestTelegram.Parse(cardInfoRequestTelegram.ToBody());
+                if (!cardInfoOutcome.IsSuccess || cardInfoOutcome.Telegram is null)
+                {
+                    FileLogger.Error(LogCategory.App,
+                        $"[field-chain-converter-test] ★ [스텁 금액 범위 회귀 #{i}] 800000 요청 파싱 실패");
+                    return false;
+                }
+
+                VanRelayOutcome cardInfoVanOutcome = stub.RelayAsync(cardInfoOutcome.Telegram).GetAwaiter().GetResult();
+                PosTelegram cardInfoResponse = PosTelegram.FromBytes(cardInfoSchema, cardInfoVanOutcome.ResponseBody!);
+                string field24 = cardInfoResponse.Read(24);
+
+                // 902614 #27 = 501008 #30+#31+#32, 902614 #29 = #27 + (800000 #24를 N15로 widen한 값).
+                string sum27 = TelegramFieldChainConverter.Convert(
+                    FieldChainConversion.Sum, new[] { field30, field31, field32 }, targetLengthBytes: 15);
+                string sum29 = TelegramFieldChainConverter.Convert(
+                    FieldChainConversion.Sum, new[] { sum27, field24 }, targetLengthBytes: 15);
+
+                // 800000 #15 = 501008 #30+#31+#32(902614 #27과 동일한 합산 규칙).
+                string sum15 = TelegramFieldChainConverter.Convert(
+                    FieldChainConversion.Sum, new[] { field30, field31, field32 }, targetLengthBytes: 15);
+
+                PosTelegram probe902614 = PosTelegram.CreateEmpty(sum902614Schema);
+                probe902614.Write(1, sum27);
+                probe902614.Write(1, sum29);
+
+                PosTelegram probe800000 = PosTelegram.CreateEmpty(sum800000Schema);
+                probe800000.Write(1, sum15);
+            }
+            catch (Exception ex)
+            {
+                FileLogger.Error(LogCategory.App,
+                    $"[field-chain-converter-test] ★ [스텁 금액 범위 회귀 #{i}] 예외 발생(자리수 초과 등): {ex}");
+                return false;
+            }
+        }
+
+        FileLogger.Info($"[field-chain-converter-test] 스텁 금액 범위 회귀 — {iterations}회 반복, Pad 예외 없이 전부 통과");
+        return true;
     }
 }

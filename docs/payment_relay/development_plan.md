@@ -8635,6 +8635,54 @@ PRD §13.7의 4가지 변환. 핵심은 **반글자 방지 절삭**이다.
 
 ---
 
+## 체크포인트 1 — Opus 검증 리뷰 (P30-1·P30-2·P30-3 직후)
+
+### 검증 결과 (2026-09-23, `checkpoint-reviewer` 독립 세션, Opus)
+
+`git diff eb0a057..7607f14` 전체를 직접 재검토하고 빌드·하네스(`--pos-client-test`/`--payment-flow-test`/
+`--field-chain-converter-test`)를 독립 재실행. P30-2의 `TelegramFieldChainMap` 23건은 3전문 스키마
+파일과 전수 대조해 **결함 0건**(교차 매핑인 `902614 #25`←`501008 #32`/`#26`←`#31` 같은 함정도 정확).
+절대 제약(원캡 중계 경로 3파일, 스키마 파일) 위반 없음.
+
+확정 결함 3건, 경미 지적 6건:
+
+- **M-1** — `902614 #38`(카드소유주 주민/사업자등록번호)이 `TelegramLogRedactor`의 위치 기반 마스킹
+  대상에서 빠져 있었다. P30-1 이전엔 이 필드가 항상 공백이라 안 드러났는데, 스텁 확장으로 값이 실리기
+  시작하면서 로그에 평문 노출. **수정 완료**(아래).
+- **M-2** — 스텁이 금액 필드(`501008 #30`/`#31`/`#32`, `800000 #24`)를 N15/N12 전 자리 난수로 채워,
+  `902614 #27`/`#29`, `800000 #15` 합산 연쇄가 약 83% 확률로 자리수 초과 예외. **수정 완료**(아래).
+- **M-3** — `TelegramFieldChainConverter.SumAsInteger`가 비숫자 입력에 `FormatException`을 그대로
+  전파(PRD §13.3의 "연쇄 필드도 편집 가능" 요구와 충돌 가능). **수정 완료**(아래).
+- L-1(스텁이 `PosFieldOwner.None` 필드까지 채움, `800000 #11`/`#12` 포함) — **수정 완료**.
+- L-2(`BuildFakeSuccess`가 호출마다 `new Random()`) — **수정 완료**(static 공유 인스턴스로 전환).
+- L-3(AN→N 표현변환 시 영문자가 N 필드에 실릴 수 있음) — 스키마 검증 범위 밖으로 판단, 미수정(관찰만).
+- L-4(`--pos-client-test` 로그의 "길이=" 표기가 문자 수라 회귀 판정 눈금이 흔들림) — 코드 결함 아님,
+  로그 해석 시 주의사항으로만 기록.
+- L-5(`SumAsInteger` 주석의 빈 값 정당화 근거가 P30-1 이후 사실과 다름) — **수정 완료**(M-3과 함께).
+- L-6(셀프테스트가 `Direct`/`RepresentationChange`/`Widen`/`Fixed` 분기를 검증하지 않음) — 낮은
+  우선순위로 보류(단순 통과 로직이라 위험 낮음).
+
+### 수정 결과 (2026-09-23, `csharp-wpf-developer` 후속 세션)
+
+- **M-1**: `TelegramLogRedactor`에 `#38`을 `#14`/`#36`과 동일한 "앞6+뒤4 노출" 패턴으로 추가.
+  `--payment-flow-test` 로그에서 `#38=[4BrVA7***J2BU]` 형태로 마스킹되는 것 확인.
+- **M-2**: `StubVanRelayService.BuildFakeSuccess`가 위 4개 금액 필드만 자릿수를 줄인 범위(세 세목
+  필드는 0~99,999,999, 수수료는 0~999,999)로 특별 취급하도록 수정 — 나머지 필드는 기존대로
+  `PosRandomValueGenerator` 사용. 30회 반복 회귀(`TelegramFieldChainConverterSelfTest`에
+  `RunStubAmountFieldRangeRegression` 추가)로 합산이 `PosField.Pad`를 예외 없이 통과하는 것 확인.
+- **M-3**: `PosProtocolException`에 `innerException` 생성자 오버로드 추가, `SumAsInteger`가
+  `FormatException`을 `PosProtocolException`으로 감싸 던지도록 수정 + `CultureInfo.InvariantCulture`
+  명시. `RunSumNonNumericThrowsPosProtocolException` 케이스로 확인.
+- **L-1/L-2**: 위 결과 요약대로 수정 완료, `--field-chain-converter-test`/`--pos-client-test`(0
+  ERROR)/`--payment-flow-test`(171/171)/`--random-value-generator-test` 전부 재통과 확인.
+  `app.manifest`는 검증 중 일시 `asInvoker`였다가 `requireAdministrator`로 원복 확인(`git diff` 클린).
+- `git diff --stat` 최종 확인: `PaymentOrchestrator.cs`/`TransactionQueue.cs`/`PosSocketServer.cs`/
+  스키마 파일/`TelegramFieldChainMap.cs` 전부 미변경.
+
+**판정: 체크포인트 1 통과** — 확정 결함 3건 전부 수정, 경미 지적 중 3건 수정·2건 기록만·1건 보류.
+
+---
+
 ## P30-4. 응답 캐시 + 자동 채움 (ViewModel)
 
 ### 구현할 것

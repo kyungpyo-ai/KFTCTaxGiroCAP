@@ -29,19 +29,23 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 /// docs/operations/development_plan.md의 "P22-6부속" 절과 docs/operations/PRD.md §1.4 참고. PIN 암호화
 /// 작업(SEED)이 착수될 때 이 클래스도 함께 재검토해야 한다.
 ///
-/// 최종 마스킹 대상(3곳, 모두 902614 전용):
+/// 최종 마스킹 대상(4곳, 모두 902614 전용):
 /// <list type="bullet">
 /// <item><c>#46</c>(암호화된 카드정보, POSITION 407, 길이 196) — 부분 마스킹(앞 6바이트만 남기고 나머지
 ///   전부 <c>*</c>, 사용자 확정). <b>단, 구간이 전부 space(카드리딩 전 스텁 등 아직 값이 채워지지 않은
 ///   상태)면 마스킹하지 않고 원문(공백) 그대로 남긴다</b>(2026-09-01 사용자 지적 — 값이 없는데도 마스킹
 ///   처리되어 혼란을 줬다).</item>
-/// <item><c>#14</c>(주민/사업자/법인등록번호, POSITION 70, 길이 13)와 <c>#36</c>(납부자 주민/사업자등록번호,
+/// <item><c>#14</c>(주민/사업자/법인등록번호, POSITION 70, 길이 13), <c>#36</c>(납부자 주민/사업자등록번호,
 ///   POSITION 296, 길이 13) — 2026-09-14 CP2(Opus) 리뷰 지적("범용 패턴 마스킹 제거 후 이 두 필드가
 ///   평문으로 남는다") + 사용자 결정으로 신규 추가. 카드번호가 아니라 고유식별정보지만, 삭제된
 ///   <c>LogMessageMasker</c>가 13~19자리 카드번호에 쓰던 방식("앞6+뒤4 노출, 가운데만 <c>*</c>")을 그대로
 ///   재사용하기로 사용자가 확정했다 — 13자리 기준 앞 6바이트(생년월일/사업자 앞자리)와 뒤 4바이트를
 ///   그대로 남기고 가운데 3바이트만 <c>*</c>로 채운다. <c>#46</c>과 마찬가지로 구간이 전부 space면
 ///   마스킹하지 않는다.</item>
+/// <item><c>#38</c>(카드소유주 주민(사업자)등록번호, POSITION 319, 길이 13) — 2026-09-23 P30 체크포인트
+///   지적(M-1)으로 추가. <c>#14</c>/<c>#36</c>과 완전히 같은 성격(주민/사업자등록번호)이라 동일한
+///   앞6+뒤4 노출 방식을 그대로 재사용한다. SET 장소가 인터넷지로라 원래 kiosk는 채우지 않는 필드지만,
+///   P30-1 스텁 확장 이후 스텁이 이 필드를 난수로 채우면서 평문 노출이 드러났다.</item>
 /// </list>
 /// 나머지 필드(902614 <c>#43/#44/#45/#48/#50/#51/#53</c>, 800000 <c>#14</c>)는 원문 그대로 남긴다.
 /// 501008은 원캡이 채우는 필드가 없어(카드 데이터 자체가 없는 전문) 이 유틸의 대상이 아니다.
@@ -83,7 +87,7 @@ namespace KFTCOneCAP.Wpf.Services.Diagnostics;
 /// </summary>
 internal static class TelegramLogRedactor
 {
-    /// <summary>마스킹 대상 3곳(<c>#14</c>/<c>#36</c>/<c>#46</c>)이 전부 "902614 전용"이므로(클래스 요약)
+    /// <summary>마스킹 대상 4곳(<c>#14</c>/<c>#36</c>/<c>#38</c>/<c>#46</c>)이 전부 "902614 전용"이므로(클래스 요약)
     /// 다른 전문 종류는 필드 번호가 같아도 마스킹하지 않는다.
     ///
     /// <b>2026-09-15 Phase 27 최종 검증에서 발견·수정</b> — 필드 <b>번호</b>만 보고 마스킹하면 같은
@@ -113,6 +117,12 @@ internal static class TelegramLogRedactor
 
     /// <summary>SPEC #36 "납부자 주민(사업자)등록번호"(902614) — 부분 마스킹 대상(클래스 요약 참고).</summary>
     private const int PayerRegistrationNumberFieldNumber36 = 36;
+
+    /// <summary>SPEC #38 "카드소유주 주민(사업자)등록번호"(902614) — 부분 마스킹 대상. P30 체크포인트
+    /// 지적(M-1, 2026-09-23) — #14/#36과 완전히 같은 성격(주민/사업자등록번호)인데 마스킹 목록에서
+    /// 빠져 있었다. 이전엔 이 필드가 SET 장소가 인터넷지로라 항상 공백이라 안 드러났지만, P30-1
+    /// 스텁 확장 이후 값이 실려 평문으로 로그에 남게 됐다.</summary>
+    private const int PayerRegistrationNumberFieldNumber38 = 38;
 
     /// <summary>#14/#36(13자리 등록번호)에서 앞뒤로 남기는 바이트 수 — 삭제된 <c>LogMessageMasker</c>가
     /// 13~19자리 카드번호에 쓰던 "앞6+뒤4 노출, 가운데만 <c>*</c>" 방식을 그대로 재사용한다(2026-09-14
@@ -155,7 +165,7 @@ internal static class TelegramLogRedactor
         if (body.Length != schema.TotalLength)
             return DecodeWhole(body); // 기형 전문 — POSITION을 신뢰할 수 없어 폴백.
 
-        // 마스킹 대상 3곳이 전부 902614 전용이다(CardApprovalTransactionTypeCode 주석의 실측 참고) —
+        // 마스킹 대상 4곳이 전부 902614 전용이다(CardApprovalTransactionTypeCode 주석의 실측 참고) —
         // 501008/800000/999999는 필드 번호가 겹쳐도 손대지 않고 원문 그대로 남긴다.
         if (!string.Equals(schema.TransactionTypeCode, CardApprovalTransactionTypeCode, StringComparison.Ordinal))
             return DecodeWhole(body);
@@ -178,10 +188,12 @@ internal static class TelegramLogRedactor
         // #51(암호화된 비밀번호 정보)은 2026-09-01 사용자 확정으로 마스킹하지 않는다(클래스 요약의
         // "2026-09-01 재확정" 절 참고) — SEED 암호화 전까지는 이 로그에 평문 PIN이 그대로 남는다.
 
-        // #14/#36(13자리 등록번호) — 2026-09-14 CP2 리뷰 지적 + 사용자 결정으로 추가(클래스 요약 참고).
-        // #46과 동일하게 "전부 space면 마스킹하지 않는다" 예외를 적용한다.
+        // #14/#36/#38(13자리 등록번호) — #14/#36은 2026-09-14 CP2 리뷰 지적 + 사용자 결정, #38은
+        // 2026-09-23 P30 체크포인트 지적(M-1)으로 추가(클래스 요약 참고). #46과 동일하게 "전부 space면
+        // 마스킹하지 않는다" 예외를 적용한다.
         AddRegistrationNumberRangeIfPresent(schema, body, PayerRegistrationNumberFieldNumber14, ranges);
         AddRegistrationNumberRangeIfPresent(schema, body, PayerRegistrationNumberFieldNumber36, ranges);
+        AddRegistrationNumberRangeIfPresent(schema, body, PayerRegistrationNumberFieldNumber38, ranges);
 
         if (ranges.Count == 0)
             return DecodeWhole(body);
